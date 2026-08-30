@@ -41,7 +41,7 @@ export function renderJsonl(history: readonly RenderableEvent[]): string {
 export function renderHuman(history: readonly RenderableEvent[]): string {
   if (history.length === 0) return "No domain events were recorded.\n";
   const first = history[0]!;
-  const lines = [`Guarded Agent run ${first.streamId}`];
+  const lines = [`Robin run ${first.streamId}`];
   for (const event of history) {
     lines.push(
       `${String(event.streamVersion).padStart(3, "0")}  ${event.recordedAt}  ${event.eventType}`,

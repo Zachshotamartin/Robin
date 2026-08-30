@@ -5,8 +5,13 @@ export {
   MAXIMUM_CLI_PATH_BYTES,
   MAXIMUM_CLI_POLICY_CATALOGS,
   MAXIMUM_CLI_TOTAL_ARGUMENT_BYTES,
+  DEFAULT_MAXIMUM_SESSION_TURNS,
+  MAXIMUM_SESSION_TURNS,
+  MAXIMUM_SESSION_PROMPT_BYTES,
   OUTPUT_FORMATS,
   POLICY_EFFECTS,
+  SESSION_OUTPUT_FORMATS,
+  SESSION_PERMISSION_MODES,
   CliUsageError,
   parseArgv,
 } from "./argv.js";
@@ -19,14 +24,30 @@ export type {
   PolicyCliRequest,
   PolicyDefaultEffect,
   PolicyOutputFormat,
+  InteractiveCliRequest,
+  PrintCliRequest,
+  SessionCliRequest,
+  SessionOutputFormat,
+  SessionPermissionMode,
 } from "./argv.js";
 export {
   CLI_VERSION,
   EXIT_CODES,
+  exitCodeForErrorCode,
   exitCodeForResult,
   runCli,
 } from "./main.js";
 export type { CliDependencies, CliWriter } from "./main.js";
+export {
+  DEFAULT_SESSION_COMMAND_DEPENDENCIES,
+  executeSessionCommand,
+  sanitizeTerminalDiagnostic,
+  sanitizeTerminalText,
+} from "./session-command.js";
+export type {
+  SessionCommandDependencies,
+  SessionWriter,
+} from "./session-command.js";
 export {
   DEFAULT_POLICY_COMMAND_DEPENDENCIES,
   MAXIMUM_POLICY_CATALOG_BYTES,

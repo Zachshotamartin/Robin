@@ -1,4 +1,4 @@
-# Guarded Agent: Glossary
+# Robin: Glossary
 
 Canonical definitions for the controlled vocabulary used across the planning documents. When another document appears to conflict with a definition here, fix the conflict rather than redefining the term locally.
 
@@ -16,7 +16,7 @@ Canonical definitions for the controlled vocabulary used across the planning doc
 
 ## Context and Capabilities
 
-- **Context broker** — the read side of the security boundary. Every resource Guarded Agent delivers to an agent or model passes canonicalization, policy, classification, redaction, budgets, and provenance recording here first. Lower-tier external agents may have separately disclosed context outside Guarded Agent's visibility.
+- **Context broker** — the read side of the security boundary. Every resource Robin delivers to an agent or model passes canonicalization, policy, classification, redaction, budgets, and provenance recording here first. Lower-tier external agents may have separately disclosed context outside Robin's visibility.
 - **Context-source adapter** — installed trusted code that resolves one scheme of `ResourceRef` (repository, document corpus, artifact) into bounded content for the broker.
 - **Capability pack** — installed versioned trusted code defining guarded operations: schemas, normalizers, approval displays, executors, reconcilers, and output classifiers. Coding and local research are the reference packs.
 - **Normalized action** — the single immutable canonical representation of a proposed operation. Policy evaluates it, approval binds its hash, and the handler executes that exact object.
@@ -51,6 +51,6 @@ Canonical definitions for the controlled vocabulary used across the planning doc
 
 - **Compatibility tier** — the evidence-computed guarantee level of an integration: A (direct model, fully mediated), B (protocol-controlled external agent), C (sandboxed black-box CLI, containment only), D (observe-only). Adapters report primitive capabilities; the trusted validator computes the tier.
 - **Conformance suite / dialect** — the versioned test corpus an adapter or endpoint must pass before its profile may claim a tier; a compatibility label is never accepted from self-description.
-- **Credential reference** — the opaque identifier stored in configuration and PostgreSQL; secret bytes live only in the OS credential store. Guard-owned provider credentials are injected by the trusted transport against an exact origin. Reviewed agent-owned delivery modes disclose that the pinned agent and its children can read the selected credential and receive a weaker confinement claim.
+- **Credential reference** — the opaque identifier stored in configuration and PostgreSQL; secret bytes live only in the OS credential store. Robin-owned provider credentials are injected by the trusted transport against an exact origin. Reviewed agent-owned delivery modes disclose that the pinned agent and its children can read the selected credential and receive a weaker confinement claim.
 - **Canary** — a seeded high-entropy synthetic secret used to prove leak absence across serialized requests, events, logs, artifacts, child environments, and protocol surfaces.
 - **Guarded MCP bridge** — the run-scoped stdio MCP server exposing only installed operations; its annotations are untrusted hints and never authorization.

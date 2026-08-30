@@ -2,7 +2,7 @@
   "name": "@guard/profile-registry",
   "version": "0.0.0",
   "private": true,
-  "description": "Immutable validated task-profile registry for the Guarded Agent kernel.",
+  "description": "Immutable validated task-profile registry for Robin's internal kernel.",
   "license": "MIT",
   "type": "module",
   "exports": {

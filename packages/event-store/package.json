@@ -2,7 +2,7 @@
   "name": "@guard/event-store",
   "version": "0.0.0",
   "private": true,
-  "description": "Event-store port and deterministic in-memory adapter for the Guarded Agent kernel.",
+  "description": "Event-store port and deterministic in-memory adapter for Robin's internal kernel.",
   "license": "MIT",
   "type": "module",
   "exports": {

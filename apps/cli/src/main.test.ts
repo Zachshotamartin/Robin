@@ -40,6 +40,8 @@ test("usage failures never start a scenario or leak following option values", as
   assert.equal(code, EXIT_CODES.invalidConfiguration);
   assert.equal(calls, 0);
   assert.equal(stdout.value, "");
+  assert.match(stderr.value, /^robin: Unknown option: --api-key\.\n/u);
+  assert.match(stderr.value, /Try 'robin --help'\./u);
   assert.doesNotMatch(stderr.value, new RegExp(secret, "u"));
 });
 
@@ -162,10 +164,59 @@ test("policy commands are dispatched without starting a run", async () => {
   assert.equal(stderr.value, "policy diagnostics\n");
 });
 
+test("coding-session modes dispatch without starting a compatibility scenario", async () => {
+  const stdout = writer();
+  const stderr = writer();
+  let runCalls = 0;
+  let sessionCalls = 0;
+  const base = successfulDependencies(() => {
+    runCalls += 1;
+  });
+  const dependencies: CliDependencies = {
+    ...base,
+    executeSession: async (request, sessionStdout) => {
+      sessionCalls += 1;
+      assert.equal(request.kind, "print");
+      sessionStdout.write("session result\n");
+      return 0;
+    },
+  };
+  const code = await runCli(
+    ["-p", "explain this repository"],
+    stdout,
+    stderr,
+    dependencies,
+  );
+  assert.equal(code, 0);
+  assert.equal(sessionCalls, 1);
+  assert.equal(runCalls, 0);
+  assert.equal(stdout.value, "session result\n");
+  assert.equal(stderr.value, "");
+});
+
+test("continue and resume fail clearly before starting any session", async () => {
+  for (const argv of [["--continue"], ["--resume", "session-1"]] as const) {
+    const stdout = writer();
+    const stderr = writer();
+    let sessionCalls = 0;
+    const code = await runCli(argv, stdout, stderr, {
+      ...successfulDependencies(),
+      executeSession: async () => {
+        sessionCalls += 1;
+        return 0;
+      },
+    });
+    assert.equal(code, EXIT_CODES.invalidConfiguration);
+    assert.equal(sessionCalls, 0);
+    assert.equal(stdout.value, "");
+    assert.match(stderr.value, /Session persistence and resume are not implemented/u);
+  }
+});
+
 test("root and policy help list every debugger command", async () => {
   const dependencies = successfulDependencies();
   for (const [argv, pattern] of [
-    [["--help"], /policy/u],
+    [["--help"], /^Usage: robin \[options\] \[prompt\]/u],
     [["policy", "--help"], /simulate/u],
     [["policy", "check", "--help"], /--catalog/u],
     [["policy", "format", "--help"], /canonicalText/u],

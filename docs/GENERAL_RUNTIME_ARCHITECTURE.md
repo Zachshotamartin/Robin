@@ -1,8 +1,17 @@
-# Guarded Agent: General Multi-Agent and Multi-Model Runtime Architecture
+# Robin: Internal Runtime Substrate Architecture
 
-Guarded Agent is a general policy-enforced agent runtime. Coding is the first reference profile because it provides concrete, high-value security and recovery tests, but repository files, patches, Git, and test commands are not hard-coded into the runtime kernel.
+Document status: retained internal architecture. It is not the Robin product
+definition or build-order authority. See [ADR-0007](decisions/ADR-0007-robin-coding-agent-product-pivot.md),
+[Product Requirements](PRODUCT_REQUIREMENTS.md), and
+[Robin CLI Architecture](ROBIN_CLI_ARCHITECTURE.md).
 
-The reusable product is the harness:
+Robin is a coding-agent CLI. This document describes the general policy,
+context, event, and adapter substrate that can be reused inside the coding
+agent without making a general control plane the user-facing product. Coding
+sessions, repository tools, Git, terminal interaction, and provider-driven tool
+loops are assembled in the Robin application layer above this kernel.
+
+The reusable internal harness contains:
 
 - Agent drivers decide what to propose next.
 - Model adapters translate different model APIs and modalities.
@@ -11,9 +20,9 @@ The reusable product is the harness:
 - Task profiles compose drivers, models, context, capabilities, budgets, outcomes, and evals.
 - The same event, policy, approval, artifact, credential, recovery, and client infrastructure applies to every profile.
 
-## 1. Product Boundary
+## 1. Internal Substrate Boundary
 
-The core supports:
+The substrate can support:
 
 - Direct hosted or local generative models.
 - External agent processes and hosted agent APIs.
@@ -454,19 +463,16 @@ Capability packs may add bounded dimensions. Budget counters come from durable f
 
 ## 11. Generic Run Configuration and CLI
 
-Planned profile commands:
-
-```text
-guard profiles list
-guard profiles inspect coding-local
-guard profiles inspect research-local-corpus
-guard profiles validate research-local-corpus
-```
+The pre-pivot architecture requires internal profile-registry operations to
+enumerate, inspect, and validate installed profiles. It does not define a
+separate public profile-management binary or command contract. Robin exposes
+only the coding-agent command surface specified by the product-first documents;
+internal profile diagnostics are reached through that surface when implemented.
 
 Coding run:
 
 ```text
-guard run \
+robin \
   --profile coding-local \
   --objective-file examples/objectives/add-rate-limiting.json \
   --provider openai-coding
@@ -475,7 +481,7 @@ guard run \
 Research run:
 
 ```text
-guard run \
+robin \
   --profile research-local-corpus \
   --objective-file examples/objectives/compare-runtime-designs.json \
   --provider claude-research
@@ -484,7 +490,7 @@ guard run \
 External agent:
 
 ```text
-guard run \
+robin \
   --profile coding-external-agent \
   --objective-file examples/objectives/add-rate-limiting.json \
   --agent review-agent
@@ -606,7 +612,11 @@ The runtime and policy packages cannot import a capability pack or provider adap
 - Run one coding task through direct-model and ACP drivers while retaining the correct distinct guarantee tier.
 - Replay every profile without invoking driver, model, context, capability, credential, or sandbox adapters.
 
-## 16. Implementation Sequence
+## 16. Historical Runtime-First Implementation Sequence
+
+This sequence is preserved as design history. The active Robin sequence is in
+[BUILD_PLAN.md](BUILD_PLAN.md); coding-session vertical slices now precede
+further general-runtime expansion.
 
 1. Rename coding-specific domain types in the kernel to generic run, driver, action, observation, and outcome types before implementation makes them expensive to change.
 2. Define task-profile, driver, model-capability, content-block, context-source, capability-pack, and outcome schemas.

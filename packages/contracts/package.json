@@ -2,7 +2,7 @@
   "name": "@guard/contracts",
   "version": "0.0.0",
   "private": true,
-  "description": "Generic branded identifiers, domain errors, and canonical serialization for the Guarded Agent kernel.",
+  "description": "Generic branded identifiers, domain errors, and canonical serialization for Robin's internal kernel.",
   "license": "MIT",
   "type": "module",
   "exports": {

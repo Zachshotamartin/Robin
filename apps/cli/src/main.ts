@@ -10,6 +10,7 @@ import {
   type CliProfile,
   type CliRequest,
   type PolicyCliRequest,
+  type SessionCliRequest,
 } from "./argv.js";
 import {
   parseObjectiveJson,
@@ -21,19 +22,11 @@ import {
   executePolicyCommand,
   type PolicyCommandResult,
 } from "./policy-commands.js";
+import { executeSessionCommand } from "./session-command.js";
+import { EXIT_CODES, exitCodeForErrorCode } from "./exit-codes.js";
 
 export const CLI_VERSION = "0.0.0";
-
-export const EXIT_CODES = Object.freeze({
-  success: 0,
-  invalidConfiguration: 2,
-  policyDenied: 3,
-  approvalPending: 4,
-  budgetExceeded: 5,
-  taskFailed: 6,
-  infrastructureFailed: 7,
-  cancelled: 8,
-});
+export { EXIT_CODES, exitCodeForErrorCode } from "./exit-codes.js";
 
 export interface CliWriter {
   write(chunk: string): unknown;
@@ -53,6 +46,11 @@ export interface CliDependencies {
   readonly runSynthetic: () => Promise<ScenarioExecutionView>;
   readonly runCoding: () => Promise<ScenarioExecutionView>;
   readonly executePolicy: (request: PolicyCliRequest) => Promise<PolicyCommandResult>;
+  readonly executeSession?: (
+    request: SessionCliRequest,
+    stdout: CliWriter,
+    stderr: CliWriter,
+  ) => Promise<number>;
 }
 
 const DEFAULT_DEPENDENCIES: CliDependencies = Object.freeze({
@@ -60,6 +58,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = Object.freeze({
   runSynthetic: runSyntheticTransformScenario,
   runCoding: runCodingVirtualRepositoryScenario,
   executePolicy: executePolicyCommand,
+  executeSession: executeSessionCommand,
 });
 
 export async function runCli(
@@ -78,12 +77,25 @@ export async function runCli(
       stdout.write(`${CLI_VERSION}\n`);
       return EXIT_CODES.success;
     }
+    if (request.kind === "continue" || request.kind === "resume") {
+      throw new CliUsageError(
+        "Session persistence and resume are not implemented in this preview.",
+      );
+    }
 
     if (isPolicyRequest(request)) {
       const result = await dependencies.executePolicy(request);
       if (result.stdout.length > 0) stdout.write(result.stdout);
       if (result.stderr.length > 0) stderr.write(result.stderr);
       return result.exitCode;
+    }
+
+    if (request.kind === "interactive" || request.kind === "print") {
+      return await (dependencies.executeSession ?? executeSessionCommand)(
+        request,
+        stdout,
+        stderr,
+      );
     }
 
     if (request.objective.kind !== "builtin") {
@@ -104,15 +116,15 @@ export async function runCli(
     return exitCode;
   } catch (error) {
     if (isCliUsageError(error)) {
-      stderr.write(`guard: ${error.message}\nTry 'guard --help'.\n`);
+      stderr.write(`robin: ${error.message}\nTry 'robin --help'.\n`);
       return EXIT_CODES.invalidConfiguration;
     }
     const code = domainErrorCode(error);
     const exitCode = exitCodeForErrorCode(code);
     stderr.write(
       code === null
-        ? "guard: The run failed before a terminal result was recorded.\n"
-        : `guard: The run failed (${code}).\n`,
+        ? "robin: The run failed before a terminal result was recorded.\n"
+        : `robin: The run failed (${code}).\n`,
     );
     return exitCode;
   }
@@ -154,42 +166,14 @@ async function runSelectedScenario(
     : dependencies.runCoding();
 }
 
-function exitCodeForErrorCode(code: string | null): number {
-  switch (code) {
-    case "policy_denied":
-    case "approval_invalid":
-      return EXIT_CODES.policyDenied;
-    case "approval_required":
-      return EXIT_CODES.approvalPending;
-    case "budget_exceeded":
-      return EXIT_CODES.budgetExceeded;
-    case "cancelled":
-      return EXIT_CODES.cancelled;
-    case "infrastructure_failed":
-    case "provider_failed":
-    case "provider_result_uncertain":
-    case "sandbox_failed":
-    case "invariant_violated":
-      return EXIT_CODES.infrastructureFailed;
-    case "invalid_input":
-    case "action_failed":
-    case "driver_failed":
-    case "attempt_result_uncertain":
-    case "conflict":
-      return EXIT_CODES.taskFailed;
-    default:
-      return EXIT_CODES.infrastructureFailed;
-  }
-}
-
 function terminalDiagnostic(result: unknown): string {
   const status = recordString(result, "status");
-  if (status === "cancelled") return "guard: The run was cancelled.\n";
-  if (status === "orphaned") return "guard: The run was orphaned.\n";
+  if (status === "cancelled") return "robin: The run was cancelled.\n";
+  if (status === "orphaned") return "robin: The run was orphaned.\n";
   const code = domainErrorCode(recordValue(result, "error"));
   return code === null
-    ? "guard: The run did not complete successfully.\n"
-    : `guard: The run failed (${code}).\n`;
+    ? "robin: The run did not complete successfully.\n"
+    : `robin: The run failed (${code}).\n`;
 }
 
 function domainErrorCode(error: unknown): string | null {
@@ -215,21 +199,42 @@ function recordValue(value: unknown, key: string): unknown {
   }
 }
 
-const ROOT_HELP = `Usage: guard <command> [options]
+const ROOT_HELP = `Usage: robin [options] [prompt]
+       robin -p [options] <prompt>
+       robin <command> [options]
+
+Coding session modes:
+  robin [prompt]       Start an interactive session, optionally with a first prompt
+  robin -p <prompt>    Run one non-interactive turn and print the result
+
+Session options:
+  -p, --print                 Use non-interactive print mode
+  --provider <id>             Model provider; synthetic is available in this preview
+  --model <id>                Provider model identifier
+  --permission-mode <mode>    ask (preview label for future default) or plan
+  --output-format <format>    text, json, or stream-json; print mode only
+  --maximum-turns <1..256>    Future agent-turn ceiling recorded in preview output
+  --no-save                   Explicitly keep print mode ephemeral
+  --continue                  Reserved for durable continuation; unavailable now
+  --resume [selector]         Reserved for durable resume; unavailable now
 
 Commands:
-  run       Execute a deterministic scenario
-  policy    Check, format, test, explain, or simulate .guard policy
+  run       Execute a retained deterministic compatibility scenario
+  policy    Check, format, test, explain, or simulate a .guard policy
 
 Global options:
   --help    Show this help
   --version Show the CLI version
 
-Run 'guard run --help' or 'guard policy --help' for command options.
+The current coding-session preview is credential-free, synthetic, ephemeral, and
+does not read files, run commands, use the network, or persist a session. Those
+capabilities are implemented in later Robin release gates.
+
+Run 'robin run --help' or 'robin policy --help' for compatibility command options.
 `;
 
-const RUN_HELP = `Usage: guard run --profile <name> [options]
-       guard run --profile <name> -- <objective-json>
+const RUN_HELP = `Usage: robin run --profile <name> [options]
+       robin run --profile <name> -- <objective-json>
 
 Required:
   --profile <name>          synthetic-demo or coding-virtual
@@ -252,7 +257,7 @@ Exit codes: 0 success, 2 invalid input/configuration, 3 policy denial,
 7 infrastructure failure, 8 cancellation.
 `;
 
-const POLICY_HELP = `Usage: guard policy <subcommand> [options]
+const POLICY_HELP = `Usage: robin policy <subcommand> [options]
 
 Subcommands:
   check       Parse and type-check one policy snapshot
@@ -261,10 +266,10 @@ Subcommands:
   explain     Evaluate one normalized action with a full safe trace
   simulate    Compare two policies over recorded normalized actions
 
-Run 'guard policy <subcommand> --help' for exact arguments.
+Run 'robin policy <subcommand> --help' for exact arguments.
 `;
 
-const POLICY_CHECK_HELP = `Usage: guard policy check <policy.guard> [options]
+const POLICY_CHECK_HELP = `Usage: robin policy check <policy.guard> [options]
 
 Options:
   --catalog <catalog.json>  Add one versioned attribute catalog; repeatable
@@ -273,14 +278,14 @@ Options:
   --help                    Show this help
 `;
 
-const POLICY_FORMAT_HELP = `Usage: guard policy format <policy.guard> [options]
+const POLICY_FORMAT_HELP = `Usage: robin policy format <policy.guard> [options]
 
 Options:
   --json  Emit canonical JSON containing canonicalText
   --help  Show this help
 `;
 
-const POLICY_TEST_HELP = `Usage: guard policy test <policy.guard> --cases <cases.json> [options]
+const POLICY_TEST_HELP = `Usage: robin policy test <policy.guard> --cases <cases.json> [options]
 
 Options:
   --catalog <catalog.json>  Add one versioned attribute catalog; repeatable
@@ -289,7 +294,7 @@ Options:
   --help                    Show this help
 `;
 
-const POLICY_EXPLAIN_HELP = `Usage: guard policy explain <policy.guard> --action <action.json> [options]
+const POLICY_EXPLAIN_HELP = `Usage: robin policy explain <policy.guard> --action <action.json> [options]
 
 Options:
   --catalog <catalog.json>  Add one versioned attribute catalog; repeatable
@@ -301,7 +306,7 @@ Secret-classified values are represented by category and count. Per-run
 correlation tokens are redacted from portable command output.
 `;
 
-const POLICY_SIMULATE_HELP = `Usage: guard policy simulate --from <old.guard> --to <new.guard> --actions <actions.json> [options]
+const POLICY_SIMULATE_HELP = `Usage: robin policy simulate --from <old.guard> --to <new.guard> --actions <actions.json> [options]
 
 Options:
   --catalog <catalog.json>       Add one versioned attribute catalog; repeatable

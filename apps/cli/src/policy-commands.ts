@@ -621,7 +621,7 @@ function invalidResult(
               message,
             },
           })
-        : boundedOutput(`guard policy: ${message}\n`),
+        : boundedOutput(`robin policy: ${message}\n`),
   });
 }
 

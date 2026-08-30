@@ -62,7 +62,7 @@ test("parsed objectives are descriptor-only and deeply frozen", () => {
 });
 
 test("file reader accepts a regular bounded UTF-8 JSON file", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "guard-cli-objective-"));
+  const directory = await mkdtemp(join(tmpdir(), "robin-cli-objective-"));
   const file = join(directory, "objective.json");
   await writeFile(file, '{"recordId":"greeting","mode":"uppercase"}', "utf8");
   const parsed = await readObjectiveFile(file);
@@ -70,7 +70,7 @@ test("file reader accepts a regular bounded UTF-8 JSON file", async () => {
 });
 
 test("file reader rejects directories and bytes beyond the hard limit", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "guard-cli-objective-"));
+  const directory = await mkdtemp(join(tmpdir(), "robin-cli-objective-"));
   const nestedDirectory = join(directory, "not-a-file");
   await mkdir(nestedDirectory);
   await assert.rejects(() => readObjectiveFile(nestedDirectory), /regular file/u);

@@ -2,7 +2,7 @@
   "name": "@guard/milestone-a-scenarios",
   "version": "0.0.0",
   "private": true,
-  "description": "Deterministic end-to-end Milestone A scenario evidence for the Guarded Agent runtime.",
+  "description": "Deterministic end-to-end Milestone A scenario evidence for Robin's internal runtime.",
   "license": "MIT",
   "type": "module",
   "exports": {

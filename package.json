@@ -1,9 +1,17 @@
 {
-  "name": "guarded-agent",
+  "name": "robin",
   "version": "0.0.0",
   "private": true,
-  "description": "A policy-enforced runtime for interchangeable agents, models, context sources, and capability packs.",
+  "description": "A provider-flexible coding agent CLI for interactive repository work.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Zachshotamartin/Robin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Zachshotamartin/Robin/issues"
+  },
+  "homepage": "https://github.com/Zachshotamartin/Robin#readme",
   "type": "module",
   "engines": {
     "node": ">=22.0.0",
@@ -21,7 +29,7 @@
     "test:repository": "node --test scripts/check-docs.test.mjs scripts/check-architecture.test.mjs scripts/check-gate-b-configuration.test.mjs scripts/check-repository-policy.test.mjs",
     "test:unit": "npm run test --workspaces --if-present",
     "test:contracts": "npm run test:gate:b:contracts",
-    "test:gate:b:contracts": "npm run test --workspace @guard/contracts --workspace @guard/schema-validation --workspace @guard/profile-registry --workspace @guard/event-store --workspace @guard/agent-driver --workspace @guard/model-provider --workspace @guard/policy-language --workspace @guard/policy-engine --workspace @guard/context-broker --workspace @guard/capability-gateway --workspace @guard/capability-synthetic --workspace @guard/capability-repository --workspace @guard/runtime --workspace @guard/runtime-host --workspace @guard/milestone-a-scenarios --workspace @guard/cli",
+    "test:gate:b:contracts": "npm run test --workspace @guard/contracts --workspace @guard/schema-validation --workspace @guard/profile-registry --workspace @guard/event-store --workspace @guard/agent-driver --workspace @guard/model-provider --workspace @guard/policy-language --workspace @guard/policy-engine --workspace @guard/context-broker --workspace @guard/capability-gateway --workspace @guard/capability-synthetic --workspace @guard/capability-repository --workspace @guard/runtime --workspace @guard/runtime-host --workspace @guard/milestone-a-scenarios --workspace @guard/robin-agent --workspace @guard/robin-application --workspace @zachshotamartin/robin",
     "test:eval:deterministic": "npm run test --workspace @guard/milestone-b-scenarios",
     "test:policy-parser": "npm run test --workspace @guard/policy-language",
     "test:policy-engine": "npm run test --workspace @guard/policy-engine",

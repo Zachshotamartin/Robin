@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { execFile as execFileCallback } from "node:child_process";
+import {
+  execFile as execFileCallback,
+  spawn,
+} from "node:child_process";
+import { once } from "node:events";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -42,7 +46,7 @@ test("source-installed bin runs the synthetic human profile", async () => {
     SYNTHETIC_OBJECTIVE,
   ]);
   assert.equal(result.code, 0);
-  assert.match(result.stdout, /Guarded Agent run run_/u);
+  assert.match(result.stdout, /Robin run run_/u);
   assert.match(result.stdout, /RunCompleted/u);
   assert.match(result.stdout, /Status: completed/u);
   assert.match(result.stdout, /GUARDED AGENTS TRANSFORM BOUNDED DATA\./u);
@@ -107,6 +111,72 @@ test("source-installed bin rejects API-key flags without leaking the value", asy
   assert.match(result.stderr, /Unknown option: --api-key/u);
   assert.doesNotMatch(result.stderr, new RegExp(secret, "u"));
 });
+
+test("source-installed bin runs one headless Robin preview turn", async () => {
+  const result = await execute(["-p", "Explain the current slice."]);
+  assert.equal(result.code, 0);
+  assert.equal(result.stderr, "");
+  assert.match(result.stdout, /^Robin received: Explain the current slice\./u);
+  assert.match(result.stdout, /no repository files were read or changed/u);
+});
+
+test("source-installed bin emits parseable stream JSON for a preview turn", async () => {
+  const result = await execute([
+    "--print",
+    "--output-format",
+    "stream-json",
+    "Stream one turn.",
+  ]);
+  assert.equal(result.code, 0);
+  assert.equal(result.stderr, "");
+  const records = result.stdout
+    .trimEnd()
+    .split("\n")
+    .map((line) => JSON.parse(line) as {
+      readonly schemaVersion: number;
+      readonly persistence: string;
+      readonly event: { readonly type: string };
+    });
+  assert.equal(records.length > 3, true);
+  assert.equal(records.every((record) => record.schemaVersion === 1), true);
+  assert.equal(records.every((record) => record.persistence === "ephemeral"), true);
+  assert.equal(records[0]?.event.type, "turn_started");
+  assert.equal(records.at(-1)?.event.type, "turn_completed");
+});
+
+test(
+  "source-installed bin exits quietly when a headless output pipe closes early",
+  { timeout: 30_000 },
+  async () => {
+    const child = spawn(
+      process.execPath,
+      [
+        BIN,
+        "--print",
+        "--output-format",
+        "stream-json",
+        "x".repeat(12_000),
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    await once(child.stdout, "data");
+    child.stdout.destroy();
+    const [code, signal] = (await once(child, "close")) as [
+      number | null,
+      NodeJS.Signals | null,
+    ];
+
+    assert.equal(code, 0);
+    assert.equal(signal, null);
+    assert.doesNotMatch(stderr, /EPIPE|Unhandled 'error' event|node:events/u);
+  },
+);
 
 test("source-installed bin checks, formats, and tests policies", async () => {
   const checked = await execute(["policy", "check", STRICT_POLICY, "--json"]);

@@ -1,13 +1,17 @@
 # Contributing
 
-Guarded Agent is built milestone by milestone. Preserve the distinction between
-implemented evidence and planned guarantees: Milestone B is the current
-implementation; Milestones C through H remain planned.
+Robin is built through user-visible coding-agent vertical slices. Preserve the
+distinction between implemented evidence and planned guarantees: the completed
+Milestones A and B are internal deterministic substrate; the interactive Robin
+product begins with the R-series plan. The archived Milestone C prototype is
+not merge-ready and is not the active sequence.
 
 ## Before Making a Change
 
-Read the sections of the [build plan](docs/BUILD_PLAN.md),
-[implementation guide](docs/IMPLEMENTATION_GUIDE.md),
+Read the sections of the [product requirements](docs/PRODUCT_REQUIREMENTS.md),
+[Robin CLI architecture](docs/ROBIN_CLI_ARCHITECTURE.md),
+[build plan](docs/BUILD_PLAN.md),
+[internal implementation reference](docs/IMPLEMENTATION_GUIDE.md),
 [threat model](docs/THREAT_MODEL.md), and [Event Model v1](docs/event-model.md)
 that govern the change. Identify:
 
@@ -18,8 +22,10 @@ that govern the change. Identify:
 5. replay and recovery consequences;
 6. the deterministic tests and residual-risk documentation required.
 
-Do not add coding, provider, Git, filesystem, process, credential, daemon, or UI
-concepts to generic kernel packages to make an adapter easier to implement.
+Do not add coding, provider, Git, filesystem, process, credential, terminal, or
+UI concepts to generic kernel packages to make an adapter easier to implement.
+Do not force product-level coding sessions into the one-run terminal outcome
+model. Application packages compose internal ports around a multi-turn session.
 
 ## Bootstrap and Required Checks
 

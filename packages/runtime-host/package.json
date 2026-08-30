@@ -2,7 +2,7 @@
   "name": "@guard/runtime-host",
   "version": "0.0.0",
   "private": true,
-  "description": "Synchronous application host for the Guarded Agent runtime kernel.",
+  "description": "Synchronous application host for Robin's internal runtime kernel.",
   "license": "MIT",
   "type": "module",
   "exports": {

@@ -1,108 +1,139 @@
-# Guarded Agent
+# Robin
 
-Guarded Agent is a general policy-enforced agent runtime. An interchangeable
-agent driver may propose context reads, capability actions, and outcomes, but
-trusted local components validate and record each boundary crossing. Coding is
-the first reference capability pack and flagship demo, not the kernel's product
-boundary.
+Robin is a local-first, provider-flexible coding agent for the terminal,
+currently available only as the early synthetic preview described below. Its
+intended product workflow is to start `robin` in a repository, describe work in
+natural language, and collaborate with an agent that can inspect the codebase,
+edit files, run commands and tests, review Git changes, and resume the same
+session later.
 
-The project is CLI-first. A future VS Code extension is planned as a client of
-the same runtime rather than a second enforcement implementation.
+Robin targets the same product category and terminal interaction model as
+Claude Code. It is not a wrapper around Claude Code or another coding-agent
+binary. Robin owns the agent loop, repository tools, session model, permission
+UX, provider normalization, and verification workflow. Its policy and runtime
+control layer is internal infrastructure for that coding experience, not the
+product's primary surface.
 
-## Current Status
+> **Implementation status:** the pivot branch now contains an initial R1
+> preview: `robin` starts an ephemeral multi-turn prompt loop and `robin -p`
+> runs the same provider-neutral application path with text, JSON, or streaming
+> JSON output. It uses a deterministic credential-free synthetic model provider
+> and deliberately has no repository, process, Git, network, credential, or
+> persistence tools. Milestones A and B remain the accepted internal substrate;
+> neither the R0 rename gate nor the complete R1 terminal gate is claimed as
+> accepted until all evidence in the build plan passes.
 
-Milestone A remains complete as the deterministic runtime foundation.
-Milestone B is complete: the policy engine and context boundary are implemented.
-The runnable profiles remain deliberately scripted, synthetic, virtual, in
-memory, and credential-free. Two broker-current CLI scenarios complete through
-the same strict contracts, policy snapshots, context broker, gateway, reducer,
-command planner, and runtime host:
+## Intended Robin Experience
 
-- a generic synthetic profile releases bounded reviewed context, transforms it
-  through a versioned capability, validates a typed outcome, and records a
-  23-event canonical history;
-- a coding profile lists, searches, reads, proposes, and inspects against a
-  virtual repository, records a 40-event canonical history, and proves the
-  original fixture is unchanged.
+The first usable Robin release is designed around this workflow:
 
-The historical 19-event synthetic and 33-event coding v1 fixtures remain
-byte-exact replay compatibility evidence; fresh executions use separately
-versioned broker-current goldens. Milestones C through H are planned. Milestone
-B does not claim host Git/worktree mutation, process/container isolation,
-durable restart recovery, live approvals, arbitrary agents/models or API keys,
-provider connectivity, credential storage, a daemon, or editor integration.
+```text
+$ robin
+Robin · my-project · main · model: configured-provider/model
 
-## What Milestones A and B Implement
+> Find the cause of the failing account test and fix it.
 
-- Versioned generic contracts for branded UUIDv7 IDs, task profiles,
-  objectives, resources, content, normalized actions, observations, outcomes,
-  evidence, results, domain errors, and 43 event types.
-- Bounded, descriptor-safe boundary snapshots and canonical JSON; known event
-  payloads reject unknown fields and malformed nested data.
-- One shared strict JSON Schema compiler boundary for profile objective/outcome
-  schemas and capability operation schemas.
-- An atomic in-memory compare-and-swap event store with strict custom-family
-  parser registration, duplicate-ID protection, immutable reads, batch bounds,
-  and envelope byte limits.
-- A pure `decide`/`evolve`/`planEffects`/`replay` runtime kernel with explicit
-  legal states, semantic guards, budget counters, identifier ledgers, terminal
-  invariants, and at most one outstanding consequential command.
-- Generic `AgentDriver` and `ModelProvider` ports, a deterministic
-  `ScriptedAgentDriver`, and a `SyntheticModelProvider` test adapter.
-- Version-pinned profile, context-source, and capability-pack registries; a
-  context broker and gateway that expose only bounded released views.
-- A generic synthetic transform capability and a virtual repository capability
-  with `list_files`, `search_text`, `read_file`, `propose_patch`, and
-  `inspect_diff` operations. None mutates the host filesystem or invokes Git or
-  a process.
-- A synchronous in-process runtime host that drains a bounded FIFO, executes
-  only installed exact-version ports after pinned policy evaluation, and
-  records decisions and results as events.
-- Checked-in canonical golden histories, byte-for-byte determinism tests, and
-  replay tests whose fail-on-effect spies prove projection rebuild performs no
-  I/O or adapter calls.
-- A minimal `guard run` CLI whose human, JSONL, and quiet renderers consume
-  completed run history rather than making authorization decisions.
-- A handwritten `.guard` frontend with bounded UTF-8 lexer, Pratt parser,
-  source-span diagnostics, canonical formatter, generative round trips, and
-  reviewed production examples.
-- Closed, composable attribute catalogs; typed three-valued evaluation with
-  explicit presence, deterministic deny/approval/allow combining, secret-safe
-  traces, immutable snapshot sets, exact case corpora, and paged simulation.
-- `guard policy check|format|test|explain|simulate`, including bounded regular
-  file reads, exact snapshot/corpus binding, stable JSON envelopes, independent
-  old/new catalogs, whole-corpus totals, and effect-free execution.
-- A domain-neutral context broker with source registration, canonical resource
-  references, byte/item/run budgets, binary/media checks, secret classifiers,
-  prompt-injection tagging, release manifests, and immutable run-pinned policy.
-- A contained repository source and virtual pack with hostile-path and TOCTOU
-  defenses, literal search, line reads, structural unified-diff inspection,
-  byte-free pre-policy normalization, exact multi-path input authorization, and
-  independently policy-mediated output paths, filenames, snippets, and patches.
-- One-use gateway-owned evaluated-action receipts: denied and approval-gated
-  operations cannot reach handlers, while allowed execution receives the exact
-  immutable normalized object evaluated by policy. Denied output release also
-  suppresses pack-provided audit and human payloads.
-- Deterministic Gate B scenarios that inspect exact broker and synthetic-provider
-  request bytes, scan all persisted/provider surfaces for raw, encoded, split,
-  identifier, filename, search, summary, and hash canaries, and prove replay
-  performs no effects.
+Robin searches and reads the relevant files, explains its short plan, requests
+permission for consequential actions, applies a reviewable patch, runs targeted
+tests, reports failures honestly, and shows the final Git diff.
 
-See [Event Model v1](docs/event-model.md) for envelope fields, event inventory,
-state transitions, intent legality, command planning, replay, and current
-storage limits.
+> Continue by adding the regression test.
+```
+
+The same application service will power interactive sessions and headless
+automation. Planned entry points include:
+
+| Entry point | Intended behavior |
+|---|---|
+| `robin` | Start an interactive coding session in the current repository. |
+| `robin "prompt"` | Start interactively and submit an initial request. |
+| `robin --print "prompt"` | Run the same agent loop headlessly and return a stable result. |
+| `robin --continue` | Continue the newest eligible session for this repository. |
+| `robin --resume [id-or-name]` | Select or resume an exact saved session. |
+| `robin sessions` | List, inspect, rename, export, or delete local sessions. |
+| `robin auth` | Add and manage supported credential records without putting keys in arguments. |
+| `robin models` | Inspect configured providers, models, and declared capabilities. |
+| `robin config` | Explain effective user, project, environment, and CLI configuration. |
+| `robin doctor` | Diagnose the installation, repository, provider, state, and sandbox. |
+| `robin policy` | Use the advanced policy debugger behind Robin's permission layer. |
+
+These commands are requirements, not current implementation claims. The
+current command surface is documented under [Run What Exists Today](#run-what-exists-today).
+
+## Product Boundary
+
+Robin is a coding-agent product, not a general secure-agent control plane with
+a small CLI attached. The CLI and agent workflow own:
+
+- streaming conversation, interruption, redirection, and terminal state;
+- repository discovery, instructions, search, reads, edits, commands, tests,
+  and Git-aware review;
+- the direct-model tool loop and normalized provider continuation;
+- provider/model selection and bring-your-own-credential onboarding;
+- local session persistence, continuation, branching, export, and deletion;
+- permissions that show the exact file, command, network, or Git effect;
+- observable tool results, verification status, usage, and cost estimates;
+- deterministic headless input/output for scripts and CI;
+- later extension points for skills, hooks, MCP, subagents, and editor clients.
+
+The existing event kernel, policy language, context broker, capability gateway,
+and evidence fixtures support those journeys. They do not define a separate
+end-user product. Internal `@guard/*` package names and `.guard` policy files
+remain temporarily as versioned substrate identifiers; the public repository,
+package, executable, documentation, and product name are Robin.
+
+## Current Implementation
+
+The repository currently proves inherited Milestones A and B plus a tested,
+in-progress R1 synthetic session slice. The complete R1 terminal gate remains
+open.
+
+| Area | Implemented now | Not implemented now |
+|---|---|---|
+| CLI | Ephemeral `robin` and `robin "prompt"` line-oriented interactive sessions; `robin -p` text/JSON/stream-JSON output; retained deterministic `robin run`; implemented `robin policy` debugger | Raw-mode terminal editor, cancellation/resize restoration gate, setup wizard, durable sessions, auth, models, doctor |
+| Agent and model | Provider-neutral multi-turn text loop, shared application service, deterministic streaming synthetic provider, generic provider port, and inherited scripted driver | Structured coding-tool loop, hosted/local provider transport, provider onboarding, external-agent bridge |
+| Repository work | Virtual repository operations for listing, literal search, line reads, patch proposals, and diff inspection | Host repository mutation, Git worktrees, real patch application, command or test execution |
+| Control substrate | Strict contracts, event reducer and replay, policy evaluation, context release, capability mediation, deterministic evidence | Durable approvals, sandbox enforcement, restart reconciliation, production audit storage |
+| Persistence | Atomic in-memory event store for deterministic scenarios | Durable transcripts, saved sessions, crash recovery, background supervision |
+| Credentials | No credential is needed or read | API-key onboarding, OS credential storage, origin-bound injection, rotation |
+
+The synthetic scenario records a canonical 23-event broker-current history. The
+virtual coding scenario records a canonical 40-event history and proves its
+fixture repository remains unchanged. Historical 19-event and 33-event golden
+histories remain replay-compatibility evidence. These scenarios are development
+and security fixtures; they are no longer presented as the finished product.
+
+Implemented Milestone B evidence includes:
+
+- strict versioned contracts and bounded canonical event envelopes;
+- a pure state reducer, legal transition checks, command planning, and
+  effect-free replay;
+- an atomic in-memory compare-and-swap event store;
+- exact-version profile, context-source, capability, and policy bindings;
+- one-use evaluated-action receipts so denied or approval-gated actions cannot
+  dispatch through the capability gateway;
+- a bounded `.guard` lexer, parser, formatter, evaluator, case runner, trace,
+  and old/new policy simulator;
+- descriptor-safe and hostile-path tests for the repository context boundary;
+- checked-in byte-exact histories and deterministic adversarial canary scans;
+- mutation gates for critical contract and policy boundaries.
+
+See [Event Model v1](docs/event-model.md) and
+[Policy Language v1](docs/policy-language.md) for the exact implemented
+contracts and current limits.
 
 ## Prerequisites
 
 - Node.js 22 or newer
 - npm 10 or newer
-- Git for cloning and contributing
+- Git for cloning and contributor workflows
 
-PostgreSQL, Docker or Podman, provider accounts, API keys, and agent
-credentials are not needed for Milestone B. They become relevant only in the
-later milestones that introduce those adapters.
+PostgreSQL, Docker or Podman, a provider account, and an API key are not needed
+for the current deterministic implementation and synthetic session preview.
+There is no public Robin release or global installer yet; use the repository
+build below.
 
-## Install and Verify
+## Install and Verify the Current Repository
 
 From the repository root:
 
@@ -110,38 +141,53 @@ From the repository root:
 npm ci --ignore-scripts
 npm run check
 npm run build
+node apps/cli/dist/bin.js --version
 ```
 
-`npm run check` runs strict TypeScript checks, repository documentation and
-architecture/policy guards, and every workspace unit/scenario/CLI test. The
-separate build command verifies all distributable workspace outputs.
+`npm run check` runs strict TypeScript checks, repository architecture and
+documentation guards, and all workspace unit, scenario, and CLI tests. The
+separate build verifies distributable workspace output. Install scripts are not
+required. The direct external runtime dependencies remain exact-pinned behind
+reviewed boundaries.
 
-The repository has two exact-pinned direct external runtime dependencies:
-`uuid@14.0.2` behind the branded-ID boundary and `ajv@8.20.0` behind the shared
-schema-validation boundary. Internal workspace packages are also pinned to
-`0.0.0`; TypeScript and Node type definitions are development dependencies.
-Install scripts are not required.
+## Run What Exists Today
 
-## Run the Deterministic Demos
+Build first. The local compiled binary is named `robin`; invoking its JavaScript
+entry point avoids implying that a global package has already been published.
 
-Build first, then invoke the compiled workspace binary. The human renderer is
-the default:
+Run the ephemeral synthetic conversation preview:
+
+```bash
+node apps/cli/dist/bin.js
+node apps/cli/dist/bin.js "Explain what this preview can do."
+node apps/cli/dist/bin.js -p "Summarize the current implementation."
+node apps/cli/dist/bin.js --print --output-format json "Explain Robin."
+node apps/cli/dist/bin.js --print --output-format stream-json "Stream one turn."
+```
+
+Interactive mode supports multiple prompts plus `/help` and `/exit`. Its banner
+and shutdown diagnostic state that the conversation is ephemeral. The
+synthetic provider reflects bounded text through the real normalized session
+path; it never claims to inspect or change the repository. Text output escapes
+terminal control characters. The preview machine formats declare
+`stability: "experimental"`; they preserve parsed model text while emitting
+terminal controls as standard JSON escapes and contain no ANSI output.
+
+Run the retained deterministic synthetic and virtual-coding fixtures:
 
 ```bash
 node apps/cli/dist/bin.js run --profile synthetic-demo
 node apps/cli/dist/bin.js run --profile coding-virtual
 ```
 
-Select a stable JSON Lines event stream or a completed-outcome-only view with:
+Select stable JSON Lines output or the completed-outcome-only view:
 
 ```bash
 node apps/cli/dist/bin.js run --profile synthetic-demo --format jsonl
 node apps/cli/dist/bin.js run --profile coding-virtual --format quiet
 ```
 
-The built-in objective is used when no objective option is present. A file,
-inline JSON option, or post-`--` shorthand is accepted only when it exactly
-matches the selected golden fixture's full envelope or payload shorthand:
+Use the exact checked-in objective or its bounded payload shorthand:
 
 ```bash
 node apps/cli/dist/bin.js run --profile coding-virtual \
@@ -150,19 +196,13 @@ node apps/cli/dist/bin.js run --profile synthetic-demo --quiet -- \
   '{"recordId":"greeting","mode":"uppercase"}'
 ```
 
-Objective input is limited to 65,536 UTF-8 bytes and bounded JSON object depth
-and node count. File input must be a regular file. The three objective forms
-and the three format selectors are each mutually exclusive.
+The compatibility `run` command accepts only the two built-in objectives. The
+session surface accepts only `--provider synthetic`; selecting a real provider
+returns a clear configuration error. Raw API-key arguments, external agents,
+network access, real-repository tools, and durable session flags are not
+accepted rather than pretending unsupported configuration is protected.
 
-Use `node apps/cli/dist/bin.js --help` and
-`node apps/cli/dist/bin.js run --help` for the exact local command reference.
-Milestone B accepts only its two fixed deterministic run profiles. It
-intentionally rejects provider, external-agent, model, API-key, credential,
-network, and real repository flags rather than accepting a value it cannot
-enforce safely.
-
-The policy debugger operates on bounded local files and never executes a
-capability effect:
+The advanced policy debugger is also implemented:
 
 ```bash
 node apps/cli/dist/bin.js policy check policies/strict.guard --json
@@ -177,120 +217,167 @@ node apps/cli/dist/bin.js policy simulate \
   --actions apps/cli/testdata/policy-actions-v1.json --json
 ```
 
-See [Policy Language v1](docs/policy-language.md) for the grammar, catalog
-schema, evaluation semantics, trace behavior, case corpus, and simulator.
+Use `node apps/cli/dist/bin.js --help`,
+`node apps/cli/dist/bin.js run --help`, and
+`node apps/cli/dist/bin.js policy --help` for the current command reference.
 
-No demo or policy command above contacts a network service, reads an environment
-credential, starts a model server, mutates a checkout, or launches a container.
-The virtual coding run returns patch data as an observation and outcome; it does
-not apply that patch.
+No command above contacts a network service, reads an environment credential,
+starts a model server, mutates a checkout, invokes Git, or launches a child
+process. Session text streams in-process; compatibility-scenario output remains
+buffered until completion. Conversation state lives only in memory, so the
+current CLI cannot resume after exit.
 
-Output is buffered until the scenario completes. In this in-process slice,
-`SIGINT` exits without a partial progress stream and does not append a durable
-cancellation event. Exit codes are `0` success, `2` invalid input or
-configuration, `3` policy denial or invalid approval, `4` approval pending,
-`5` budget exhaustion, `6` task failure, `7` infrastructure failure, and `8`
-cancellation.
+## Architecture at a Glance
 
-## Implemented Guarantees and Evidence
+Robin is organized so every user surface reaches one coding-agent application
+core rather than implementing a second agent loop:
 
-The following claims are implemented and tested for the Milestone B in-process
-profiles:
+```text
+terminal CLI / headless CLI / future editor client
+                         |
+          session and conversation services
+                         |
+             Robin direct-model agent loop
+                         |
+       normalized provider and model adapters
+                         |
+ repository tools -> permissions -> capability execution
+                         |
+ events, context release, checkpoints, evidence, persistence
+```
 
-- Kernel packages do not import coding, Git, provider SDK, or external-agent
-  implementations. Architecture tests enforce the dependency direction and
-  scan kernel sources for forbidden provider/coding coupling.
-- Profile, capability-pack, and operation identities are exact-version bound.
-  Inputs are schema-validated, normalized once, and executed using the captured
-  immutable prepared object.
-- The scripted driver sees only advertised operations, broker-released context,
-  and agent-safe observation views; raw capability results are not included in
-  its turn request or golden history.
-- Every action crosses the pinned policy evaluator. A deny or approval decision
-  cannot execute; only an exact gateway-owned allow receipt reaches its handler.
-- Every scenario transition is represented by a strict event envelope. Fresh
-  executions are canonically identical to their checked-in golden histories.
-- Replaying either history reconstructs the exact terminal projection without
-  invoking an effect port.
-- The virtual coding fixture remains byte-for-byte unchanged after its run.
-- Unknown, malformed, absent, or mismatched policy data fails closed. Every
-  shipped policy file owns a reviewed ten-category evidence matrix and a
-  fail-closed initial-rollout simulation over its exact recorded action corpus.
-- Forbidden source bytes and repository identifiers do not reach exact
-  serialized agent/provider input, released observations, audit/human views,
-  histories, manifests, or artifacts in the deterministic adversarial corpus.
-- Mixed safe and forbidden repository paths deny before handler dispatch or
-  provider reads; independently forbidden output paths deny after the bounded
-  handler without releasing pack views.
-- Boundary mutation tests kill all 14 configured critical mutants and policy
-  mutation tests kill all 23, both at the required 100% score.
+The pivot branch now contains the first narrow implementation of the upper
+session, application, and provider-neutral loop layers. It is intentionally
+text-only and ephemeral until the full R1 terminal/tool-loop evidence passes.
+The build order creates a usable vertical coding workflow before deepening
+isolation, distributed durability, evaluation infrastructure, or clients.
 
-These are deterministic in-process policy/context claims, not host isolation,
-production-provider, approval, or durability claims.
+The detailed component boundaries, turn state machine, streaming contracts,
+tool protocol, configuration precedence, session schema, and integration plan
+are specified in the [Robin CLI architecture](docs/ROBIN_CLI_ARCHITECTURE.md).
 
-## Current Limitations
+## Providers, Models, Agents, and API Keys
 
-- Events and commands live only in process memory. A process exit loses active
-  state; there is no restart/resume contract, durable command queue, lease,
-  reaper, projection database, or crash reconciliation.
-- Policy `require_approval` is represented and routed, but the durable human
-  approval service, expiry, consumption, and live precondition revalidation are
-  Milestone E work.
-- CLI coding runs still use a closed virtual fixture. Milestone B tests a
-  no-follow contained host-repository read source, but there is no Git
-  repository/worktree manager, patch application, shell/process runner,
-  container sandbox, or process-mutation isolation claim yet.
-- `ScriptedAgentDriver` and `SyntheticModelProvider` are deterministic adapters.
-  There is no direct-model driver, provider HTTP adapter, API-key transport,
-  OS credential store, local model endpoint, ACP, MCP, or contained CLI-agent
-  integration yet.
-- There is no daemon, PostgreSQL database, live approval inbox, multi-client
-  protocol, release package, VS Code extension, or Code-OSS fork.
-- The CLI runs two built-in evidence scenarios plus the local policy debugger.
-  Complete run management, diagnostics, cleanup/export flows, installation
-  packaging, and release-quality UX arrive in Milestone F.
+Robin is designed to be provider- and model-flexible without making a false
+universal-compatibility promise.
+
+- Robin owns one provider-neutral coding-agent loop. A direct provider adapter
+  compiles normalized requests, authenticates through a narrow transport, and
+  normalizes text, tool calls, usage, stop reasons, and failures.
+- A provider/model pair is supported only when its adapter declares the needed
+  capabilities and passes Robin's conformance suite. Entering an arbitrary API
+  key does not make an incompatible API, model, or protocol work.
+- Bring your own key means selecting a supported adapter and storing or
+  referencing the credential through a supported secure source. Robin will not
+  accept raw secrets as command-line arguments or save them in repository
+  configuration, transcripts, logs, or Git.
+- Local endpoints and OpenAI-compatible endpoints use the same capability
+  contract and must pass their declared dialect tests; a compatibility label by
+  itself is not evidence.
+- External coding agents can be added later through reviewed ACP, MCP, or
+  contained-process adapters. Robin can only guarantee the context and actions
+  it can actually mediate, so those integrations have explicit compatibility
+  tiers.
+
+Today, only the synthetic credential-free provider exists. The first
+hosted-provider alpha at R4 requires one production direct-provider adapter and
+session-scoped BYOK onboarding; it is not yet the first supported developer
+release, which requires every gate through R8. See the
+[provider, credential, and external-agent compatibility plan](docs/PROVIDER_AGENT_COMPATIBILITY.md)
+for the exact claims and limitations.
+
+## Permissions and Isolation
+
+Robin's planned permission UX and its internal policy engine answer whether a
+specific normalized action is allowed, denied, or requires approval. Command
+sandboxing constrains an allowed process. Whole-process or container isolation
+is a separate property. Documentation, diagnostics, and release evidence must
+name which boundary is active rather than collapsing all three into a single
+"safe" label.
+
+The ordinary workflow will show exact requested scope for file writes,
+commands, network access, and Git mutations. Read-only operations may be allowed
+inside the bound workspace according to the selected mode. Pre-existing user
+changes are preserved and must never be silently reset, overwritten, or labeled
+as Robin-created.
+
+## Why the Project Pivoted
+
+The original repository was organized as a general policy-enforced runtime and
+scheduled the full CLI late. That order produced valuable deterministic
+substrate but not the intended product. Robin reverses the priority: terminal
+conversation, real repository work, a provider-backed agent loop, sessions,
+and developer feedback come first; the control layer evolves when those
+journeys require it.
+
+[ADR-0007](docs/decisions/ADR-0007-robin-coding-agent-product-pivot.md) records
+the decision and why a CLI precedes a VS Code extension or Code-OSS fork.
+
+The unfinished runtime-first Milestone C prototype was checkpointed on the
+`milestone/c-isolated-filesystem-execution` branch before the pivot. It is
+archived reference material, not part of this branch and not a merge-ready
+implementation. Worktree, artifact, and gateway pieces may return only through
+fresh Robin user-journey requirements, review, and tests.
+
+## Roadmap
+
+The ordered roadmap is:
+
+1. **Completed substrate — Milestones A and B:** contracts, deterministic event
+   loop and replay, strict policy engine, context boundary, virtual repository
+   capability, golden scenarios, and the renamed fixture CLI.
+2. **Coding-agent foundation — in progress:** a normalized multi-turn synthetic
+   loop, shared application path, basic interactive shell, headless formats,
+   and output sanitization now exist; the raw terminal lifecycle, event schema,
+   cancellation, synthetic tool calls, and PTY matrix remain open.
+3. **Hosted-provider alpha (R2–R4):** one real direct provider with BYOK setup,
+   real repository search/read/edit tools, command and test execution, Git diff
+   review, permission prompts, interruption, continue/resume, and a complete
+   end-to-end demonstration.
+4. **First supported developer bundle (R5–R8):** strict permission/sandbox
+   evidence, richer Git workflows and checkpoints, provider breadth, stable
+   headless contracts, credential stores, configuration and trust, instructions,
+   skills, hooks, and MCP.
+5. **Robin 1.0 hardening (R10):** packaging, clean-machine
+   install/upgrade/rollback/uninstall, migrations, deterministic evals,
+   adversarial evidence, accessibility, and release operations.
+6. **Post-1.0 orchestration and clients (R9, R11–R12):** subagents, isolated
+   worktrees, background supervision, a stable client protocol, and a VS Code
+   extension. A Code-OSS fork is considered only if a documented extension
+   limitation justifies its maintenance cost.
+
+Every planned claim remains a design target until its named tests and evidence
+gate pass. The [full build plan](docs/BUILD_PLAN.md) defines implementation
+order, algorithms, tests, and exit criteria.
 
 ## Documentation
 
-- [Full build plan](docs/BUILD_PLAN.md)
-- [Critical plan review](docs/PLAN_REVIEW.md)
-- [Deep plan audit and resolution register](docs/DEEP_AUDIT.md)
-- [General multi-agent and multi-model runtime architecture](docs/GENERAL_RUNTIME_ARCHITECTURE.md)
-- [Provider, API-key, and external-agent compatibility](docs/PROVIDER_AGENT_COMPATIBILITY.md)
-- [Detailed implementation guide](docs/IMPLEMENTATION_GUIDE.md)
-- [Installation, testing, operations, and release plan](docs/OPERATIONS_TEST_PLAN.md)
+Start with the product-first source of truth:
+
 - [Product requirements and user flows](docs/PRODUCT_REQUIREMENTS.md)
+- [Full Robin build plan](docs/BUILD_PLAN.md)
+- [Robin CLI architecture](docs/ROBIN_CLI_ARCHITECTURE.md)
+- [ADR-0007: Robin coding-agent product pivot](docs/decisions/ADR-0007-robin-coding-agent-product-pivot.md)
+
+Implementation, operations, and evidence references:
+
+- [Provider, credential, model, and external-agent compatibility](docs/PROVIDER_AGENT_COMPATIBILITY.md)
+- [Implementation guide](docs/IMPLEMENTATION_GUIDE.md)
+- [Installation, testing, operations, and release plan](docs/OPERATIONS_TEST_PLAN.md)
+- [Threat model](docs/THREAT_MODEL.md)
 - [Event Model v1](docs/event-model.md)
 - [Policy Language v1](docs/policy-language.md)
-- [Threat model](docs/THREAT_MODEL.md)
 - [Glossary](docs/GLOSSARY.md)
-- [Open questions and deferred decisions](docs/OPEN_QUESTIONS.md)
+- [Open questions](docs/OPEN_QUESTIONS.md)
 - [Architecture decision records](docs/decisions/)
 - [Documentation index](docs/README.md)
 
-## Planned Milestones
-
-The accepted implementation sequence is:
-
-1. **C — Isolated real filesystem execution:** Git adapter, disposable
-   worktrees, validated patches, shell-free process recipes, and container
-   isolation.
-2. **D — Direct models and credentials:** provider-neutral direct-model driver,
-   local no-key endpoint, OS credential boundary, and first hosted provider.
-3. **E — Durability, daemon, and approvals:** PostgreSQL event/command storage,
-   workers and leases, encrypted evidence, reconciliation, restart recovery,
-   and precondition-bound approvals.
-4. **F — Evaluation and release-quality CLI:** deterministic eval control
-   plane, local-corpus research profile, adversarial corpus, complete CLI,
-   packaging, clean-machine install, and portfolio release evidence.
-5. **G — Broad compatibility:** additional provider families, compatible/local
-   endpoint conformance, ACP, MCP, and containment-labeled CLI agents.
-6. **H — Multi-client and editor:** hardened authenticated daemon protocol,
-   cursor subscriptions and chunked artifacts, daemon-client CLI, and VS Code
-   integration.
-
-Planned behavior remains a design target until its milestone-specific tests and
-evidence gates pass.
+The older [general runtime architecture](docs/GENERAL_RUNTIME_ARCHITECTURE.md),
+[plan review](docs/PLAN_REVIEW.md), and
+[deep audit](docs/DEEP_AUDIT.md) remain useful pre-pivot design and security
+references. Where they conflict with the four product-first documents above,
+the Robin product requirements, build plan, CLI architecture, and ADR-0007
+control.
 
 ## License
 

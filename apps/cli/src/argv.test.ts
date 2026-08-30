@@ -3,6 +3,130 @@ import test from "node:test";
 
 import { CliUsageError, parseArgv } from "./argv.js";
 
+test("starts an interactive Robin session when no command is supplied", () => {
+  assert.deepEqual(parseArgv([]), {
+    kind: "interactive",
+    prompt: null,
+    provider: "synthetic",
+    model: null,
+    permissionMode: "ask",
+  });
+});
+
+test("starts an interactive session with one initial prompt", () => {
+  assert.deepEqual(parseArgv(["explain the retry loop"]), {
+    kind: "interactive",
+    prompt: "explain the retry loop",
+    provider: "synthetic",
+    model: null,
+    permissionMode: "ask",
+  });
+  assert.deepEqual(
+    parseArgv([
+      "--provider",
+      "synthetic",
+      "--model",
+      "fixture-v1",
+      "--permission-mode",
+      "plan",
+      "inspect the project",
+    ]),
+    {
+      kind: "interactive",
+      prompt: "inspect the project",
+      provider: "synthetic",
+      model: "fixture-v1",
+      permissionMode: "plan",
+    },
+  );
+});
+
+test("parses headless print mode with stable output and budget options", () => {
+  assert.deepEqual(parseArgv(["-p", "summarize this repository"]), {
+    kind: "print",
+    prompt: "summarize this repository",
+    provider: "synthetic",
+    model: null,
+    permissionMode: "ask",
+    outputFormat: "text",
+    save: false,
+    maximumTurns: 16,
+  });
+  assert.deepEqual(
+    parseArgv([
+      "--print",
+      "--output-format",
+      "stream-json",
+      "--no-save",
+      "--maximum-turns",
+      "4",
+      "inspect the project",
+    ]),
+    {
+      kind: "print",
+      prompt: "inspect the project",
+      provider: "synthetic",
+      model: null,
+      permissionMode: "ask",
+      outputFormat: "stream-json",
+      save: false,
+      maximumTurns: 4,
+    },
+  );
+});
+
+test("reserves continue, resume, and future product commands", () => {
+  assert.deepEqual(parseArgv(["--continue"]), { kind: "continue" });
+  assert.deepEqual(parseArgv(["--resume"]), { kind: "resume", selector: null });
+  assert.deepEqual(parseArgv(["--resume", "session-1"]), {
+    kind: "resume",
+    selector: "session-1",
+  });
+  assert.throws(() => parseArgv(["--continue", "extra"]), CliUsageError);
+  assert.throws(
+    () => parseArgv(["--resume", "one", "two"]),
+    CliUsageError,
+  );
+  for (const command of ["sessions", "auth", "models", "config", "doctor"]) {
+    assert.throws(() => parseArgv([command]), /reserved but not implemented/u);
+  }
+  assert.deepEqual(parseArgv(["continue"]), {
+    kind: "interactive",
+    prompt: "continue",
+    provider: "synthetic",
+    model: null,
+    permissionMode: "ask",
+  });
+});
+
+test("session prompt limit accepts its exact UTF-8 boundary and rejects one byte more", () => {
+  const atLimit = "a".repeat(65_536);
+  assert.equal(parseArgv([atLimit]).kind, "interactive");
+  assert.throws(() => parseArgv([atLimit + "a"]), /non-empty and bounded/u);
+});
+
+test("session parsing rejects unpaired UTF-16 surrogates", () => {
+  assert.throws(() => parseArgv(["broken\ud800prompt"]), CliUsageError);
+  assert.throws(() => parseArgv(["broken\udc00prompt"]), CliUsageError);
+  assert.equal(parseArgv(["valid 😀 prompt"]).kind, "interactive");
+});
+
+test("session parsing rejects missing prompts, raw credentials, and ambiguous input", () => {
+  for (const argv of [
+    ["--print"],
+    ["-p"],
+    ["one prompt", "second prompt"],
+    ["--output-format", "json", "interactive cannot select output"],
+    ["--no-save", "interactive cannot disable persistence"],
+    ["--maximum-turns", "0", "prompt"],
+    ["--maximum-turns", "257", "prompt"],
+    ["--permission-mode", "bypass", "prompt"],
+    ["--api-key", "canary-secret", "prompt"],
+  ]) {
+    assert.throws(() => parseArgv(argv), CliUsageError);
+  }
+});
+
 test("parses a minimal run and applies the human default", () => {
   assert.deepEqual(parseArgv(["run", "--profile", "synthetic-demo"]), {
     kind: "run",
@@ -103,8 +227,6 @@ test("supports root and run help plus root version", () => {
 });
 
 for (const argv of [
-  [] as string[],
-  ["inspect"],
   ["run"],
   ["run", "--profile"],
   ["run", "--profile", "unknown"],

@@ -2,7 +2,12 @@
 
 ## Current Status
 
-Guarded Agent is in design and initial implementation. It is not yet a production security boundary and should not be trusted with sensitive repositories or credentials until the relevant controls are implemented and independently reviewed.
+Robin is in a product pivot and initial coding-agent implementation. Its
+Milestones A and B policy/context substrate has deterministic evidence, but the
+interactive workspace, process, credential, live-provider, session, and
+extension boundaries are not yet implemented release guarantees. Do not trust
+the current development build with sensitive repositories or real credentials
+until the relevant Robin release gate passes and the claim is documented.
 
 ## Reporting a Vulnerability
 
@@ -18,4 +23,8 @@ Include:
 
 ## Security Claims
 
-Every release will document implemented guarantees and residual risks. Container isolation will not be described as a formal proof of containment. Policy and approval user interfaces will not be described as enforcement unless corresponding gateway tests exist.
+Every release will document implemented guarantees and residual risks. A
+client-side permission is not a command sandbox, a command sandbox is not
+whole-process isolation, and a container is not a formal proof of containment.
+Permission and approval UI is not described as enforcement unless the exact
+normalized action executed by the tool is covered by boundary tests.

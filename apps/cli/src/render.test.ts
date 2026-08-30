@@ -64,7 +64,7 @@ test("human view is stable and includes a domain-event timeline plus final outco
   assert.equal(
     renderHuman(HISTORY),
     [
-      `Guarded Agent run ${RUN_ID}`,
+      `Robin run ${RUN_ID}`,
       "001  2026-01-02T03:04:06.000Z  RunCreated",
       "002  2026-01-02T03:04:06.000Z  RunCompleted",
       "Status: completed",

@@ -1,0 +1,27 @@
+{
+  "name": "@guard/robin-application",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Application use cases for Robin coding sessions.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build --force",
+    "test": "npm run build && node --test dist/*.test.js"
+  },
+  "dependencies": {
+    "@guard/contracts": "0.0.0",
+    "@guard/model-provider": "0.0.0",
+    "@guard/robin-agent": "0.0.0"
+  }
+}

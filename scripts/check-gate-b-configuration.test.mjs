@@ -25,7 +25,9 @@ const requiredContractPackages = Object.freeze([
   "@guard/runtime",
   "@guard/runtime-host",
   "@guard/milestone-a-scenarios",
-  "@guard/cli",
+  "@guard/robin-agent",
+  "@guard/robin-application",
+  "@zachshotamartin/robin",
 ]);
 
 const requiredBoundaryMutationIds = Object.freeze([

@@ -159,7 +159,7 @@ test("workspace manifests use the repository license and exact dependency versio
   const lockfile = JSON.parse(await readFile(path.join(repositoryRoot, "package-lock.json"), "utf8"));
 
   assert.equal(lockfile.lockfileVersion, 3, "package-lock.json must use lockfile version 3");
-  assert.equal(lockfile.name, "guarded-agent");
+  assert.equal(lockfile.name, "robin");
 
   for (const manifestPath of manifestPaths) {
     const manifest = JSON.parse(await readFile(path.join(repositoryRoot, manifestPath), "utf8"));

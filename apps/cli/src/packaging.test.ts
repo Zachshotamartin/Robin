@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -12,7 +12,7 @@ const APP_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const REPOSITORY_ROOT = resolve(APP_ROOT, "../..");
 const NPM_ENV = Object.freeze({
   ...process.env,
-  npm_config_cache: join(tmpdir(), "guard-cli-npm-cache"),
+  npm_config_cache: join(tmpdir(), "robin-cli-npm-cache"),
   npm_config_audit: "false",
   npm_config_fund: "false",
   npm_config_update_notifier: "false",
@@ -40,15 +40,20 @@ test("npm pack dry-run includes the bin and bounded objective testdata", async (
   assert.equal(paths.has("testdata/policy-actions-v1.json"), true);
 });
 
+test("the compiled Robin entry point is directly executable", async () => {
+  const metadata = await stat(join(APP_ROOT, "dist", "bin.js"));
+  assert.notEqual(metadata.mode & 0o111, 0);
+});
+
 test("the actual tarball installs with its local workspace closure and runs offline", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "guard-cli-pack-"));
+  const directory = await mkdtemp(join(tmpdir(), "robin-cli-pack-"));
   const pack = await npmPack(["--json", "--pack-destination", directory]);
   const tarball = join(directory, pack.filename);
   const installRoot = join(directory, "install");
   await mkdir(installRoot);
   await writeFile(
     join(installRoot, "package.json"),
-    `${JSON.stringify({ name: "guard-cli-install-smoke", private: true })}\n`,
+    `${JSON.stringify({ name: "robin-cli-install-smoke", private: true })}\n`,
     "utf8",
   );
   await execFile(
@@ -57,7 +62,6 @@ test("the actual tarball installs with its local workspace closure and runs offl
       "install",
       "--ignore-scripts",
       "--offline",
-      "--no-bin-links",
       "--no-audit",
       "--no-fund",
       "--package-lock=false",
@@ -68,9 +72,33 @@ test("the actual tarball installs with its local workspace closure and runs offl
     { cwd: installRoot, env: NPM_ENV, timeout: 60_000, maxBuffer: 4 * 1024 * 1024 },
   );
   const installedManifest = JSON.parse(
-    await readFile(join(installRoot, "node_modules", "@guard", "cli", "package.json"), "utf8"),
+    await readFile(
+      join(
+        installRoot,
+        "node_modules",
+        "@zachshotamartin",
+        "robin",
+        "package.json",
+      ),
+      "utf8",
+    ),
   ) as { readonly bin?: Readonly<Record<string, string>> };
-  assert.equal(installedManifest.bin?.["guard"], "./dist/bin.js");
+  assert.equal(installedManifest.bin?.["robin"], "./dist/bin.js");
+
+  const installedCommand = join(
+    installRoot,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "robin.cmd" : "robin",
+  );
+  const commandResult = await execFile(installedCommand, ["--version"], {
+    cwd: installRoot,
+    encoding: "utf8",
+    timeout: 30_000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  assert.equal(commandResult.stdout, "0.0.0\n");
+  assert.equal(commandResult.stderr, "");
 
   const scenarioFixture = await readFile(
     join(
@@ -88,7 +116,14 @@ test("the actual tarball installs with its local workspace closure and runs offl
   const result = await execFile(
     process.execPath,
     [
-      join(installRoot, "node_modules", "@guard", "cli", "dist", "bin.js"),
+      join(
+        installRoot,
+        "node_modules",
+        "@zachshotamartin",
+        "robin",
+        "dist",
+        "bin.js",
+      ),
       "--version",
     ],
     { cwd: installRoot, encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024 },
@@ -96,19 +131,35 @@ test("the actual tarball installs with its local workspace closure and runs offl
   assert.equal(result.stdout, "0.0.0\n");
   assert.equal(result.stderr, "");
 
+  const previewResult = await execFile(
+    installedCommand,
+    ["-p", "Verify the installed Robin preview."],
+    {
+      cwd: installRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 4 * 1024 * 1024,
+    },
+  );
+  assert.equal(previewResult.stderr, "");
+  assert.match(
+    previewResult.stdout,
+    /^Robin received: Verify the installed Robin preview\./u,
+  );
+
   const installedBin = join(
     installRoot,
     "node_modules",
-    "@guard",
-    "cli",
+    "@zachshotamartin",
+    "robin",
     "dist",
     "bin.js",
   );
   const testdata = join(
     installRoot,
     "node_modules",
-    "@guard",
-    "cli",
+    "@zachshotamartin",
+    "robin",
     "testdata",
   );
   const runPolicy = async (args: readonly string[]) =>
@@ -211,9 +262,12 @@ function localDependencyPaths(): readonly string[] {
     "context-broker",
     "contracts",
     "event-store",
+    "model-provider",
     "policy-engine",
     "policy-language",
     "profile-registry",
+    "robin-agent",
+    "robin-application",
     "runtime-host",
     "runtime",
     "schema-validation",
