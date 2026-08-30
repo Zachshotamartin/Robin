@@ -15,6 +15,8 @@ export const AGENT_DRIVER_SCHEMA_VERSION = 1 as const;
 export type AgentDriverSchemaVersion = typeof AGENT_DRIVER_SCHEMA_VERSION;
 
 export interface AdvertisedOperation {
+  readonly capabilityPackId: string;
+  readonly capabilityPackVersion: number;
   readonly operationId: string;
   readonly operationVersion: number;
   readonly description: string;
@@ -61,6 +63,8 @@ export type AgentDriverEvent =
   | {
       readonly type: "action_proposed";
       readonly proposalId: DriverProposalId;
+      readonly capabilityPackId: string;
+      readonly capabilityPackVersion: number;
       readonly operationId: string;
       readonly operationVersion: number;
       readonly input: JsonObject;

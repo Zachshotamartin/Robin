@@ -6,6 +6,7 @@ import {
   GENERIC_EVENT_TYPES,
   ActionIdKind,
   ArtifactIdKind,
+  DriverProposalIdKind,
   EventIdKind,
   RunIdKind,
   assertContractSchemaVersion,
@@ -228,6 +229,29 @@ test("the initial generic event union is explicit, unique, and domain-neutral", 
   assert.equal(isGenericEventType("coding.PatchProduced"), false);
   assert.equal(isGenericEventType("RunCreated"), true);
   assert.equal(isGenericEventType("RunCompleted"), true);
+});
+
+test("ActionProposed events bind the exact positive capability-pack version", () => {
+  const event: GenericEvent = {
+    eventId: EventIdKind.generate(),
+    eventType: "ActionProposed",
+    eventSchemaVersion: 1,
+    occurredAt: "2026-08-30T12:00:00.000Z",
+    actor: { kind: "agent_driver", id: "driver:scripted" },
+    correlationId: "correlation:action-proposal",
+    causationId: null,
+    payload: {
+      proposalId: DriverProposalIdKind.generate(),
+      capabilityPackId: "capability:synthetic",
+      capabilityPackVersion: 1,
+      operationId: "synthetic.transform",
+      operationVersion: 1,
+      input: { input: "alpha" },
+    },
+  };
+
+  assert.equal(event.eventType, "ActionProposed");
+  assert.equal(event.payload.capabilityPackVersion > 0, true);
 });
 
 test("generic event envelopes preserve stable metadata and validate strictly", () => {

@@ -124,6 +124,8 @@ function turn(
     objective: objective(),
     advertisedOperations: [
       {
+        capabilityPackId: "capability:documents",
+        capabilityPackVersion: 1,
         operationId: "documents.search",
         operationVersion: 1,
         description: "Search the released local corpus.",
@@ -151,6 +153,8 @@ const FIRST_EVENTS: readonly AgentDriverEvent[] = [
   {
     type: "action_proposed",
     proposalId: PROPOSAL_ID,
+    capabilityPackId: "capability:documents",
+    capabilityPackVersion: 1,
     operationId: "documents.search",
     operationVersion: 1,
     input: { query: "policy boundary" },
@@ -189,6 +193,34 @@ async function collect<T>(iterable: AsyncIterable<T>): Promise<readonly T[]> {
 
 function isDomainCode(error: unknown, code: string): boolean {
   return isDomainError(error) && error.code === code;
+}
+
+function firstAdvertisedOperation(request: AgentTurnRequest): Record<string, unknown> {
+  const operation = request.advertisedOperations[0];
+  assert.notEqual(operation, undefined);
+  return operation as unknown as Record<string, unknown>;
+}
+
+function scriptWithRequestOperationMutation(
+  mutate: (operation: Record<string, unknown>) => void,
+): ScriptedAgentDriverScript {
+  const script = structuredClone(driverScript()) as ScriptedAgentDriverScript;
+  const request = script.turns[0]?.expectedRequest;
+  assert.notEqual(request, undefined);
+  mutate(firstAdvertisedOperation(request as AgentTurnRequest));
+  return script;
+}
+
+function scriptWithActionMutation(
+  mutate: (event: Record<string, unknown>) => void,
+): ScriptedAgentDriverScript {
+  const script = structuredClone(driverScript()) as ScriptedAgentDriverScript;
+  const events = script.turns[0]?.events;
+  assert.notEqual(events, undefined);
+  const event = events?.find((candidate) => candidate.type === "action_proposed");
+  assert.notEqual(event, undefined);
+  mutate(event as unknown as Record<string, unknown>);
+  return script;
 }
 
 test("asserts every turn input and emits deterministic immutable generic events", async () => {
@@ -242,10 +274,17 @@ test("asserts every turn input and emits deterministic immutable generic events"
 
 test("fails closed for divergence in turn, objective, operations, context, or observations", async () => {
   const expected = turn(1);
+  const differentPackId = structuredClone(expected);
+  firstAdvertisedOperation(differentPackId)["capabilityPackId"] =
+    "capability:other-documents";
+  const differentPackVersion = structuredClone(expected);
+  firstAdvertisedOperation(differentPackVersion)["capabilityPackVersion"] = 2;
   const divergences: readonly AgentTurnRequest[] = [
     turn(2),
     turn(1, [], { objective: objective("A different question") }),
     turn(1, [], { advertisedOperations: [] }),
+    differentPackId,
+    differentPackVersion,
     turn(1, [], { context: [textBlock("context-2", "Different context")] }),
     turn(1, [observation("denied")]),
   ];
@@ -261,6 +300,91 @@ test("fails closed for divergence in turn, objective, operations, context, or ob
     );
     assert.equal(driver.remainingTurns, 1, "a divergent request did not consume the turn");
   }
+});
+
+test("validates exact capability identity on requests, scripts, and proposals", () => {
+  const requestMutations: readonly ((operation: Record<string, unknown>) => void)[] = [
+    (operation) => { delete operation["capabilityPackId"]; },
+    (operation) => { operation["capabilityPackId"] = ""; },
+    (operation) => { delete operation["capabilityPackVersion"]; },
+    (operation) => { operation["capabilityPackVersion"] = 0; },
+    (operation) => { operation["capabilityPackVersion"] = -1; },
+    (operation) => { operation["capabilityPackVersion"] = 1.5; },
+    (operation) => { operation["capabilityPackVersion"] = "1"; },
+  ];
+  for (const mutate of requestMutations) {
+    assert.throws(
+      () => new ScriptedAgentDriver(scriptWithRequestOperationMutation(mutate)),
+      (error: unknown) => isDomainCode(error, "invalid_input"),
+    );
+  }
+
+  const actionMutations: readonly ((event: Record<string, unknown>) => void)[] = [
+    (event) => { delete event["capabilityPackId"]; },
+    (event) => { event["capabilityPackId"] = ""; },
+    (event) => { delete event["capabilityPackVersion"]; },
+    (event) => { event["capabilityPackVersion"] = 0; },
+    (event) => { event["capabilityPackVersion"] = -1; },
+    (event) => { event["capabilityPackVersion"] = 1.5; },
+    (event) => { event["capabilityPackVersion"] = "1"; },
+  ];
+  for (const mutate of actionMutations) {
+    assert.throws(
+      () => new ScriptedAgentDriver(scriptWithActionMutation(mutate)),
+      (error: unknown) => isDomainCode(error, "invalid_input"),
+    );
+  }
+
+  assert.throws(
+    () =>
+      new ScriptedAgentDriver(
+        scriptWithActionMutation((event) => {
+          event["capabilityPackVersion"] = 2;
+        }),
+      ),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+});
+
+test("operation uniqueness and proposal matching include the pack identity", () => {
+  const request = turn(1);
+  const operation = request.advertisedOperations[0];
+  assert.notEqual(operation, undefined);
+  const withSameOperationInAnotherPack: AgentTurnRequest = {
+    ...request,
+    advertisedOperations: [
+      operation!,
+      {
+        ...operation!,
+        capabilityPackId: "capability:archive-documents",
+        capabilityPackVersion: 3,
+      },
+    ],
+  };
+  assert.doesNotThrow(
+    () =>
+      new ScriptedAgentDriver({
+        scriptId: "pack-qualified-operations",
+        turns: [{ expectedRequest: withSameOperationInAnotherPack, events: FIRST_EVENTS }],
+      }),
+  );
+
+  assert.throws(
+    () =>
+      new ScriptedAgentDriver({
+        scriptId: "duplicate-pack-qualified-operation",
+        turns: [
+          {
+            expectedRequest: {
+              ...request,
+              advertisedOperations: [operation!, structuredClone(operation!)],
+            },
+            events: FIRST_EVENTS,
+          },
+        ],
+      }),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
 });
 
 test("detects incomplete and exhausted scripts", async () => {

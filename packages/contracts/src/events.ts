@@ -165,6 +165,7 @@ export interface GenericEventPayloadMap {
   readonly ActionProposed: {
     readonly proposalId: DriverProposalId;
     readonly capabilityPackId: string;
+    readonly capabilityPackVersion: number;
     readonly operationId: string;
     readonly operationVersion: number;
     readonly input: JsonObject;

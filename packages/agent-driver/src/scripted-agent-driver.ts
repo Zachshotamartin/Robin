@@ -171,7 +171,11 @@ function validateScript(script: ScriptedAgentDriverScript): void {
       turn.expectedRequest as AgentTurnRequest,
       `script.turns[${index}].expectedRequest`,
     );
-    validateEvents(turn.events as readonly AgentDriverEvent[], index);
+    validateEvents(
+      turn.events as readonly AgentDriverEvent[],
+      index,
+      (turn.expectedRequest as AgentTurnRequest).advertisedOperations,
+    );
   }
 }
 
@@ -203,6 +207,14 @@ function validateRequest(request: AgentTurnRequest, path: string): void {
       invalidInput(`${path}.advertisedOperations[${index}] must be a plain object.`);
     }
     nonEmptyString(
+      operation.capabilityPackId,
+      `${path}.advertisedOperations[${index}].capabilityPackId`,
+    );
+    positiveInteger(
+      operation.capabilityPackVersion,
+      `${path}.advertisedOperations[${index}].capabilityPackVersion`,
+    );
+    nonEmptyString(
       operation.operationId,
       `${path}.advertisedOperations[${index}].operationId`,
     );
@@ -217,9 +229,16 @@ function validateRequest(request: AgentTurnRequest, path: string): void {
     if (!isRecord(operation.inputSchema)) {
       invalidInput(`${path}.advertisedOperations[${index}].inputSchema must be JSON.`);
     }
-    const key = `${operation.operationId}@${operation.operationVersion}`;
+    const key = canonicalize([
+      operation.capabilityPackId,
+      operation.capabilityPackVersion,
+      operation.operationId,
+      operation.operationVersion,
+    ]);
     if (operationKeys.has(key)) {
-      invalidInput(`${path}.advertisedOperations contains duplicate ${key}.`);
+      invalidInput(
+        `${path}.advertisedOperations contains a duplicate exact operation identity.`,
+      );
     }
     operationKeys.add(key);
   }
@@ -231,7 +250,11 @@ function validateRequest(request: AgentTurnRequest, path: string): void {
   }
 }
 
-function validateEvents(events: readonly AgentDriverEvent[], turnIndex: number): void {
+function validateEvents(
+  events: readonly AgentDriverEvent[],
+  turnIndex: number,
+  advertisedOperations: AgentTurnRequest["advertisedOperations"],
+): void {
   if (!Array.isArray(events) || events.length === 0) {
     invalidInput(`script.turns[${turnIndex}].events must not be empty.`);
   }
@@ -264,10 +287,23 @@ function validateEvents(events: readonly AgentDriverEvent[], turnIndex: number):
           invalidInput(`${path}.proposalId duplicates an earlier proposal.`);
         }
         proposalIds.add(event.proposalId);
+        nonEmptyString(event.capabilityPackId, `${path}.capabilityPackId`);
+        positiveInteger(event.capabilityPackVersion, `${path}.capabilityPackVersion`);
         nonEmptyString(event.operationId, `${path}.operationId`);
         positiveInteger(event.operationVersion, `${path}.operationVersion`);
         if (!isRecord(event.input)) {
           invalidInput(`${path}.input must be a JSON object.`);
+        }
+        if (
+          !advertisedOperations.some(
+            (operation) =>
+              operation.capabilityPackId === event.capabilityPackId &&
+              operation.capabilityPackVersion === event.capabilityPackVersion &&
+              operation.operationId === event.operationId &&
+              operation.operationVersion === event.operationVersion,
+          )
+        ) {
+          invalidInput(`${path} does not match an exactly advertised operation.`);
         }
         break;
       case "outcome_proposed":
