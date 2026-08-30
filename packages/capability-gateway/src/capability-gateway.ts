@@ -8,11 +8,13 @@ import {
   canonicalSha256Hex,
   createDomainError,
   isDomainError,
+  parseResourceRef,
 } from "@guard/contracts";
 import type {
   ActionPrecondition,
   JsonObject,
   NormalizedAction,
+  ResourceRef,
 } from "@guard/contracts";
 import type {
   PinnedPolicyEvaluator,
@@ -22,7 +24,11 @@ import type {
 
 import type {
   CapabilityActionProposal,
+  CapabilityAgentContextReleaseClaim,
+  CapabilityAgentContextReleaseDefinition,
+  CapabilityAgentContextReleaseDescriptor,
   CapabilityAdvertisement,
+  CapabilityContextPolicyProjection,
   CapabilityExecutionContext,
   CapabilityExecutionResult,
   CapabilityGatewayOptions,
@@ -323,7 +329,13 @@ export class CapabilityGateway {
         message: "The capability output classifier failed unexpectedly.",
       });
     }
-    const views = normalizeReleasedViews(released);
+    const views = normalizeReleasedViews(
+      released,
+      provenance.operation.agentContextRelease,
+      provenance.action,
+      provenance.actionHash,
+      structurallyValidRaw,
+    );
     assertByteBound(
       views.audit,
       "audit view",
@@ -339,6 +351,12 @@ export class CapabilityGateway {
     assertByteBound(
       views.agent,
       "agent view",
+      this.#maximumReleasedViewBytes,
+      "maximumReleasedViewBytes",
+    );
+    assertByteBound(
+      views.agentContextRelease,
+      "agent context-release descriptor",
       this.#maximumReleasedViewBytes,
       "maximumReleasedViewBytes",
     );
@@ -689,35 +707,341 @@ function normalizePrecondition(value: ActionPrecondition): ActionPrecondition {
 
 function normalizeReleasedViews(
   value: CapabilityReleasedViews,
-): CapabilityReleasedViews {
-  if (!isPlainRecord(value)) {
-    throw invariant("A capability release classifier must return an object.");
-  }
-  const expected = ["audit", "human", "agent"];
-  const keys = Object.keys(value);
-  if (
-    keys.length !== expected.length ||
-    expected.some((key) => !Object.hasOwn(value, key))
-  ) {
-    throw invariant("A capability release classifier returned incomplete views.");
-  }
+  definition: CapabilityAgentContextReleaseDefinition,
+  action: NormalizedAction,
+  actionHash: string,
+  rawResult: JsonObject,
+): {
+  readonly audit: JsonObject;
+  readonly human: JsonObject;
+  readonly agent: JsonObject;
+  readonly agentContextRelease: CapabilityAgentContextReleaseDescriptor;
+} {
+  const fields = readExactInvariantDataProperties(
+    value,
+    ["audit", "human", "agent", "agentContextRelease"],
+    "capability release classifier result",
+  );
+  const agent = snapshotObject(
+    fields["agent"],
+    "Capability agent view",
+    "invariant_violated",
+  );
   return Object.freeze({
     audit: snapshotObject(
-      value.audit,
+      fields["audit"],
       "Capability audit view",
       "invariant_violated",
     ),
     human: snapshotObject(
-      value.human,
+      fields["human"],
       "Capability human view",
       "invariant_violated",
     ),
-    agent: snapshotObject(
-      value.agent,
-      "Capability agent view",
+    agent,
+    agentContextRelease: normalizeAgentContextReleaseClaim(
+      fields["agentContextRelease"] as CapabilityAgentContextReleaseClaim,
+      definition,
+      action,
+      actionHash,
+      rawResult,
+      agent,
+    ),
+  });
+}
+
+function normalizeAgentContextReleaseClaim(
+  value: CapabilityAgentContextReleaseClaim,
+  definition: CapabilityAgentContextReleaseDefinition,
+  action: NormalizedAction,
+  actionHash: string,
+  rawResult: JsonObject,
+  agentView: JsonObject,
+): CapabilityAgentContextReleaseDescriptor {
+  const claim = readExactInvariantDataProperties(
+    value,
+    ["descriptor", "binding"],
+    "capability agent-context release claim",
+  );
+  const descriptor = normalizeAgentContextReleaseDescriptor(
+    claim["descriptor"],
+    definition,
+    action,
+  );
+  const binding = readExactInvariantDataProperties(
+    claim["binding"],
+    [
+      "schemaVersion",
+      "normalizedActionHash",
+      "rawResultHash",
+      "agentViewHash",
+      "descriptorHash",
+    ],
+    "capability agent-context release binding",
+  );
+  if (
+    binding["schemaVersion"] !== CONTRACT_SCHEMA_VERSION ||
+    binding["normalizedActionHash"] !== actionHash ||
+    binding["rawResultHash"] !== canonicalSha256Hex(rawResult) ||
+    binding["agentViewHash"] !== canonicalSha256Hex(agentView) ||
+    binding["descriptorHash"] !== canonicalSha256Hex(descriptor)
+  ) {
+    throw invariant(
+      "A capability agent-context release claim is not bound to the exact action and result.",
+    );
+  }
+  return descriptor;
+}
+
+function normalizeAgentContextReleaseDescriptor(
+  value: unknown,
+  definition: CapabilityAgentContextReleaseDefinition,
+  action: NormalizedAction,
+): CapabilityAgentContextReleaseDescriptor {
+  const fields = readExactInvariantDataProperties(
+    value,
+    [
+      "schemaVersion",
+      "sourceVersion",
+      "resource",
+      "policyProjection",
+      "classification",
+      "reason",
+    ],
+    "capability agent-context release descriptor",
+  );
+  if (fields["schemaVersion"] !== CONTRACT_SCHEMA_VERSION) {
+    throw invariant(
+      "A capability agent-context release descriptor has an unsupported schema version.",
+    );
+  }
+  const resource = normalizeReleaseResource(fields["resource"]);
+  const policyProjection = normalizeReleasePolicyProjection(
+    fields["policyProjection"],
+  );
+  if (
+    fields["sourceVersion"] !== definition.sourceVersion ||
+    fields["classification"] !== definition.classification ||
+    fields["reason"] !== definition.reason ||
+    policyProjection.catalogId !== definition.catalogId ||
+    policyProjection.catalogVersion !== definition.catalogVersion ||
+    policyProjection.catalogContentHash !== definition.catalogContentHash
+  ) {
+    throw invariant(
+      "A capability agent-context release descriptor does not match its installed operation definition.",
+    );
+  }
+  if (
+    resource.classification !== definition.classification ||
+    resource.mediaType !== "application/json"
+  ) {
+    throw invariant(
+      "A capability agent-context release resource has inconsistent classification or media type.",
+    );
+  }
+  assertReleaseMetadataBoundToAction(resource, policyProjection, action);
+  return Object.freeze({
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    sourceVersion: definition.sourceVersion,
+    resource,
+    policyProjection,
+    classification: definition.classification,
+    reason: definition.reason,
+  });
+}
+
+function normalizeReleaseResource(value: unknown): ResourceRef {
+  try {
+    return parseResourceRef(value);
+  } catch {
+    throw invariant("A capability agent-context release resource is malformed.");
+  }
+}
+
+function normalizeReleasePolicyProjection(
+  value: unknown,
+): CapabilityContextPolicyProjection {
+  const fields = readExactInvariantDataProperties(
+    value,
+    [
+      "schemaVersion",
+      "catalogId",
+      "catalogVersion",
+      "catalogContentHash",
+      "resourceAttributes",
+      "requestAttributes",
+    ],
+    "capability context-policy projection",
+  );
+  if (
+    fields["schemaVersion"] !== CONTRACT_SCHEMA_VERSION ||
+    typeof fields["catalogId"] !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(fields["catalogId"]) ||
+    fields["catalogId"] === "guard.base" ||
+    fields["catalogId"] === "guard.context" ||
+    typeof fields["catalogVersion"] !== "number" ||
+    !Number.isSafeInteger(fields["catalogVersion"]) ||
+    fields["catalogVersion"] < 1 ||
+    typeof fields["catalogContentHash"] !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(fields["catalogContentHash"])
+  ) {
+    throw invariant("A capability context-policy projection identity is malformed.");
+  }
+  return Object.freeze({
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    catalogId: fields["catalogId"],
+    catalogVersion: fields["catalogVersion"],
+    catalogContentHash: fields["catalogContentHash"],
+    resourceAttributes: snapshotObject(
+      fields["resourceAttributes"],
+      "Capability context-policy resource attributes",
+      "invariant_violated",
+    ),
+    requestAttributes: snapshotObject(
+      fields["requestAttributes"],
+      "Capability context-policy request attributes",
       "invariant_violated",
     ),
   });
+}
+
+const RESERVED_CONTEXT_RESOURCE_ATTRIBUTES = new Set([
+  "scheme",
+  "sourceId",
+  "classification",
+  "mediaType",
+  "kind",
+]);
+const RESERVED_CONTEXT_REQUEST_ATTRIBUTES = new Set([
+  "intent",
+  "reason",
+  "turnId",
+  "resourceBytes",
+  "selectedBytes",
+  "sourceBytes",
+  "truncated",
+  "secretCategories",
+  "promptInjectionTags",
+]);
+
+function assertReleaseMetadataBoundToAction(
+  resource: ResourceRef,
+  projection: CapabilityContextPolicyProjection,
+  action: NormalizedAction,
+): void {
+  if (
+    resource.scheme !== action.resource["scheme"] ||
+    resource.sourceId !== action.resource["sourceId"] ||
+    resource.classification !== action.resource["classification"] ||
+    Object.keys(resource.locator).length === 0
+  ) {
+    throw invariant(
+      "A capability agent-context release resource is not bound to the normalized action.",
+    );
+  }
+  assertBoundProjectionAttributes(
+    projection.resourceAttributes,
+    action.resource,
+    resource.locator,
+    RESERVED_CONTEXT_RESOURCE_ATTRIBUTES,
+    "resource",
+  );
+  assertBoundProjectionAttributes(
+    projection.requestAttributes,
+    action.request,
+    null,
+    RESERVED_CONTEXT_REQUEST_ATTRIBUTES,
+    "request",
+  );
+  for (const [key, locatorValue] of Object.entries(resource.locator)) {
+    const actionValue = action.resource[key];
+    const projectionValue = projection.resourceAttributes[key];
+    const expectedValue = actionValue ?? projectionValue;
+    if (
+      expectedValue === undefined ||
+      canonicalSha256Hex(expectedValue) !== canonicalSha256Hex(locatorValue)
+    ) {
+      throw invariant(
+        "A capability agent-context resource locator is not bound to action metadata.",
+      );
+    }
+  }
+}
+
+function assertBoundProjectionAttributes(
+  attributes: JsonObject,
+  actionAttributes: JsonObject,
+  locator: JsonObject | null,
+  reserved: ReadonlySet<string>,
+  section: "resource" | "request",
+): void {
+  for (const [key, value] of Object.entries(attributes)) {
+    if (reserved.has(key)) {
+      throw invariant(
+        `A capability context-policy ${section} projection shadows broker metadata.`,
+      );
+    }
+    const actionValue = actionAttributes[key];
+    const locatorValue = locator?.[key];
+    const expectedValue = actionValue ?? locatorValue;
+    if (
+      expectedValue === undefined ||
+      canonicalSha256Hex(expectedValue) !== canonicalSha256Hex(value)
+    ) {
+      throw invariant(
+        `A capability context-policy ${section} projection is not bound to the normalized action.`,
+      );
+    }
+  }
+}
+
+function readExactInvariantDataProperties(
+  value: unknown,
+  expected: readonly string[],
+  label: string,
+): Readonly<Record<string, unknown>> {
+  try {
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      Array.isArray(value) ||
+      isProxy(value)
+    ) {
+      throw new TypeError();
+    }
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError();
+    }
+    const keys = Reflect.ownKeys(value);
+    if (
+      keys.length !== expected.length ||
+      keys.some((key) => typeof key !== "string") ||
+      expected.some((key) => !keys.includes(key))
+    ) {
+      throw new TypeError();
+    }
+    const captured: Record<string, unknown> = {};
+    for (const key of expected) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (
+        descriptor === undefined ||
+        !("value" in descriptor) ||
+        descriptor.enumerable !== true
+      ) {
+        throw new TypeError();
+      }
+      Object.defineProperty(captured, key, {
+        value: descriptor.value,
+        enumerable: true,
+        configurable: false,
+        writable: false,
+      });
+    }
+    return Object.freeze(captured);
+  } catch {
+    throw invariant(`The ${label} must contain exact enumerable data properties.`);
+  }
 }
 
 function validateExecutionContext(

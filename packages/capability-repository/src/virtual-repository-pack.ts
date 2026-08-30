@@ -1,15 +1,22 @@
 import { isProxy } from "node:util/types";
 
-import { createDomainError, sha256Hex } from "@guard/contracts";
-import type { JsonObject } from "@guard/contracts";
+import {
+  CONTRACT_SCHEMA_VERSION,
+  createDomainError,
+  sha256Hex,
+} from "@guard/contracts";
+import type { JsonObject, NormalizedAction } from "@guard/contracts";
 
-import type {
-  CapabilityOperation,
-  CapabilityOperationReference,
-  CapabilityPack,
+import {
+  bindCapabilityAgentContextRelease,
+  type CapabilityAgentContextReleaseDefinition,
+  type CapabilityOperation,
+  type CapabilityOperationReference,
+  type CapabilityPack,
 } from "@guard/capability-gateway";
 
 import { snapshotBoundaryObject } from "./boundary.js";
+import { REPOSITORY_POLICY_ATTRIBUTE_CATALOG } from "./policy-catalog.js";
 import { normalizeRepositoryPath } from "./repository-path.js";
 import { VirtualRepository } from "./virtual-repository.js";
 
@@ -49,6 +56,30 @@ const DEFAULT_LIMITS: VirtualRepositoryPackLimits = Object.freeze({
   maximumReadBytes: 64 * 1024,
   maximumPatchBytes: 256 * 1024,
 });
+
+function agentContextReleaseDefinition(
+  reason: string,
+): CapabilityAgentContextReleaseDefinition {
+  return Object.freeze({
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    sourceVersion: 1,
+    catalogId: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.catalogId,
+    catalogVersion: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion,
+    catalogContentHash: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
+    classification: "fixture",
+    reason,
+  });
+}
+
+const LIST_AGENT_CONTEXT_RELEASE = agentContextReleaseDefinition(
+  "capability.list_files.output",
+);
+const READ_AGENT_CONTEXT_RELEASE = agentContextReleaseDefinition(
+  "capability.read_file.output",
+);
+const PATCH_AGENT_CONTEXT_RELEASE = agentContextReleaseDefinition(
+  "capability.propose_patch.output",
+);
 
 export function createVirtualRepositoryPack(
   repository: VirtualRepository,
@@ -109,6 +140,7 @@ function listOperation(
       },
       sideEffectClass: "none",
     },
+    agentContextRelease: LIST_AGENT_CONTEXT_RELEASE,
     normalize(input) {
       const root = normalizeRepositoryPath(input["root"], { allowRoot: true });
       const maxResults = input["maxResults"] as number;
@@ -147,6 +179,7 @@ function listOperation(
     release(raw, action) {
       const files = raw["files"]!;
       const truncated = raw["truncated"]!;
+      const agent: JsonObject = { files, truncated };
       return {
         audit: {
           root: action.normalizedInput["root"]!,
@@ -159,7 +192,13 @@ function listOperation(
             Array.isArray(files) ? files.length : 0,
           )} virtual path(s).`,
         },
-        agent: { files, truncated },
+        agent,
+        agentContextRelease: repositoryAgentContextRelease(
+          LIST_AGENT_CONTEXT_RELEASE,
+          action,
+          raw,
+          agent,
+        ),
       };
     },
   };
@@ -207,6 +246,7 @@ function readOperation(
       },
       sideEffectClass: "none",
     },
+    agentContextRelease: READ_AGENT_CONTEXT_RELEASE,
     normalize(input) {
       const path = normalizeRepositoryPath(input["path"], { allowRoot: false });
       const startLine = input["startLine"] as number;
@@ -265,7 +305,12 @@ function readOperation(
         truncated: bounded.truncated,
       };
     },
-    release(raw) {
+    release(raw, action) {
+      const agent: JsonObject = {
+        path: raw["path"]!,
+        content: raw["content"]!,
+        truncated: raw["truncated"]!,
+      };
       return {
         audit: {
           path: raw["path"]!,
@@ -278,11 +323,13 @@ function readOperation(
             raw["path"],
           )}.`,
         },
-        agent: {
-          path: raw["path"]!,
-          content: raw["content"]!,
-          truncated: raw["truncated"]!,
-        },
+        agent,
+        agentContextRelease: repositoryAgentContextRelease(
+          READ_AGENT_CONTEXT_RELEASE,
+          action,
+          raw,
+          agent,
+        ),
       };
     },
   };
@@ -334,6 +381,7 @@ function patchOperation(
       },
       sideEffectClass: "none",
     },
+    agentContextRelease: PATCH_AGENT_CONTEXT_RELEASE,
     normalize(input) {
       const path = normalizeRepositoryPath(input["path"], { allowRoot: false });
       const replacement = (input["replacement"] as string).replace(/\r\n?/gu, "\n");
@@ -383,7 +431,8 @@ function patchOperation(
         replacementSha256: action.normalizedInput["replacementSha256"]!,
       };
     },
-    release(raw) {
+    release(raw, action) {
+      const agent: JsonObject = { path: raw["path"]!, patch: raw["patch"]! };
       return {
         audit: {
           path: raw["path"]!,
@@ -397,10 +446,52 @@ function patchOperation(
           )}; no fixture content was changed.`,
           patch: raw["patch"]!,
         },
-        agent: { path: raw["path"]!, patch: raw["patch"]! },
+        agent,
+        agentContextRelease: repositoryAgentContextRelease(
+          PATCH_AGENT_CONTEXT_RELEASE,
+          action,
+          raw,
+          agent,
+        ),
       };
     },
   };
+}
+
+function repositoryAgentContextRelease(
+  definition: CapabilityAgentContextReleaseDefinition,
+  action: NormalizedAction,
+  raw: JsonObject,
+  agent: JsonObject,
+) {
+  const path = action.resource["path"] as string;
+  return bindCapabilityAgentContextRelease(
+    {
+      schemaVersion: CONTRACT_SCHEMA_VERSION,
+      sourceVersion: definition.sourceVersion,
+      resource: {
+        schemaVersion: CONTRACT_SCHEMA_VERSION,
+        scheme: "repo",
+        sourceId: "virtual-repository",
+        locator: { path },
+        mediaType: "application/json",
+        classification: definition.classification,
+      },
+      policyProjection: {
+        schemaVersion: CONTRACT_SCHEMA_VERSION,
+        catalogId: definition.catalogId,
+        catalogVersion: definition.catalogVersion,
+        catalogContentHash: definition.catalogContentHash,
+        resourceAttributes: { path },
+        requestAttributes: {},
+      },
+      classification: definition.classification,
+      reason: definition.reason,
+    },
+    action,
+    raw,
+    agent,
+  );
 }
 
 function logicalLines(content: string): readonly string[] {

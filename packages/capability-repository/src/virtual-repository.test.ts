@@ -12,6 +12,7 @@ import type { PinnedPolicyEvaluator, PolicyDecision } from "@guard/policy-engine
 
 import {
   VIRTUAL_REPOSITORY_REFERENCES,
+  REPOSITORY_POLICY_ATTRIBUTE_CATALOG,
   VirtualRepository,
   createVirtualRepositoryPack,
   type VirtualRepositoryLimits,
@@ -147,6 +148,11 @@ test("lists virtual fixture paths in stable order with a hard result bound", asy
     files: ["src/alpha.ts"],
     truncated: true,
   });
+  assertRepositoryAgentContextRelease(
+    result.agentContextRelease,
+    "src",
+    "capability.list_files.output",
+  );
 });
 
 test("reads only a bounded line range and truncates at a valid UTF-8 boundary", async () => {
@@ -168,6 +174,11 @@ test("reads only a bounded line range and truncates at a valid UTF-8 boundary", 
     content: "two\nthree",
     truncated: false,
   });
+  assertRepositoryAgentContextRelease(
+    full.result.agentContextRelease,
+    "src/alpha.ts",
+    "capability.read_file.output",
+  );
 
   const unicodeRepository = new VirtualRepository(
     { "unicode.txt": "ééé" },
@@ -234,7 +245,44 @@ test("proposes an exact bounded patch without mutating the virtual fixture", asy
   assert.match(result.raw["patch"] as string, /\+TWO\n/u);
   assert.equal(result.agent["path"], "src/alpha.ts");
   assert.equal(result.agent["patch"], result.raw["patch"]);
+  assertRepositoryAgentContextRelease(
+    result.agentContextRelease,
+    "src/alpha.ts",
+    "capability.propose_patch.output",
+  );
 });
+
+function assertRepositoryAgentContextRelease(
+  descriptor: Awaited<ReturnType<CapabilityGateway["execute"]>>["agentContextRelease"],
+  path: string,
+  reason: string,
+): void {
+  assert.deepEqual(descriptor, {
+    schemaVersion: 1,
+    sourceVersion: 1,
+    resource: {
+      schemaVersion: 1,
+      scheme: "repo",
+      sourceId: "virtual-repository",
+      locator: { path },
+      mediaType: "application/json",
+      classification: "fixture",
+    },
+    policyProjection: {
+      schemaVersion: 1,
+      catalogId: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.catalogId,
+      catalogVersion: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion,
+      catalogContentHash: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
+      resourceAttributes: { path },
+      requestAttributes: {},
+    },
+    classification: "fixture",
+    reason,
+  });
+  assert.equal(Object.isFrozen(descriptor), true);
+  assert.equal(Object.isFrozen(descriptor.policyProjection), true);
+  assert.equal(Object.isFrozen(descriptor.policyProjection.resourceAttributes), true);
+}
 
 test("rejects traversal, absolute, drive, UNC, encoded, and ambiguous paths before execution", async () => {
   const invalidPaths = [

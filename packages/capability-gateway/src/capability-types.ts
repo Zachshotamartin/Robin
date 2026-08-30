@@ -3,6 +3,7 @@ import type {
   ActionPrecondition,
   JsonObject,
   NormalizedAction,
+  ResourceRef,
   SideEffectClass,
   VersionedSchema,
 } from "@guard/contracts";
@@ -48,20 +49,72 @@ export interface CapabilityGatewayOptions {
   readonly maximumInputBytes?: number;
   /** Bound checked before the trusted validator evaluates a handler result. */
   readonly maximumRawOutputBytes?: number;
-  /** Independent bound applied to each audit, human, and agent view. */
+  /** Independent bound applied to each view and the context-release descriptor. */
   readonly maximumReleasedViewBytes?: number;
-  /** Aggregate bound applied to the three released views together. */
+  /** Aggregate bound applied to all three views plus the release descriptor. */
   readonly maximumCombinedReleasedViewBytes?: number;
+}
+
+/**
+ * Immutable installation-time policy identity for one operation's agent view.
+ * The gateway captures this separately from the dynamic release callback so a
+ * callback cannot redirect an output to another catalog or classification.
+ */
+export interface CapabilityAgentContextReleaseDefinition {
+  readonly schemaVersion: 1;
+  readonly sourceVersion: number;
+  readonly catalogId: string;
+  readonly catalogVersion: number;
+  readonly catalogContentHash: string;
+  readonly classification: string;
+  readonly reason: string;
+}
+
+/** Structural twin of the broker's source-owned context policy projection. */
+export interface CapabilityContextPolicyProjection {
+  readonly schemaVersion: 1;
+  readonly catalogId: string;
+  readonly catalogVersion: number;
+  readonly catalogContentHash: string;
+  readonly resourceAttributes: JsonObject;
+  readonly requestAttributes: JsonObject;
+}
+
+/**
+ * Everything needed to release `CapabilityExecutionResult.agent` through the
+ * context broker except the runtime-owned turn ID and the agent value itself.
+ */
+export interface CapabilityAgentContextReleaseDescriptor {
+  readonly schemaVersion: 1;
+  readonly sourceVersion: number;
+  readonly resource: ResourceRef;
+  readonly policyProjection: CapabilityContextPolicyProjection;
+  readonly classification: string;
+  readonly reason: string;
+}
+
+/** Operation claim tying a descriptor to the exact action, raw result, and view. */
+export interface CapabilityAgentContextReleaseClaim {
+  readonly descriptor: CapabilityAgentContextReleaseDescriptor;
+  readonly binding: {
+    readonly schemaVersion: 1;
+    readonly normalizedActionHash: string;
+    readonly rawResultHash: string;
+    readonly agentViewHash: string;
+    readonly descriptorHash: string;
+  };
 }
 
 export interface CapabilityReleasedViews {
   readonly audit: JsonObject;
   readonly human: JsonObject;
   readonly agent: JsonObject;
+  readonly agentContextRelease: CapabilityAgentContextReleaseClaim;
 }
 
 export interface CapabilityOperation {
   readonly definition: CapabilityOperationDefinition;
+  readonly agentContextRelease: CapabilityAgentContextReleaseDefinition;
   normalize(
     input: JsonObject,
     context: CapabilityNormalizationContext,
@@ -119,6 +172,7 @@ export interface CapabilityExecutionResult {
   readonly audit: JsonObject;
   readonly human: JsonObject;
   readonly agent: JsonObject;
+  readonly agentContextRelease: CapabilityAgentContextReleaseDescriptor;
 }
 
 export interface RegisteredOperationDescriptor
@@ -126,6 +180,7 @@ export interface RegisteredOperationDescriptor
   readonly description: string;
   readonly inputSchema: VersionedSchema;
   readonly sideEffectClass: SideEffectClass;
+  readonly agentContextRelease: CapabilityAgentContextReleaseDefinition;
 }
 
 export interface RegisteredPackDescriptor {

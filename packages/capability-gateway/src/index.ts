@@ -1,4 +1,5 @@
 export { CapabilityGateway } from "./capability-gateway.js";
+export { bindCapabilityAgentContextRelease } from "./agent-context-release.js";
 export {
   CapabilityPackRegistry,
   DEFAULT_MAXIMUM_OPERATION_SCHEMA_BYTES,
@@ -6,8 +7,12 @@ export {
 export type { CapabilityPackRegistryOptions } from "./capability-pack-registry.js";
 export type {
   AdvertisedCapabilityOperation,
+  CapabilityAgentContextReleaseClaim,
+  CapabilityAgentContextReleaseDefinition,
+  CapabilityAgentContextReleaseDescriptor,
   CapabilityActionProposal,
   CapabilityAdvertisement,
+  CapabilityContextPolicyProjection,
   CapabilityExecutionContext,
   CapabilityExecutionResult,
   EvaluatedCapabilityAction,

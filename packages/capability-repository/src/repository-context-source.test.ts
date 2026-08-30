@@ -508,9 +508,9 @@ test("releases repository content through broker policy projection and provider-
     (semantic["provenance"] as JsonObject)["policyCatalogContentHash"],
     REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
   );
-  const assembly = contextBroker.assembleAgentContext({
+  const assembly = await contextBroker.assembleAgentContext({
     turnId: "turn.repository",
-    providerRequestId: "provider.repository",
+    agentRequestId: "provider.repository",
     orderedItemIds: [result.item.itemId],
   });
   assert.equal(assembly.utf8Text, result.item.serializedValue);

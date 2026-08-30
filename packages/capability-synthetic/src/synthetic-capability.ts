@@ -6,8 +6,16 @@ import {
 } from "@guard/contracts";
 import type { JsonObject, TaskProfile } from "@guard/contracts";
 
-import { InMemoryContextSource } from "@guard/context-broker";
-import type { CapabilityOperationReference, CapabilityPack } from "@guard/capability-gateway";
+import {
+  bindCapabilityAgentContextRelease,
+  type CapabilityAgentContextReleaseDefinition,
+  type CapabilityOperationReference,
+  type CapabilityPack,
+} from "@guard/capability-gateway";
+import {
+  InMemoryContextSource,
+  MEMORY_POLICY_ATTRIBUTE_CATALOG,
+} from "@guard/context-broker";
 import {
   compilePolicySnapshot,
   createPolicySnapshotManifest,
@@ -23,6 +31,16 @@ export const SYNTHETIC_TRANSFORM_REFERENCE: CapabilityOperationReference =
   });
 
 const MAXIMUM_TRANSFORM_BYTES = 256;
+const SYNTHETIC_AGENT_CONTEXT_RELEASE: CapabilityAgentContextReleaseDefinition =
+  Object.freeze({
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    sourceVersion: SYNTHETIC_TRANSFORM_REFERENCE.operationVersion,
+    catalogId: MEMORY_POLICY_ATTRIBUTE_CATALOG.catalogId,
+    catalogVersion: MEMORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion,
+    catalogContentHash: MEMORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
+    classification: "synthetic",
+    reason: "capability.transform_text.output",
+  });
 
 const SYNTHETIC_POLICY_SOURCE = `policy "allow-synthetic-transform" priority 100 {
   when action.pack == "synthetic.transform" and action.operation == "transform_text" and action.side_effect == "none"
@@ -92,6 +110,7 @@ export function createSyntheticTransformPack(): CapabilityPack {
           },
           sideEffectClass: "none",
         },
+        agentContextRelease: SYNTHETIC_AGENT_CONTEXT_RELEASE,
         normalize(input) {
           const text = (input["text"] as string).normalize("NFC").trim();
           const mode = input["mode"] as "uppercase" | "lowercase";
@@ -146,6 +165,8 @@ export function createSyntheticTransformPack(): CapabilityPack {
         release(raw, action) {
           const inputBytes = raw["inputBytes"]!;
           const outputBytes = raw["outputBytes"]!;
+          const agent: JsonObject = { transformed: raw["transformed"]! };
+          const recordId = `transform:${action.actionId}`;
           return {
             audit: {
               inputBytes,
@@ -157,7 +178,35 @@ export function createSyntheticTransformPack(): CapabilityPack {
                 outputBytes,
               )} bytes.`,
             },
-            agent: { transformed: raw["transformed"]! },
+            agent,
+            agentContextRelease: bindCapabilityAgentContextRelease(
+              {
+                schemaVersion: CONTRACT_SCHEMA_VERSION,
+                sourceVersion: SYNTHETIC_AGENT_CONTEXT_RELEASE.sourceVersion,
+                resource: {
+                  schemaVersion: CONTRACT_SCHEMA_VERSION,
+                  scheme: "memory",
+                  sourceId: "synthetic:transform-input",
+                  locator: { recordId },
+                  mediaType: "application/json",
+                  classification: SYNTHETIC_AGENT_CONTEXT_RELEASE.classification,
+                },
+                policyProjection: {
+                  schemaVersion: CONTRACT_SCHEMA_VERSION,
+                  catalogId: SYNTHETIC_AGENT_CONTEXT_RELEASE.catalogId,
+                  catalogVersion: SYNTHETIC_AGENT_CONTEXT_RELEASE.catalogVersion,
+                  catalogContentHash:
+                    SYNTHETIC_AGENT_CONTEXT_RELEASE.catalogContentHash,
+                  resourceAttributes: { recordId },
+                  requestAttributes: {},
+                },
+                classification: SYNTHETIC_AGENT_CONTEXT_RELEASE.classification,
+                reason: SYNTHETIC_AGENT_CONTEXT_RELEASE.reason,
+              },
+              action,
+              raw,
+              agent,
+            ),
           };
         },
       },

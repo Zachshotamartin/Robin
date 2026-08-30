@@ -23,6 +23,7 @@ import { isPlainRecord, snapshot, snapshotObject } from "./immutable.js";
 export interface CompiledOperation {
   readonly reference: CapabilityOperationReference;
   readonly definition: CapabilityOperation["definition"];
+  readonly agentContextRelease: CapabilityOperation["agentContextRelease"];
   readonly normalize: CapabilityOperation["normalize"];
   readonly execute: CapabilityOperation["execute"];
   readonly release: CapabilityOperation["release"];
@@ -132,6 +133,7 @@ export class CapabilityPackRegistry {
         const compiled: CompiledOperation = Object.freeze({
           reference,
           definition,
+          agentContextRelease: operation.agentContextRelease,
           normalize: operation.normalize,
           execute: operation.execute,
           release: operation.release,
@@ -145,6 +147,7 @@ export class CapabilityPackRegistry {
             description: definition.description,
             inputSchema,
             sideEffectClass: definition.sideEffectClass,
+            agentContextRelease: operation.agentContextRelease,
           }),
         );
       }
@@ -334,7 +337,7 @@ function inspectPack(value: unknown): InspectedPack {
 function inspectOperation(value: unknown): CapabilityOperation {
   const operation = inspectTrustedRecord(
     value,
-    ["definition", "normalize", "execute", "release"],
+    ["definition", "agentContextRelease", "normalize", "execute", "release"],
     "capability operation",
   );
   const normalize = operation["normalize"];
@@ -354,6 +357,9 @@ function inspectOperation(value: unknown): CapabilityOperation {
   const definition = normalizeOperationDefinition(operation["definition"]);
   return Object.freeze({
     definition,
+    agentContextRelease: normalizeAgentContextReleaseDefinition(
+      operation["agentContextRelease"],
+    ),
     normalize: Function.prototype.bind.call(
       normalize,
       original,
@@ -366,6 +372,61 @@ function inspectOperation(value: unknown): CapabilityOperation {
       release,
       original,
     ) as CapabilityOperation["release"],
+  });
+}
+
+function normalizeAgentContextReleaseDefinition(
+  value: unknown,
+): CapabilityOperation["agentContextRelease"] {
+  const definition = inspectTrustedRecord(
+    value,
+    [
+      "schemaVersion",
+      "sourceVersion",
+      "catalogId",
+      "catalogVersion",
+      "catalogContentHash",
+      "classification",
+      "reason",
+    ],
+    "capability agent-context release definition",
+  );
+  if (definition["schemaVersion"] !== 1) {
+    throw invalidInput(
+      "A capability agent-context release definition has an unsupported schema version.",
+    );
+  }
+  validatePositive(definition["sourceVersion"], "release sourceVersion");
+  validateSafeIdentifier(definition["catalogId"], "release catalogId");
+  if (
+    definition["catalogId"] === "guard.base" ||
+    definition["catalogId"] === "guard.context"
+  ) {
+    throw invalidInput(
+      "A capability operation cannot claim a broker-owned policy catalog.",
+    );
+  }
+  validatePositive(definition["catalogVersion"], "release catalogVersion");
+  const catalogContentHash = definition["catalogContentHash"];
+  if (
+    typeof catalogContentHash !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(catalogContentHash)
+  ) {
+    throw invalidInput("A capability release catalog hash must be canonical SHA-256.");
+  }
+  validateSafeIdentifier(
+    definition["classification"],
+    "release classification",
+  );
+  validateSafeIdentifier(definition["reason"], "release reason");
+  return Object.freeze({
+    schemaVersion: 1,
+    sourceVersion: definition["sourceVersion"],
+    catalogId: definition["catalogId"],
+    catalogVersion: definition["catalogVersion"],
+    catalogContentHash,
+    classification: definition["classification"],
+    reason: definition["reason"],
   });
 }
 
@@ -630,6 +691,18 @@ function validateNonEmpty(value: unknown, field: string): asserts value is strin
 function validatePositive(value: unknown, field: string): asserts value is number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
     throw invalidInput(`${field} must be a positive safe integer.`);
+  }
+}
+
+function validateSafeIdentifier(
+  value: unknown,
+  field: string,
+): asserts value is string {
+  if (
+    typeof value !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value)
+  ) {
+    throw invalidInput(`${field} must be a canonical safe identifier.`);
   }
 }
 

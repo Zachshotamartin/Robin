@@ -4,6 +4,7 @@ import test from "node:test";
 import { ActionIdKind, canonicalize, isDomainError } from "@guard/contracts";
 
 import { CapabilityGateway, CapabilityPackRegistry } from "@guard/capability-gateway";
+import { MEMORY_POLICY_ATTRIBUTE_CATALOG } from "@guard/context-broker";
 import { createPinnedPolicyEvaluator } from "@guard/policy-engine";
 
 import {
@@ -96,6 +97,30 @@ test("normalizes and executes a deterministic transform through the generic gate
   });
   assert.deepEqual(result.human, { summary: "Transformed 5 bytes into 5 bytes." });
   assert.deepEqual(result.agent, { transformed: "CAFÉ" });
+  assert.deepEqual(result.agentContextRelease, {
+    schemaVersion: 1,
+    sourceVersion: 1,
+    resource: {
+      schemaVersion: 1,
+      scheme: "memory",
+      sourceId: "synthetic:transform-input",
+      locator: { recordId: `transform:${ACTION_ID}` },
+      mediaType: "application/json",
+      classification: "synthetic",
+    },
+    policyProjection: {
+      schemaVersion: 1,
+      catalogId: MEMORY_POLICY_ATTRIBUTE_CATALOG.catalogId,
+      catalogVersion: MEMORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion,
+      catalogContentHash: MEMORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
+      resourceAttributes: { recordId: `transform:${ACTION_ID}` },
+      requestAttributes: {},
+    },
+    classification: "synthetic",
+    reason: "capability.transform_text.output",
+  });
+  assert.equal(Object.isFrozen(result.agentContextRelease), true);
+  assert.equal(Object.isFrozen(result.agentContextRelease.resource.locator), true);
 });
 
 test("applies handwritten semantic bounds after schema validation", async () => {

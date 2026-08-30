@@ -23,12 +23,14 @@ import type {
 import type { CompiledJsonObjectSchema } from "@guard/schema-validation";
 
 import {
+  bindCapabilityAgentContextRelease,
   CapabilityGateway,
   CapabilityPackRegistry,
   DEFAULT_MAXIMUM_OPERATION_SCHEMA_BYTES,
   type CapabilityOperation,
   type CapabilityOperationReference,
   type CapabilityPack,
+  type CapabilityReleasedViews,
   type CapabilitySemanticNormalization,
 } from "./index.js";
 import { runCompiledValidation } from "./capability-pack-registry.js";
@@ -202,6 +204,15 @@ function counterOperation(
       },
       sideEffectClass: "none",
     },
+    agentContextRelease: {
+      schemaVersion: 1,
+      sourceVersion: operationVersion,
+      catalogId: "fixture.counter",
+      catalogVersion: 1,
+      catalogContentHash: "b".repeat(64),
+      classification: "internal",
+      reason: "capability.counter.output",
+    },
     normalize(input): CapabilitySemanticNormalization {
       spies.normalizeCalls += 1;
       const value = input["value"] as number;
@@ -244,19 +255,65 @@ function counterOperation(
     },
     release(raw, action) {
       spies.releaseCalls += 1;
+      const agent: JsonObject = {
+        next: raw["next"]!,
+        ...(options.releasedPadding === undefined
+          ? {}
+          : { padding: options.releasedPadding }),
+      };
       return {
         audit: {
           actionId: action.actionId,
           outputKeys: Object.keys(raw).sort(),
         },
         human: { summary: `Counter is ${String(raw["next"])}` },
-        agent: {
-          next: raw["next"]!,
-          ...(options.releasedPadding === undefined
-            ? {}
-            : { padding: options.releasedPadding }),
-        },
+        agent,
+        agentContextRelease: bindCapabilityAgentContextRelease(
+          {
+            schemaVersion: 1,
+            sourceVersion: operationVersion,
+            resource: {
+              schemaVersion: 1,
+              scheme: "fixture",
+              sourceId: "fixture.counter",
+              locator: { counter: action.resource["counter"]! },
+              mediaType: "application/json",
+              classification: "internal",
+            },
+            policyProjection: {
+              schemaVersion: 1,
+              catalogId: "fixture.counter",
+              catalogVersion: 1,
+              catalogContentHash: "b".repeat(64),
+              resourceAttributes: { counter: action.resource["counter"]! },
+              requestAttributes: {},
+            },
+            classification: "internal",
+            reason: "capability.counter.output",
+          },
+          action,
+          raw,
+          agent,
+        ),
       };
+    },
+  };
+}
+
+function counterOperationWithReleaseMutation(
+  operationSpies: OperationSpies,
+  mutate: (
+    released: CapabilityReleasedViews,
+    raw: JsonObject,
+    action: NormalizedAction,
+  ) => unknown,
+): CapabilityOperation {
+  const operation = counterOperation(operationSpies);
+  return {
+    ...operation,
+    async release(raw, action) {
+      const released = await operation.release(raw, action);
+      return mutate(released, raw, action) as CapabilityReleasedViews;
     },
   };
 }
@@ -302,6 +359,29 @@ function proposal(input: unknown = { value: 4, label: " alpha " }) {
   };
 }
 
+async function assertMutatedReleaseRejected(
+  mutate: Parameters<typeof counterOperationWithReleaseMutation>[1],
+): Promise<void> {
+  const calls = spies();
+  const registry = new CapabilityPackRegistry([
+    pack(counterOperationWithReleaseMutation(calls, mutate)),
+  ]);
+  const gateway = new CapabilityGateway(registry, policyEvaluator());
+  const prepared = await gateway.normalize(
+    proposal(),
+    normalizationContext(),
+    registry.createAdvertisement([REFERENCE]),
+  );
+  await assert.rejects(
+    gateway.execute(gateway.evaluate(prepared), {
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  assert.equal(calls.executeCalls, 1);
+  assert.equal(calls.releaseCalls, 1);
+}
+
 test("compiles strict versioned schemas at registry startup", () => {
   const validSpies = spies();
   const valid = new CapabilityPackRegistry([pack(counterOperation(validSpies))]);
@@ -330,6 +410,15 @@ test("compiles strict versioned schemas at registry startup", () => {
             },
           },
           sideEffectClass: "none",
+          agentContextRelease: {
+            schemaVersion: 1,
+            sourceVersion: 1,
+            catalogId: "fixture.counter",
+            catalogVersion: 1,
+            catalogContentHash: "b".repeat(64),
+            classification: "internal",
+            reason: "capability.counter.output",
+          },
         },
       ],
     },
@@ -509,6 +598,7 @@ test("inspects trusted executable pack installations without invoking accessors"
   let definitionGetterCalls = 0;
   const baseOperation = counterOperation(spies());
   const accessorOperation: Record<string, unknown> = {
+    agentContextRelease: baseOperation.agentContextRelease,
     normalize: baseOperation.normalize,
     execute: baseOperation.execute,
     release: baseOperation.release,
@@ -533,6 +623,69 @@ test("inspects trusted executable pack installations without invoking accessors"
       isSanitizedDomainCode(error, "invalid_input", installationCanary),
   );
   assert.equal(definitionGetterCalls, 0, "definition getter must never run");
+
+  let releaseDefinitionGetterCalls = 0;
+  const accessorReleaseDefinitionOperation = {
+    ...baseOperation,
+  } as Record<string, unknown>;
+  Object.defineProperty(
+    accessorReleaseDefinitionOperation,
+    "agentContextRelease",
+    {
+      enumerable: true,
+      get() {
+        releaseDefinitionGetterCalls += 1;
+        throw new Error(installationCanary);
+      },
+    },
+  );
+  assert.throws(
+    () =>
+      new CapabilityPackRegistry([
+        pack(accessorReleaseDefinitionOperation as unknown as CapabilityOperation),
+      ]),
+    (error: unknown) =>
+      isSanitizedDomainCode(error, "invalid_input", installationCanary),
+  );
+  assert.equal(
+    releaseDefinitionGetterCalls,
+    0,
+    "release-definition getter must never run",
+  );
+
+  let releaseDefinitionProxyCalls = 0;
+  const proxiedReleaseDefinition = new Proxy(baseOperation.agentContextRelease, {
+    get() {
+      releaseDefinitionProxyCalls += 1;
+      throw new Error(installationCanary);
+    },
+  });
+  assert.throws(
+    () =>
+      new CapabilityPackRegistry([
+        pack({
+          ...baseOperation,
+          agentContextRelease: proxiedReleaseDefinition,
+        }),
+      ]),
+    (error: unknown) =>
+      isSanitizedDomainCode(error, "invalid_input", installationCanary),
+  );
+  assert.equal(releaseDefinitionProxyCalls, 0, "release-definition proxy stays inert");
+
+  assert.throws(
+    () =>
+      new CapabilityPackRegistry([
+        pack({
+          ...baseOperation,
+          agentContextRelease: {
+            ...baseOperation.agentContextRelease,
+            unexpected: true,
+          } as unknown as CapabilityOperation["agentContextRelease"],
+        }),
+      ]),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
 
   let proxyGetCalls = 0;
   const proxiedPack = new Proxy(pack(counterOperation(spies())), {
@@ -795,6 +948,124 @@ test("bounds raw output plus each and combined released view before return", asy
   );
 });
 
+test("strictly captures agent-context release claims without invoking hostile values", async () => {
+  await assertMutatedReleaseRejected((released) => ({
+    ...released,
+    unexpected: true,
+  }));
+  await assertMutatedReleaseRejected((released) => ({
+    ...released,
+    agentContextRelease: {
+      ...released.agentContextRelease,
+      descriptor: {
+        ...released.agentContextRelease.descriptor,
+        unexpected: true,
+      },
+    },
+  }));
+
+  const canary = "release-descriptor-access-canary";
+  let proxyCalls = 0;
+  await assertMutatedReleaseRejected((released) => ({
+    ...released,
+    agentContextRelease: {
+      ...released.agentContextRelease,
+      descriptor: new Proxy(released.agentContextRelease.descriptor, {
+        get() {
+          proxyCalls += 1;
+          throw new Error(canary);
+        },
+      }),
+    },
+  }));
+  assert.equal(proxyCalls, 0, "a descriptor proxy is rejected without property access");
+
+  let getterCalls = 0;
+  await assertMutatedReleaseRejected((released) => {
+    const descriptor = { ...released.agentContextRelease.descriptor } as Record<
+      string,
+      unknown
+    >;
+    Object.defineProperty(descriptor, "reason", {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        throw new Error(canary);
+      },
+    });
+    return {
+      ...released,
+      agentContextRelease: {
+        ...released.agentContextRelease,
+        descriptor,
+      },
+    };
+  });
+  assert.equal(getterCalls, 0, "a descriptor accessor is rejected without invocation");
+});
+
+test("rejects catalog, resource, action, raw-result, and agent-view release forgeries", async () => {
+  await assertMutatedReleaseRejected((released, raw, action) => {
+    const descriptor = {
+      ...released.agentContextRelease.descriptor,
+      policyProjection: {
+        ...released.agentContextRelease.descriptor.policyProjection,
+        catalogId: "fixture.redirected",
+      },
+    };
+    return {
+      ...released,
+      agentContextRelease: bindCapabilityAgentContextRelease(
+        descriptor,
+        action,
+        raw,
+        released.agent,
+      ),
+    };
+  });
+
+  await assertMutatedReleaseRejected((released, raw, action) => {
+    const descriptor = {
+      ...released.agentContextRelease.descriptor,
+      resource: {
+        ...released.agentContextRelease.descriptor.resource,
+        locator: { counter: "redirected" },
+      },
+      policyProjection: {
+        ...released.agentContextRelease.descriptor.policyProjection,
+        resourceAttributes: { counter: "redirected" },
+      },
+    };
+    return {
+      ...released,
+      agentContextRelease: bindCapabilityAgentContextRelease(
+        descriptor,
+        action,
+        raw,
+        released.agent,
+      ),
+    };
+  });
+
+  for (const field of [
+    "normalizedActionHash",
+    "rawResultHash",
+    "agentViewHash",
+    "descriptorHash",
+  ] as const) {
+    await assertMutatedReleaseRejected((released) => ({
+      ...released,
+      agentContextRelease: {
+        ...released.agentContextRelease,
+        binding: {
+          ...released.agentContextRelease.binding,
+          [field]: "0".repeat(64),
+        },
+      },
+    }));
+  }
+});
+
 test("snapshots hostile proposal and normalization context before field reads", async () => {
   const calls = spies();
   const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
@@ -1032,12 +1303,37 @@ test("an allowed evaluated receipt dispatches the exact normalized action once",
     },
     human: { summary: "Counter is 5" },
     agent: { next: 5 },
+    agentContextRelease: {
+      schemaVersion: 1,
+      sourceVersion: 1,
+      resource: {
+        schemaVersion: 1,
+        scheme: "fixture",
+        sourceId: "fixture.counter",
+        locator: { counter: "alpha" },
+        mediaType: "application/json",
+        classification: "internal",
+      },
+      policyProjection: {
+        schemaVersion: 1,
+        catalogId: "fixture.counter",
+        catalogVersion: 1,
+        catalogContentHash: "b".repeat(64),
+        resourceAttributes: { counter: "alpha" },
+        requestAttributes: {},
+      },
+      classification: "internal",
+      reason: "capability.counter.output",
+    },
   });
   assert.equal(Object.isFrozen(result), true);
   assert.equal(Object.isFrozen(result.raw), true);
   assert.equal(Object.isFrozen(result.audit), true);
   assert.equal(Object.isFrozen(result.human), true);
   assert.equal(Object.isFrozen(result.agent), true);
+  assert.equal(Object.isFrozen(result.agentContextRelease), true);
+  assert.equal(Object.isFrozen(result.agentContextRelease.resource), true);
+  assert.equal(Object.isFrozen(result.agentContextRelease.policyProjection), true);
 
   await assert.rejects(
     gateway.execute(evaluated, { signal: new AbortController().signal }),
