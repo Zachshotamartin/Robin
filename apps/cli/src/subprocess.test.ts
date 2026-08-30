@@ -74,7 +74,7 @@ test("source-installed bin runs the coding profile as clean JSONL", async () => 
     ]);
   }
   assert.equal(decoded.at(-1)?.["type"], "RunCompleted");
-  assert.equal(decoded.at(-1)?.["cursor"], 33);
+  assert.equal(decoded.at(-1)?.["cursor"], 40);
 });
 
 test("source-installed bin runs quiet shorthand without progress contamination", async () => {
