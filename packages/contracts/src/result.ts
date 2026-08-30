@@ -53,7 +53,12 @@ export interface CompletedRunResult extends RunResultBase {
 }
 
 export interface FailedRunResult extends RunResultBase {
-  readonly status: "failed" | "orphaned";
+  readonly status: "failed";
+  readonly error: DomainError;
+}
+
+export interface OrphanedRunResult extends RunResultBase {
+  readonly status: "orphaned";
   readonly error: DomainError;
 }
 
@@ -65,4 +70,5 @@ export interface CancelledRunResult extends RunResultBase {
 export type RunResult =
   | CompletedRunResult
   | FailedRunResult
+  | OrphanedRunResult
   | CancelledRunResult;

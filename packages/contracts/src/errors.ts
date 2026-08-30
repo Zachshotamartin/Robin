@@ -5,6 +5,7 @@ import {
   type JsonObject,
 } from "./json-value.js";
 import { generateUuidV7, isLowercaseUuidV7 } from "./uuid-v7.js";
+import { snapshotBoundaryJsonObject } from "./boundary-snapshot.js";
 
 export type ErrorId = Brand<string, "ErrorId">;
 
@@ -131,78 +132,63 @@ export function createDomainError(input: DomainErrorInput): DomainError {
 
 export function isDomainError(value: unknown): value is DomainError {
   try {
-    if (!isPlainRecord(value)) {
-      return false;
-    }
-    const ownKeys = Reflect.ownKeys(value);
-    if (ownKeys.some((key) => typeof key !== "string")) {
-      return false;
-    }
-    const allowed = new Set([
-      "errorId",
-      "code",
-      "message",
-      "retry",
-      "details",
-      "causeErrorId",
-    ]);
-    if (
-      ownKeys.some((key) => typeof key !== "string" || !allowed.has(key)) ||
-      !hasDataProperty(value, "errorId") ||
-      !hasDataProperty(value, "code") ||
-      !hasDataProperty(value, "message") ||
-      !hasDataProperty(value, "retry")
-    ) {
-      return false;
-    }
-
-    const candidate = value as Readonly<Record<string, unknown>>;
-    if (
-      !isErrorId(candidate["errorId"]) ||
-      typeof candidate["code"] !== "string" ||
-      !ERROR_CODE_SET.has(candidate["code"]) ||
-      typeof candidate["message"] !== "string" ||
-      candidate["message"].trim().length === 0 ||
-      typeof candidate["retry"] !== "string" ||
-      !RETRY_CLASSES.has(candidate["retry"])
-    ) {
-      return false;
-    }
-    if (
-      Object.hasOwn(candidate, "details") &&
-      (!hasDataProperty(candidate, "details") || !isJsonObject(candidate["details"]))
-    ) {
-      return false;
-    }
-    if (
-      Object.hasOwn(candidate, "causeErrorId") &&
-      (!hasDataProperty(candidate, "causeErrorId") ||
-        !isErrorId(candidate["causeErrorId"]))
-    ) {
-      return false;
-    }
-    return true;
+    return validateDomainErrorSnapshot(snapshotBoundaryJsonObject(value));
   } catch {
     return false;
   }
 }
 
-function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
+/** Validates and returns a detached, deeply frozen serialized domain error. */
+export function parseDomainError(value: unknown): DomainError {
+  try {
+    const snapshot = snapshotBoundaryJsonObject(value);
+    if (validateDomainErrorSnapshot(snapshot)) {
+      return snapshot as unknown as DomainError;
+    }
+  } catch {
+    // The public error is deliberately independent of hostile input details.
   }
-  const prototype: unknown = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
+  throw createDomainError({
+    code: "invalid_input",
+    message: "Invalid serialized domain error.",
+  });
 }
 
-function hasDataProperty(
-  value: Readonly<Record<string, unknown>>,
-  key: string
-): boolean {
-  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+function validateDomainErrorSnapshot(candidate: JsonObject): boolean {
+  const allowed = new Set([
+    "errorId",
+    "code",
+    "message",
+    "retry",
+    "details",
+    "causeErrorId",
+  ]);
+  const keys = Object.keys(candidate);
+  if (
+    keys.some((key) => !allowed.has(key)) ||
+    !Object.hasOwn(candidate, "errorId") ||
+    !Object.hasOwn(candidate, "code") ||
+    !Object.hasOwn(candidate, "message") ||
+    !Object.hasOwn(candidate, "retry")
+  ) {
+    return false;
+  }
+  if (
+    !isErrorId(candidate["errorId"]) ||
+    typeof candidate["code"] !== "string" ||
+    !ERROR_CODE_SET.has(candidate["code"]) ||
+    typeof candidate["message"] !== "string" ||
+    candidate["message"].trim().length === 0 ||
+    typeof candidate["retry"] !== "string" ||
+    !RETRY_CLASSES.has(candidate["retry"])
+  ) {
+    return false;
+  }
+  if (Object.hasOwn(candidate, "details") && !isJsonObject(candidate["details"])) {
+    return false;
+  }
   return (
-    descriptor !== undefined &&
-    "value" in descriptor &&
-    descriptor.enumerable === true
+    !Object.hasOwn(candidate, "causeErrorId") ||
+    isErrorId(candidate["causeErrorId"])
   );
 }

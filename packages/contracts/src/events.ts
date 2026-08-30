@@ -1,6 +1,11 @@
-import { ACTOR_KINDS, type ActorIdentity } from "./actor.js";
+import type { ActorIdentity } from "./actor.js";
 import type { ContentBlock } from "./content.js";
 import { createDomainError, type DomainError } from "./errors.js";
+import { snapshotBoundaryJsonObject } from "./boundary-snapshot.js";
+import {
+  validateActor,
+  validateKnownEventPayload,
+} from "./known-event-validation.js";
 import {
   ApprovalIdKind,
   EventIdKind,
@@ -21,6 +26,7 @@ import type {
   CancelledRunResult,
   CompletedRunResult,
   FailedRunResult,
+  OrphanedRunResult,
   Observation,
   OutcomeEnvelope,
   OutcomeEvidenceRef,
@@ -122,7 +128,7 @@ export interface GenericEventPayloadMap {
   readonly RunCancelled: { readonly result: CancelledRunResult };
   readonly RunFailed: { readonly result: FailedRunResult };
   readonly RunCompleted: { readonly result: CompletedRunResult };
-  readonly RunOrphaned: { readonly result: FailedRunResult };
+  readonly RunOrphaned: { readonly result: OrphanedRunResult };
   readonly AgentDriverStarted: {
     readonly driverProfileId: string;
     readonly driverProfileVersion: number;
@@ -251,10 +257,13 @@ const ENVELOPE_KEYS = new Set([
   "streamVersion",
   "recordedAt",
 ]);
-const ACTOR_KIND_SET: ReadonlySet<string> = new Set(ACTOR_KINDS);
 
 export function isNewEvent(value: unknown): value is NewEvent {
-  return validateEventRecord(value, false);
+  try {
+    return validateEventRecordSnapshot(snapshotBoundaryJsonObject(value), false);
+  } catch {
+    return false;
+  }
 }
 
 export function assertNewEvent(value: unknown): asserts value is NewEvent {
@@ -263,8 +272,17 @@ export function assertNewEvent(value: unknown): asserts value is NewEvent {
   }
 }
 
+/** Returns a detached, deeply frozen extensible event-framing snapshot. */
+export function parseNewEvent(value: unknown): NewEvent {
+  return parseEventRecord(value, false) as unknown as NewEvent;
+}
+
 export function isEventEnvelope(value: unknown): value is EventEnvelope {
-  return validateEventRecord(value, true);
+  try {
+    return validateEventRecordSnapshot(snapshotBoundaryJsonObject(value), true);
+  } catch {
+    return false;
+  }
 }
 
 export function assertEventEnvelope(value: unknown): asserts value is EventEnvelope {
@@ -273,9 +291,77 @@ export function assertEventEnvelope(value: unknown): asserts value is EventEnvel
   }
 }
 
-function validateEventRecord(value: unknown, envelope: boolean): boolean {
+/** Returns a detached, deeply frozen extensible envelope-framing snapshot. */
+export function parseEventEnvelope(value: unknown): EventEnvelope {
+  return parseEventRecord(value, true) as unknown as EventEnvelope;
+}
+
+export function isGenericEvent(value: unknown): value is GenericEvent {
   try {
-    if (!isPlainRecord(value) || !hasExactDataKeys(value, envelope ? ENVELOPE_KEYS : NEW_EVENT_KEYS)) {
+    const snapshot = snapshotBoundaryJsonObject(value);
+    return validateGenericEventSnapshot(snapshot, false);
+  } catch {
+    return false;
+  }
+}
+
+export function assertGenericEvent(value: unknown): asserts value is GenericEvent {
+  if (!isGenericEvent(value)) {
+    throw invalidEvent("generic event");
+  }
+}
+
+export function parseGenericEvent(value: unknown): GenericEvent {
+  const snapshot = parseEventRecord(value, false);
+  if (!validateGenericEventSnapshot(snapshot, false)) {
+    throw invalidEvent("generic event");
+  }
+  return snapshot as unknown as GenericEvent;
+}
+
+export function isGenericEventEnvelope(value: unknown): value is GenericEventEnvelope {
+  try {
+    const snapshot = snapshotBoundaryJsonObject(value);
+    return validateGenericEventSnapshot(snapshot, true);
+  } catch {
+    return false;
+  }
+}
+
+export function assertGenericEventEnvelope(
+  value: unknown
+): asserts value is GenericEventEnvelope {
+  if (!isGenericEventEnvelope(value)) {
+    throw invalidEvent("generic event envelope");
+  }
+}
+
+export function parseGenericEventEnvelope(value: unknown): GenericEventEnvelope {
+  const snapshot = parseEventRecord(value, true);
+  if (!validateGenericEventSnapshot(snapshot, true)) {
+    throw invalidEvent("generic event envelope");
+  }
+  return snapshot as unknown as GenericEventEnvelope;
+}
+
+function parseEventRecord(value: unknown, envelope: boolean): JsonObject {
+  try {
+    const snapshot = snapshotBoundaryJsonObject(value);
+    if (validateEventRecordSnapshot(snapshot, envelope)) {
+      return snapshot;
+    }
+  } catch {
+    // The public failure contains no hostile input values or exceptions.
+  }
+  throw invalidEvent(envelope ? "event envelope" : "new event");
+}
+
+function validateEventRecordSnapshot(
+  value: Readonly<Record<string, unknown>>,
+  envelope: boolean
+): boolean {
+  try {
+    if (!hasExactDataKeys(value, envelope ? ENVELOPE_KEYS : NEW_EVENT_KEYS)) {
       return false;
     }
     if (
@@ -284,7 +370,7 @@ function validateEventRecord(value: unknown, envelope: boolean): boolean {
       value["eventType"].trim().length === 0 ||
       !isContractSchemaVersion(value["eventSchemaVersion"]) ||
       !isTimestamp(value["occurredAt"]) ||
-      !isActor(value["actor"]) ||
+      !validateActor(value["actor"]) ||
       typeof value["correlationId"] !== "string" ||
       value["correlationId"].trim().length === 0 ||
       !(value["causationId"] === null || EventIdKind.is(value["causationId"])) ||
@@ -302,12 +388,15 @@ function validateEventRecord(value: unknown, envelope: boolean): boolean {
   }
 }
 
-function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const prototype: unknown = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
+function validateGenericEventSnapshot(
+  value: JsonObject,
+  envelope: boolean
+): boolean {
+  return (
+    validateEventRecordSnapshot(value, envelope) &&
+    isGenericEventType(value["eventType"]) &&
+    validateKnownEventPayload(value["eventType"], value["payload"])
+  );
 }
 
 function hasExactDataKeys(
@@ -329,17 +418,6 @@ function hasExactDataKeys(
       descriptor.enumerable === true
     );
   });
-}
-
-function isActor(value: unknown): value is EventActor {
-  return (
-    isPlainRecord(value) &&
-    hasExactDataKeys(value, new Set(["kind", "id"])) &&
-    typeof value["kind"] === "string" &&
-    ACTOR_KIND_SET.has(value["kind"]) &&
-    typeof value["id"] === "string" &&
-    value["id"].trim().length > 0
-  );
 }
 
 function isTimestamp(value: unknown): value is string {

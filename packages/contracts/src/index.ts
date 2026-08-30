@@ -6,6 +6,7 @@ export {
   generateErrorId,
   isErrorId,
   isDomainError,
+  parseDomainError,
 } from "./errors.js";
 export type {
   DomainError,
@@ -44,6 +45,10 @@ export {
   isJsonObject,
   isJsonValue,
 } from "./json-value.js";
+export {
+  BoundarySnapshotError,
+  snapshotBoundaryJsonObject,
+} from "./boundary-snapshot.js";
 export type {
   JsonArray,
   JsonObject,
@@ -68,6 +73,17 @@ export type {
 } from "./schema-version.js";
 export { ACTOR_KINDS } from "./actor.js";
 export type { ActorIdentity, ActorKind } from "./actor.js";
+export {
+  parseActorIdentity,
+  parseContentBlock,
+  parseNormalizedAction,
+  parseObjectiveEnvelope,
+  parseObservation,
+  parseOutcomeEnvelope,
+  parseResourceRef,
+  parseTaskProfile,
+  parseVersionedSchema,
+} from "./contract-parsers.js";
 export type {
   BudgetPolicy,
   ComponentBinding,
@@ -104,6 +120,7 @@ export type {
   CompletedRunResult,
   EvidenceKind,
   FailedRunResult,
+  OrphanedRunResult,
   Observation,
   ObservationStatus,
   OutcomeEnvelope,
@@ -113,10 +130,18 @@ export type {
 export {
   GENERIC_EVENT_TYPES,
   assertEventEnvelope,
+  assertGenericEvent,
+  assertGenericEventEnvelope,
   assertNewEvent,
   isEventEnvelope,
+  isGenericEvent,
+  isGenericEventEnvelope,
   isGenericEventType,
   isNewEvent,
+  parseEventEnvelope,
+  parseGenericEvent,
+  parseGenericEventEnvelope,
+  parseNewEvent,
 } from "./events.js";
 export type {
   EventActor,
