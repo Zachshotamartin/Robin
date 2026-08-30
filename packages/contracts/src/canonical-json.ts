@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { createDomainError } from "./errors.js";
+import { createDomainError, isDomainError } from "./errors.js";
 
 /**
  * Canonical JSON per the implementation guide: UTF-8, lexicographically sorted
@@ -11,7 +11,14 @@ import { createDomainError } from "./errors.js";
  * closed so approval and idempotency hashes never depend on ambiguous input.
  */
 export function canonicalize(value: unknown): string {
-  return serialize(value, "$", new Set());
+  try {
+    return serialize(value, "$", new Set());
+  } catch (error: unknown) {
+    if (isDomainError(error)) {
+      throw error;
+    }
+    return reject("$", "the value could not be inspected safely");
+  }
 }
 
 export function canonicalBytes(value: unknown): Buffer {
@@ -33,9 +40,20 @@ function reject(path: string, reason: string): never {
   });
 }
 
-function isPlainObject(value: object): boolean {
-  const prototype: unknown = Object.getPrototypeOf(value);
+function isPlainObject(value: object, path: string): boolean {
+  const prototype = inspect(path, () => Object.getPrototypeOf(value));
   return prototype === Object.prototype || prototype === null;
+}
+
+function inspect<T>(path: string, operation: () => T): T {
+  try {
+    return operation();
+  } catch (error: unknown) {
+    if (isDomainError(error)) {
+      throw error;
+    }
+    return reject(path, "the value could not be inspected safely");
+  }
 }
 
 function serialize(value: unknown, path: string, seen: Set<object>): string {
@@ -73,10 +91,10 @@ function serializeContainer(value: object, path: string, seen: Set<object>): str
   seen.add(value);
 
   try {
-    if (Array.isArray(value)) {
-      return serializeArray(value, path, seen);
+    if (inspect(path, () => Array.isArray(value))) {
+      return serializeArray(value as readonly unknown[], path, seen);
     }
-    if (!isPlainObject(value)) {
+    if (!isPlainObject(value, path)) {
       reject(path, "only plain objects and arrays are representable");
     }
     return serializeObject(value as Record<string, unknown>, path, seen);
@@ -86,13 +104,60 @@ function serializeContainer(value: object, path: string, seen: Set<object>): str
 }
 
 function serializeArray(value: readonly unknown[], path: string, seen: Set<object>): string {
-  const parts: string[] = [];
-  for (let index = 0; index < value.length; index += 1) {
-    const element = value[index];
-    if (element === undefined) {
-      reject(`${path}[${index}]`, "array elements must not be undefined");
+  const ownKeys = inspect(path, () => Reflect.ownKeys(value));
+  if (ownKeys.some((key) => typeof key === "symbol")) {
+    reject(path, "symbol keys are not representable");
+  }
+
+  const lengthDescriptor = inspect(path, () =>
+    Object.getOwnPropertyDescriptor(value, "length")
+  );
+  if (
+    lengthDescriptor === undefined ||
+    !("value" in lengthDescriptor) ||
+    lengthDescriptor.enumerable === true ||
+    typeof lengthDescriptor.value !== "number" ||
+    !Number.isSafeInteger(lengthDescriptor.value) ||
+    lengthDescriptor.value < 0
+  ) {
+    reject(path, "array length must be a safe non-enumerable data property");
+  }
+  const length = lengthDescriptor.value;
+  if (ownKeys.length !== length + 1) {
+    reject(path, "sparse or decorated arrays are not representable");
+  }
+  for (const key of ownKeys) {
+    if (key === "length") {
+      continue;
     }
-    parts.push(serialize(element, `${path}[${index}]`, seen));
+    if (typeof key !== "string") {
+      reject(path, "decorated arrays are not representable");
+    }
+    const index = parseCanonicalArrayIndex(key);
+    if (index === null || index >= length) {
+      reject(path, "decorated arrays are not representable");
+    }
+  }
+
+  const parts: string[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const childPath = `${path}[${index}]`;
+    const descriptor = inspect(childPath, () =>
+      Object.getOwnPropertyDescriptor(value, String(index))
+    );
+    if (descriptor === undefined) {
+      reject(childPath, "sparse array elements are not representable");
+    }
+    if (!("value" in descriptor)) {
+      reject(childPath, "accessor properties are not representable");
+    }
+    if (descriptor.enumerable !== true) {
+      reject(childPath, "hidden array elements are not representable");
+    }
+    if (descriptor.value === undefined) {
+      reject(childPath, "array elements must not be undefined");
+    }
+    parts.push(serialize(descriptor.value, childPath, seen));
   }
   return `[${parts.join(",")}]`;
 }
@@ -102,15 +167,50 @@ function serializeObject(
   path: string,
   seen: Set<object>
 ): string {
-  const keys = Object.keys(value).sort();
+  const ownKeys = inspect(path, () => Reflect.ownKeys(value));
+  if (ownKeys.some((key) => typeof key === "symbol")) {
+    reject(path, "symbol keys are not representable");
+  }
+  const keys = (ownKeys as string[]).sort();
   const parts: string[] = [];
   for (const key of keys) {
-    const child = value[key];
-    const childPath = path === "$" ? `$.${key}` : `${path}.${key}`;
-    if (child === undefined) {
+    const childPath = appendObjectPath(path, key);
+    const descriptor = inspect(childPath, () =>
+      Object.getOwnPropertyDescriptor(value, key)
+    );
+    if (descriptor === undefined) {
+      reject(childPath, "the property disappeared during inspection");
+    }
+    if (!("value" in descriptor)) {
+      reject(childPath, "accessor properties are not representable");
+    }
+    if (descriptor.enumerable !== true) {
+      reject(childPath, "hidden properties are not representable");
+    }
+    if (descriptor.value === undefined) {
       reject(childPath, "properties must not be undefined; delete the key instead");
     }
-    parts.push(`${JSON.stringify(key)}:${serialize(child, childPath, seen)}`);
+    parts.push(
+      `${JSON.stringify(key)}:${serialize(descriptor.value, childPath, seen)}`
+    );
   }
   return `{${parts.join(",")}}`;
+}
+
+function appendObjectPath(path: string, key: string): string {
+  if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)) {
+    return `${path}.${key}`;
+  }
+  return `${path}[${JSON.stringify(key)}]`;
+}
+
+function parseCanonicalArrayIndex(key: string): number | null {
+  if (key === "0") {
+    return 0;
+  }
+  if (!/^[1-9][0-9]*$/.test(key)) {
+    return null;
+  }
+  const index = Number(key);
+  return Number.isSafeInteger(index) && String(index) === key ? index : null;
 }

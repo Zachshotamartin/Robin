@@ -66,6 +66,162 @@ test("cycles are rejected instead of overflowing", () => {
   assert.throws(() => canonicalize(value), (error: unknown) => isDomainError(error));
 });
 
+test("shared acyclic references remain valid and serialize by value", () => {
+  const shared = { z: 1, a: "same" };
+  assert.equal(
+    canonicalize({ right: shared, left: shared }),
+    '{"left":{"a":"same","z":1},"right":{"a":"same","z":1}}'
+  );
+});
+
+test("object and array accessors are rejected without being invoked", () => {
+  let objectGetterCalls = 0;
+  const nested: Record<string, unknown> = {};
+  Object.defineProperty(nested, "secret", {
+    enumerable: true,
+    get() {
+      objectGetterCalls += 1;
+      return "must-not-be-read";
+    },
+  });
+
+  let arrayGetterCalls = 0;
+  const array = ["placeholder"];
+  Object.defineProperty(array, "0", {
+    enumerable: true,
+    get() {
+      arrayGetterCalls += 1;
+      return "must-not-be-read";
+    },
+  });
+
+  assert.throws(
+    () => canonicalize({ outer: nested }),
+    (error: unknown) =>
+      isDomainError(error) &&
+      error.code === "invalid_input" &&
+      /outer\.secret/.test(error.message)
+  );
+  assert.throws(
+    () => canonicalize({ outer: array }),
+    (error: unknown) =>
+      isDomainError(error) &&
+      error.code === "invalid_input" &&
+      /outer\[0\]/.test(error.message)
+  );
+  assert.equal(objectGetterCalls, 0);
+  assert.equal(arrayGetterCalls, 0);
+});
+
+test("symbol and hidden object keys fail instead of disappearing", () => {
+  const symbolKey = Symbol("secret-symbol-description");
+  const withSymbol: Record<PropertyKey, unknown> = { visible: true };
+  withSymbol[symbolKey] = "must-not-disappear";
+
+  const withHidden = { visible: true };
+  Object.defineProperty(withHidden, "hidden", {
+    value: "must-not-disappear",
+    enumerable: false,
+  });
+
+  for (const value of [withSymbol, withHidden]) {
+    assert.throws(
+      () => canonicalize(value),
+      (error: unknown) => isDomainError(error) && error.code === "invalid_input"
+    );
+  }
+});
+
+test("sparse, decorated, symbol-keyed, and hidden-index arrays fail closed", () => {
+  const sparse: unknown[] = [];
+  sparse.length = 2;
+  sparse[1] = "present";
+
+  const decorated = [1];
+  Object.defineProperty(decorated, "extra", {
+    value: true,
+    enumerable: true,
+  });
+
+  const symbolDecorated = [1] as unknown[] & Record<PropertyKey, unknown>;
+  symbolDecorated[Symbol("decoration")] = true;
+
+  const hiddenIndex = [1];
+  Object.defineProperty(hiddenIndex, "0", {
+    value: 1,
+    enumerable: false,
+  });
+
+  for (const value of [sparse, decorated, symbolDecorated, hiddenIndex]) {
+    assert.throws(
+      () => canonicalize(value),
+      (error: unknown) => isDomainError(error) && error.code === "invalid_input"
+    );
+  }
+});
+
+test("non-plain prototypes fail while null-prototype objects remain valid", () => {
+  const inherited = Object.create({ inherited: true }) as Record<string, unknown>;
+  inherited["own"] = true;
+  assert.throws(
+    () => canonicalize(inherited),
+    (error: unknown) => isDomainError(error) && error.code === "invalid_input"
+  );
+
+  const nullPrototype = Object.create(null) as Record<string, unknown>;
+  nullPrototype["b"] = 2;
+  nullPrototype["a"] = 1;
+  assert.equal(canonicalize(nullPrototype), '{"a":1,"b":2}');
+});
+
+test("hostile proxy traps become safe domain errors at deterministic paths", () => {
+  const secret = "raw-super-secret-trap-message";
+  const hostileOwnKeys = new Proxy(
+    {},
+    {
+      ownKeys() {
+        throw new Error(secret);
+      },
+    }
+  );
+  const hostileDescriptor = new Proxy(
+    { value: 1 },
+    {
+      getOwnPropertyDescriptor() {
+        throw new Error(secret);
+      },
+    }
+  );
+  const hostilePrototype = new Proxy(
+    {},
+    {
+      getPrototypeOf() {
+        throw new Error(secret);
+      },
+    }
+  );
+  const revocable = Proxy.revocable({}, {});
+  revocable.revoke();
+
+  const cases: readonly [unknown, RegExp][] = [
+    [{ outer: hostileOwnKeys }, /outer/],
+    [{ outer: hostileDescriptor }, /outer/],
+    [hostilePrototype, /\$/],
+    [revocable.proxy, /\$/],
+  ];
+  for (const [value, expectedPath] of cases) {
+    try {
+      canonicalize(value);
+      assert.fail("expected hostile input rejection");
+    } catch (error: unknown) {
+      assert.equal(isDomainError(error), true);
+      assert.equal((error as { code: string }).code, "invalid_input");
+      assert.match((error as { message: string }).message, expectedPath);
+      assert.doesNotMatch((error as { message: string }).message, new RegExp(secret));
+    }
+  }
+});
+
 test("rejection messages name the offending path", () => {
   try {
     canonicalize({ outer: { inner: [1, Number.NaN] } });
