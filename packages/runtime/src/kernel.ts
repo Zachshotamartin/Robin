@@ -1,3 +1,5 @@
+import { isProxy } from "node:util/types";
+
 import {
   ActionIdKind,
   AgentAttemptIdKind,
@@ -16,9 +18,12 @@ import {
   isDomainError,
   isErrorId,
   isGenericEventType,
+  parseEventEnvelope,
+  parseGenericEventEnvelope,
 } from "@guard/contracts";
 import type {
   DomainError,
+  EventEnvelope,
   GenericEvent,
   GenericEventEnvelope,
   GenericEventType,
@@ -42,6 +47,7 @@ import type {
   RunLifecycleStatus,
   RunProjectionStatus,
   RunState,
+  RegisteredEventEnvelopeFramer,
   RuntimeCommand,
   RuntimeCommandType,
 } from "./types.js";
@@ -253,6 +259,74 @@ export function replay(history: Iterable<GenericEventEnvelope>): RunState {
   let state = createInitialRunState();
   for (const event of history) {
     state = evolve(state, event);
+  }
+  return state;
+}
+
+/**
+ * Evolves either a strict generic event or a parser-confirmed informational
+ * extension. The supplied family framer is invoked for every envelope.
+ */
+export function evolveRegistered(
+  state: RunState,
+  event: unknown,
+  framer: RegisteredEventEnvelopeFramer
+): RunState {
+  const framed = frameRegisteredEnvelope(event, framer);
+  if (isGenericEventType(framed.eventType)) {
+    return evolve(state, parseGenericEventEnvelope(framed));
+  }
+
+  try {
+    assertStateBoundary(state);
+    assertInformationalExtensionBoundary(state, framed);
+    const next: RunState = {
+      ...state,
+      runId: framed.streamId,
+      streamVersion: framed.streamVersion,
+      lastEventId: framed.eventId,
+      lastRecordedAt: framed.recordedAt,
+      budget: {
+        ...state.budget,
+        elapsedMs: elapsedMs(state.startedAt, framed.recordedAt),
+      },
+    };
+    assertStateInvariants(next);
+    return immutable(next);
+  } catch (error: unknown) {
+    if (isDomainError(error)) {
+      throw error;
+    }
+    throw createDomainError({
+      code: "invariant_violated",
+      message: "The runtime rejected an inconsistent registered extension fact.",
+    });
+  }
+}
+
+/** Generic events retain their planner; registered extensions plan no effects. */
+export function planRegisteredEffects(
+  state: RunState,
+  event: unknown,
+  framer: RegisteredEventEnvelopeFramer
+): readonly RuntimeCommand[] {
+  const framed = frameRegisteredEnvelope(event, framer);
+  if (isGenericEventType(framed.eventType)) {
+    return planEffects(state, parseGenericEventEnvelope(framed));
+  }
+  assertStateBoundary(state);
+  assertInformationalExtensionBoundary(state, framed);
+  return immutable([]);
+}
+
+/** Pure, gap-free replay across generic and registered informational facts. */
+export function replayRegistered(
+  history: Iterable<unknown>,
+  framer: RegisteredEventEnvelopeFramer
+): RunState {
+  let state = createInitialRunState();
+  for (const event of history) {
+    state = evolveRegistered(state, event, framer);
   }
   return state;
 }
@@ -1179,6 +1253,121 @@ function makeCommand(
 
 const EventIdPrefixLength = "evt_".length;
 
+function frameRegisteredEnvelope(
+  value: unknown,
+  framer: RegisteredEventEnvelopeFramer
+): EventEnvelope<string, unknown> {
+  try {
+    const framedInput = parseEventEnvelope(value);
+    const parseEnvelope = inspectFramer(framer);
+    const parsed = parseEnvelope(framedInput);
+    const framedOutput = parseEventEnvelope(parsed);
+    if (
+      !isDeeplyFrozenData(parsed) ||
+      sharesObjectIdentity(framedInput, parsed) ||
+      canonicalize(framedInput) !== canonicalize(framedOutput)
+    ) {
+      throw new TypeError("invalid registered framing result");
+    }
+    return framedOutput;
+  } catch {
+    throw invalidInput("The registered event framer rejected the event envelope.");
+  }
+}
+
+function inspectFramer(
+  value: unknown
+): RegisteredEventEnvelopeFramer["parseEnvelope"] {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    isProxy(value)
+  ) {
+    throw new TypeError("invalid registered event framer");
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(value, "parseEnvelope");
+  if (
+    descriptor === undefined ||
+    !("value" in descriptor) ||
+    typeof descriptor.value !== "function" ||
+    isProxy(descriptor.value)
+  ) {
+    throw new TypeError("invalid registered event framer function");
+  }
+  return descriptor.value as RegisteredEventEnvelopeFramer["parseEnvelope"];
+}
+
+function isDeeplyFrozenData(value: unknown): boolean {
+  try {
+    const pending: unknown[] = [value];
+    const visited = new WeakSet<object>();
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (typeof current !== "object" || current === null) continue;
+      if (isProxy(current) || visited.has(current) || !Object.isFrozen(current)) {
+        return false;
+      }
+      visited.add(current);
+      for (const key of Reflect.ownKeys(current)) {
+        const descriptor = Object.getOwnPropertyDescriptor(current, key);
+        if (descriptor === undefined || !("value" in descriptor)) {
+          return false;
+        }
+        pending.push(descriptor.value);
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sharesObjectIdentity(left: unknown, right: unknown): boolean {
+  try {
+    const leftObjects = collectDataObjects(left);
+    const pending: unknown[] = [right];
+    const visited = new WeakSet<object>();
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (typeof current !== "object" || current === null) continue;
+      if (isProxy(current) || leftObjects.has(current)) return true;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      for (const key of Reflect.ownKeys(current)) {
+        const descriptor = Object.getOwnPropertyDescriptor(current, key);
+        if (descriptor === undefined || !("value" in descriptor)) {
+          throw new TypeError("non-data framing result");
+        }
+        pending.push(descriptor.value);
+      }
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function collectDataObjects(value: unknown): WeakSet<object> {
+  const result = new WeakSet<object>();
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (typeof current !== "object" || current === null) continue;
+    if (isProxy(current) || result.has(current)) {
+      throw new TypeError("hostile framed input");
+    }
+    result.add(current);
+    for (const key of Reflect.ownKeys(current)) {
+      const descriptor = Object.getOwnPropertyDescriptor(current, key);
+      if (descriptor === undefined || !("value" in descriptor)) {
+        throw new TypeError("non-data framed input");
+      }
+      pending.push(descriptor.value);
+    }
+  }
+  return result;
+}
+
 function assertEventBoundary(state: RunState, event: GenericEventEnvelope): void {
   assertEventEnvelope(event);
   if (!isGenericEventType(event.eventType)) {
@@ -1193,6 +1382,39 @@ function assertEventBoundary(state: RunState, event: GenericEventEnvelope): void
       { eventType: event.eventType, status: state.status }
     );
   }
+  assertStreamCursorBoundary(state, event);
+  if (
+    event.eventType === "RecoveryCompleted" &&
+    event.payload.disposition === "recovered"
+  ) {
+    assertRecoveryCanCompleteRecovered(state);
+  }
+  if (state.budgetExceeded !== null && WORK_STARTING_EVENTS.has(event.eventType)) {
+    throw createDomainError({
+      code: "budget_exceeded",
+      message: "The run cannot start new work after budget exhaustion.",
+      details: { budget: state.budgetExceeded.budget, eventType: event.eventType },
+    });
+  }
+}
+
+function assertInformationalExtensionBoundary(
+  state: RunState,
+  event: EventEnvelope<string, unknown>
+): void {
+  assertStreamCursorBoundary(state, event);
+  if (state.status === "uninitialized" || TERMINAL_STATUS_SET.has(state.status)) {
+    throw illegalTransition(
+      "A registered informational event requires an active initialized run.",
+      { status: state.status }
+    );
+  }
+}
+
+function assertStreamCursorBoundary(
+  state: RunState,
+  event: EventEnvelope<string, unknown>
+): void {
   if (event.streamVersion !== state.streamVersion + 1) {
     throw illegalTransition("Run event versions must be consecutive.", {
       expectedVersion: state.streamVersion + 1,
@@ -1209,19 +1431,6 @@ function assertEventBoundary(state: RunState, event: GenericEventEnvelope): void
     throw illegalTransition("Event record time cannot move backwards.", {
       previousRecordedAt: state.lastRecordedAt,
       recordedAt: event.recordedAt,
-    });
-  }
-  if (
-    event.eventType === "RecoveryCompleted" &&
-    event.payload.disposition === "recovered"
-  ) {
-    assertRecoveryCanCompleteRecovered(state);
-  }
-  if (state.budgetExceeded !== null && WORK_STARTING_EVENTS.has(event.eventType)) {
-    throw createDomainError({
-      code: "budget_exceeded",
-      message: "The run cannot start new work after budget exhaustion.",
-      details: { budget: state.budgetExceeded.budget, eventType: event.eventType },
     });
   }
 }

@@ -218,7 +218,7 @@ function parseOptions<TEvent extends StorableEvent>(
   let parser: EventStoreParser<TEvent> | null = null;
   if (options["parser"] !== undefined) {
     try {
-      const parserRecord = inspectDataRecord(options["parser"], PARSER_KEYS);
+      const parserRecord = inspectParserRecord(options["parser"]);
       const parseEvent = parserRecord["parseEvent"];
       const parseEnvelope = parserRecord["parseEnvelope"];
       if (typeof parseEvent !== "function" || typeof parseEnvelope !== "function") {
@@ -239,6 +239,53 @@ function parseOptions<TEvent extends StorableEvent>(
     maximumBatchEvents,
     maximumEventBytes,
   };
+}
+
+function inspectParserRecord(
+  value: unknown
+): Readonly<Record<string, unknown>> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    isProxy(value)
+  ) {
+    throw new TypeError("invalid parser record");
+  }
+  const keys = Reflect.ownKeys(value);
+  if (
+    keys.length !== PARSER_KEYS.size ||
+    keys.some((key) => typeof key !== "string" || !PARSER_KEYS.has(key))
+  ) {
+    throw new TypeError("invalid parser record keys");
+  }
+
+  const result: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
+  for (const key of keys) {
+    if (typeof key !== "string") {
+      throw new TypeError("invalid parser key");
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (
+      descriptor === undefined ||
+      !("value" in descriptor) ||
+      descriptor.enumerable !== true ||
+      typeof descriptor.value !== "function" ||
+      isProxy(descriptor.value)
+    ) {
+      throw new TypeError("invalid parser property");
+    }
+    Object.defineProperty(result, key, {
+      value: descriptor.value,
+      enumerable: true,
+      configurable: false,
+      writable: false,
+    });
+  }
+  return Object.freeze(result);
 }
 
 function inspectDataRecord(

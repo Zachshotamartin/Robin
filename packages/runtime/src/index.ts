@@ -2,8 +2,11 @@ export {
   createInitialRunState,
   decide,
   evolve,
+  evolveRegistered,
   planEffects,
+  planRegisteredEffects,
   replay,
+  replayRegistered,
 } from "./kernel.js";
 export { EVENT_LEGAL_STATES, INTENT_LEGAL_STATES } from "./legal-states.js";
 export {
@@ -27,6 +30,7 @@ export type {
   PendingApprovalProjection,
   PolicyEvaluationProjection,
   RecoveryProjection,
+  RegisteredEventEnvelopeFramer,
   RunBudgetCounters,
   RunIntent,
   RunIntentType,

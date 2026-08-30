@@ -6,6 +6,7 @@ import type {
   ContractSchemaVersion,
   DriverProposalId,
   ErrorId,
+  EventEnvelope,
   EventId,
   GenericEvent,
   GenericEventType,
@@ -181,6 +182,16 @@ export interface RuntimeCommand {
   readonly causedByEventId: EventId;
   readonly consequential: boolean;
   readonly payload: JsonObject;
+}
+
+/**
+ * Structural port implemented by a closed event-family registry. Runtime calls
+ * it for every envelope and accepts only a detached, deeply frozen exact frame.
+ */
+export interface RegisteredEventEnvelopeFramer {
+  readonly parseEnvelope: (
+    value: unknown
+  ) => EventEnvelope<string, unknown>;
 }
 
 export interface RunState {
