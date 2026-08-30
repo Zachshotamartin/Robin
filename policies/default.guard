@@ -1,0 +1,17 @@
+policy "deny-secret-repository-reads" priority 1000 {
+  when action.pack == "repository" and action.operation == "read_file" and repo.path matches "**/.env*"
+  deny
+  reason "Secret-bearing repository paths cannot enter agent context"
+}
+
+policy "approve-dependency-installation" priority 700 {
+  when action.pack == "process" and request.intent == "install_dependency"
+  require_approval
+  reason "Dependency installation may execute third-party lifecycle code"
+}
+
+policy "allow-sandboxed-tests" priority 500 {
+  when action.pack == "process" and action.operation == "run_tests" and environment.sandboxed == true
+  allow
+  reason "Pinned test recipes may run inside the selected sandbox profile"
+}

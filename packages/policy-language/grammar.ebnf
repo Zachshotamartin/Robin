@@ -1,0 +1,35 @@
+document          = { policy } ;
+policy            = "policy", string, "priority", integer, "{",
+                    "when", expression,
+                    effect,
+                    "reason", string,
+                    "}" ;
+effect            = "allow" | "deny" | "require_approval" ;
+expression        = or_expression ;
+or_expression     = and_expression, { "or", and_expression } ;
+and_expression    = unary_expression, { "and", unary_expression } ;
+unary_expression  = [ "not" ], primary ;
+primary           = "(", expression, ")"
+                  | "exists", "(", attribute, ")"
+                  | comparison ;
+comparison        = attribute, operator, value ;
+operator          = "==" | "!=" | "in" | "matches" | "starts_with" ;
+attribute         = identifier, { ".", identifier } ;
+value             = string | integer | boolean | list ;
+list              = "[", [ value, { ",", value } ], "]" ;
+boolean           = "true" | "false" ;
+integer           = "0" | nonzero_digit, { digit } ;
+identifier        = identifier_start, { identifier_continue } ;
+identifier_start  = letter | "_" ;
+identifier_continue = letter | digit | "_" ;
+letter            = "A" ... "Z" | "a" ... "z" ;
+nonzero_digit     = "1" ... "9" ;
+digit             = "0" ... "9" ;
+string            = '"', { string_scalar | escape }, '"' ;
+string_scalar     = ? any Unicode scalar except quote, backslash, C0, or C1 control ? ;
+escape            = "\\", ('"' | "/" | "\\" | "n" | "r" | "t"
+                  | "u", hex_digit, hex_digit, hex_digit, hex_digit) ;
+hex_digit         = digit | "A" ... "F" | "a" ... "f" ;
+
+(* ASCII space, tab, CR, LF, and CRLF are discarded between tokens. *)
+(* A high-surrogate Unicode escape must be followed by a low-surrogate escape. *)
