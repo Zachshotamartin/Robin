@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ActionIdKind, canonicalize, isDomainError } from "@guard/contracts";
+import {
+  ActionIdKind,
+  canonicalize,
+  isDomainError,
+  sha256Hex,
+} from "@guard/contracts";
 
 import { CapabilityGateway, CapabilityPackRegistry } from "@guard/capability-gateway";
 import { MEMORY_POLICY_ATTRIBUTE_CATALOG } from "@guard/context-broker";
@@ -11,6 +16,7 @@ import {
   SYNTHETIC_TASK_PROFILE,
   SYNTHETIC_POLICY_SNAPSHOT,
   SYNTHETIC_TRANSFORM_REFERENCE,
+  createSyntheticBrokerContextSource,
   createSyntheticContextSource,
   createSyntheticTransformPack,
 } from "./index.js";
@@ -50,6 +56,84 @@ test("provides a bounded in-memory source fixture through the generic source por
   });
   assert.equal(result.items[0]!.resource.scheme, "memory");
   assert.equal(result.items[0]!.resource.classification, "synthetic");
+});
+
+test("provides the same canonical greeting through the broker normalize/inspect/open boundary", async () => {
+  const source = createSyntheticBrokerContextSource();
+  const callerRequest = { recordId: "greeting" };
+  const request = source.normalizeResourceRequest(callerRequest);
+  callerRequest.recordId = "changed-after-normalization";
+
+  assert.deepEqual(request, {
+    schemaVersion: 1,
+    sourceId: "synthetic:transform-input",
+    sourceVersion: 2,
+    resource: {
+      schemaVersion: 1,
+      scheme: "memory",
+      sourceId: "synthetic:transform-input",
+      locator: { recordId: "greeting" },
+      mediaType: "application/json",
+      classification: "synthetic",
+    },
+    selector: null,
+  });
+
+  const expectedText = canonicalize({
+    text: "  Guarded agents transform bounded data.  ",
+  });
+  const expectedBytes = new TextEncoder().encode(expectedText);
+  const signal = new AbortController().signal;
+  const metadata = await source.inspectMetadata(request, signal);
+  assert.deepEqual(metadata, {
+    schemaVersion: 1,
+    sourceId: "synthetic:transform-input",
+    sourceVersion: 2,
+    resource: request.resource,
+    selector: null,
+    byteLength: expectedBytes.byteLength,
+    selectedByteLength: expectedBytes.byteLength,
+    mediaType: "application/json",
+    classification: "synthetic",
+    kind: "record",
+    policyProjection: {
+      schemaVersion: 1,
+      catalogId: MEMORY_POLICY_ATTRIBUTE_CATALOG.catalogId,
+      catalogVersion: MEMORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion,
+      catalogContentHash: MEMORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
+      resourceAttributes: { recordId: "greeting" },
+      requestAttributes: {},
+    },
+    binding: {
+      contentHash: sha256Hex(expectedBytes),
+      byteLength: expectedBytes.byteLength,
+    },
+  });
+
+  const opened = await source.openBounded(
+    request,
+    metadata,
+    { maximumBytes: 256 },
+    signal,
+  );
+  assert.equal(new TextDecoder().decode(opened.bytes), expectedText);
+  assert.equal(opened.contentHash, sha256Hex(expectedBytes));
+  assert.equal(opened.byteLength, expectedBytes.byteLength);
+  assert.equal(opened.selectionComplete, true);
+  assert.equal(opened.truncated, false);
+
+  opened.bytes[0] = 0;
+  const reopened = await source.openBounded(
+    request,
+    metadata,
+    { maximumBytes: 256 },
+    signal,
+  );
+  assert.equal(new TextDecoder().decode(reopened.bytes), expectedText);
+  assert.notStrictEqual(reopened.bytes, opened.bytes);
+  assert.equal(Object.isFrozen(request), true);
+  assert.equal(Object.isFrozen(metadata), true);
+  assert.equal(Object.isFrozen(source.descriptor), true);
 });
 
 test("normalizes and executes a deterministic transform through the generic gateway", async () => {

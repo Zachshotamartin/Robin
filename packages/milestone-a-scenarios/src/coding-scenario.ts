@@ -1,32 +1,48 @@
 import {
   ScriptedAgentDriver,
+  type AgentObservation,
   type AgentTurnRequest,
   type ScriptedAgentDriverScript,
 } from "@guard/agent-driver";
 import {
   CapabilityGateway,
   CapabilityPackRegistry,
+  type CapabilityAdvertisement,
+  type CapabilityExecutionResult,
+  type CapabilityOperationReference,
 } from "@guard/capability-gateway";
 import {
+  REPOSITORY_POLICY_ATTRIBUTE_CATALOG,
   VIRTUAL_REPOSITORY_REFERENCES,
   VirtualRepository,
   createVirtualRepositoryPack,
 } from "@guard/capability-repository";
-import { ContextSourceRegistry } from "@guard/context-broker";
+import {
+  BrokerContextSourceRegistry,
+  CONTEXT_POLICY_ATTRIBUTE_CATALOG,
+  createContextBrokerIntegrationFactory,
+  createContextReleasePolicySnapshot,
+  createPinnedContextPolicyAdapter,
+  type ContextBrokerIntegration,
+} from "@guard/context-broker";
 import {
   CONTRACT_SCHEMA_VERSION,
   canonicalSha256Hex,
   sha256Hex,
   type JsonObject,
   type ObjectiveEnvelope,
+  type Observation,
   type OutcomeEnvelope,
   type TaskProfile,
 } from "@guard/contracts";
 import { InMemoryEventStore } from "@guard/event-store";
 import {
-  compilePolicySnapshot,
+  BASE_POLICY_ATTRIBUTE_CATALOG,
+  compilePolicySnapshotSet,
+  composePolicyAttributeCatalogs,
   createPinnedPolicyEvaluator,
   createPolicySnapshotManifest,
+  type PinnedPolicyEvaluator,
   type PolicySnapshot,
 } from "@guard/policy-engine";
 import { InMemoryTaskProfileRegistry } from "@guard/profile-registry";
@@ -34,9 +50,13 @@ import { SynchronousRuntimeHost } from "@guard/runtime-host";
 
 import {
   FixedRuntimeHostIdFactory,
+  REPOSITORY_CONTEXT_POLICY_SOURCE,
+  ROOT_CONTEXT_POLICY_SOURCE,
   SCENARIO_OCCURRED_AT,
   SCENARIO_RECORDED_AT,
   advertisedOperations,
+  brokerJsonContentBlock,
+  fixedActionId,
   fixedAttemptId,
   fixedObservationId,
   fixedOutcomeId,
@@ -45,7 +65,7 @@ import {
   fixedRunId,
   immutable,
   replayWithFailOnEffectPorts,
-  successfulObservation,
+  successfulBrokeredObservation,
   type ScenarioExecution,
 } from "./scenario-support.js";
 
@@ -61,6 +81,22 @@ const CODING_POLICY_SOURCE = `policy "allow-virtual-repository-operations" prior
 `;
 
 const CODING_VIRTUAL_POLICY_SNAPSHOT = compileCodingPolicy();
+const CODING_RELEASE_POLICY = createContextReleasePolicySnapshot({
+  releasePolicyId: "milestone-a.coding-context",
+  releasePolicyVersion: 1,
+  secretDisposition: "deny",
+  promptInjectionDisposition: "tag",
+  truncatedDisposition: "deny",
+});
+const CODING_BROKER_BUDGETS = Object.freeze({
+  maximumResourceBytes: 16_384,
+  maximumRequestBytes: 16_384,
+  maximumItemsPerTurn: 4,
+  maximumBytesPerTurn: 16_384,
+  maximumItemsPerRun: 16,
+  maximumBytesPerRun: 65_536,
+  maximumControlCharacterRatio: 0.05,
+});
 
 const GREETING_PATH = "src/greet.ts";
 const ORIGINAL_GREETING = [
@@ -75,7 +111,6 @@ const REPLACEMENT_GREETING = [
   "}",
   "",
 ].join("\n");
-const RELEASED_ORIGINAL_GREETING = ORIGINAL_GREETING.slice(0, -1);
 const PROPOSED_PATCH = wholeFilePatch(
   GREETING_PATH,
   ORIGINAL_GREETING,
@@ -87,10 +122,16 @@ const VIRTUAL_FILES: Readonly<Record<string, string>> = Object.freeze({
   [GREETING_PATH]: ORIGINAL_GREETING,
 });
 
+const CODING_PROFILE_BROKER_CONFIGURATION = createCodingBrokerFactory(
+  createPinnedPolicyEvaluator(CODING_VIRTUAL_POLICY_SNAPSHOT, {
+    secretCorrelationToken: "coding-profile-policy-token-0001",
+  }),
+).configurationDescriptor;
+
 export const CODING_VIRTUAL_TASK_PROFILE: TaskProfile = immutable({
   schemaVersion: CONTRACT_SCHEMA_VERSION,
   profileId: "coding-virtual-fixture",
-  profileVersion: 1,
+  profileVersion: 2,
   objectiveSchema: {
     schemaId: "coding.virtual.objective",
     schemaVersion: 1,
@@ -107,7 +148,7 @@ export const CODING_VIRTUAL_TASK_PROFILE: TaskProfile = immutable({
   driverProfile: {
     componentId: "scripted",
     componentVersion: 1,
-    configuration: { scriptId: "coding-virtual-golden" },
+    configuration: { scriptId: "coding-virtual-broker-current" },
   },
   modelBindings: [],
   contextSources: [],
@@ -121,7 +162,7 @@ export const CODING_VIRTUAL_TASK_PROFILE: TaskProfile = immutable({
   ],
   policyProfile: {
     componentId: "coding-fixture-safe-default",
-    componentVersion: 1,
+    componentVersion: 2,
     configuration: createPolicySnapshotManifest(CODING_VIRTUAL_POLICY_SNAPSHOT),
   },
   outcomeSchema: {
@@ -144,7 +185,10 @@ export const CODING_VIRTUAL_TASK_PROFILE: TaskProfile = immutable({
     maxElapsedMs: 5_000,
     maxInputBytes: 16_384,
     maxOutputBytes: 16_384,
-    extensions: {},
+    extensions: {
+      contextBroker:
+        CODING_PROFILE_BROKER_CONFIGURATION as unknown as JsonObject,
+    },
   },
   evidenceMode: "ephemeral_metadata",
   evaluationProfile: null,
@@ -160,9 +204,9 @@ export interface CodingScenarioExecution extends ScenarioExecution {
 }
 
 /**
- * Exercises the same host and reducer as the generic slice while every coding
- * operation targets an immutable in-memory fixture. list/read/propose_patch
- * cannot reach the host filesystem, Git, a subprocess, a network, or a model.
+ * Exercises list/read/propose_patch against an immutable virtual repository.
+ * Every capability agent view crosses a preview and live context broker; the
+ * ScriptedAgentDriver still validates the complete exact request on each turn.
  */
 export async function runCodingVirtualRepositoryScenario(): Promise<CodingScenarioExecution> {
   const namespace = CODING_SCENARIO_NAMESPACE;
@@ -184,7 +228,23 @@ export async function runCodingVirtualRepositoryScenario(): Promise<CodingScenar
     VIRTUAL_REPOSITORY_REFERENCES.read,
     VIRTUAL_REPOSITORY_REFERENCES.patch,
   ];
-  const advertised = advertisedOperations(packRegistry, references);
+  const advertisedReferences = Object.values(VIRTUAL_REPOSITORY_REFERENCES);
+  const advertised = advertisedOperations(packRegistry, advertisedReferences);
+  const gatewayAdvertisement = packRegistry.createAdvertisement(
+    advertisedReferences,
+  );
+  const evaluator = createPinnedPolicyEvaluator(CODING_VIRTUAL_POLICY_SNAPSHOT, {
+    secretCorrelationToken: "coding-scenario-policy-token-0001",
+  });
+  const gateway = new CapabilityGateway(packRegistry, evaluator);
+  const liveBrokerFactory = createCodingBrokerFactory(evaluator);
+  const previewBroker = createCodingBrokerFactory(evaluator).createForRun({ runId });
+  if (
+    canonicalSha256Hex(liveBrokerFactory.configurationDescriptor) !==
+    canonicalSha256Hex(CODING_PROFILE_BROKER_CONFIGURATION)
+  ) {
+    throw new Error("The coding profile and live broker configuration diverged.");
+  }
 
   const objective: ObjectiveEnvelope = immutable({
     schemaVersion: CONTRACT_SCHEMA_VERSION,
@@ -200,60 +260,26 @@ export async function runCodingVirtualRepositoryScenario(): Promise<CodingScenar
     submittedAt: SCENARIO_OCCURRED_AT,
   });
 
-  const listObservation = successfulObservation({
-    namespace,
-    observationOrdinal: 1,
-    actionOrdinal: 1,
-    firstBlockOrdinal: 1,
-    capabilityPackId: VIRTUAL_REPOSITORY_REFERENCES.list.packId,
-    audit: { root: "", matchedCount: 2, releasedCount: 2, truncated: false },
-    human: { summary: "Released 2 virtual path(s)." },
-    agent: { files: ["README.md", GREETING_PATH], truncated: false },
-  });
-  const sourceSha256 = sha256Hex(ORIGINAL_GREETING);
-  const readBytes = Buffer.byteLength(RELEASED_ORIGINAL_GREETING, "utf8");
-  const readObservation = successfulObservation({
-    namespace,
-    observationOrdinal: 2,
-    actionOrdinal: 2,
-    firstBlockOrdinal: 3,
-    capabilityPackId: VIRTUAL_REPOSITORY_REFERENCES.read.packId,
-    audit: {
-      path: GREETING_PATH,
-      byteLength: readBytes,
-      sourceSha256,
-      truncated: false,
-    },
-    human: {
-      summary: `Released ${String(readBytes)} byte(s) from ${GREETING_PATH}.`,
-    },
-    agent: {
-      path: GREETING_PATH,
-      content: RELEASED_ORIGINAL_GREETING,
-      truncated: false,
-    },
-  });
-  const patchBytes = Buffer.byteLength(PROPOSED_PATCH, "utf8");
-  const replacementSha256 = sha256Hex(REPLACEMENT_GREETING);
-  const patchObservation = successfulObservation({
-    namespace,
-    observationOrdinal: 3,
-    actionOrdinal: 3,
-    firstBlockOrdinal: 5,
-    capabilityPackId: VIRTUAL_REPOSITORY_REFERENCES.patch.packId,
-    audit: {
-      path: GREETING_PATH,
-      byteLength: patchBytes,
-      preimageSha256: sourceSha256,
-      replacementSha256,
-    },
-    human: {
-      summary: `Proposed a ${String(patchBytes)} byte patch for ${GREETING_PATH}; no fixture content was changed.`,
-      patch: PROPOSED_PATCH,
-    },
-    agent: { path: GREETING_PATH, patch: PROPOSED_PATCH },
+  await previewBroker.assembleAgentContext({
+    turnId: fixedAttemptId(namespace, 1),
+    agentRequestId: fixedAttemptId(namespace, 1),
+    orderedItemIds: [],
   });
 
+  const actionInputs: readonly JsonObject[] = [
+    { root: "src", maxResults: 10 },
+    { path: GREETING_PATH, startLine: 1, endLine: 3, maxBytes: 1_024 },
+    { path: GREETING_PATH, replacement: REPLACEMENT_GREETING },
+  ];
+  const preview = await previewCodingActions(
+    gateway,
+    gatewayAdvertisement,
+    previewBroker,
+    references,
+    actionInputs,
+  );
+  const replacementSha256 = sha256Hex(REPLACEMENT_GREETING);
+  const patchObservation = preview.eventObservations[2]!;
   const outcome: OutcomeEnvelope = immutable({
     schemaVersion: CONTRACT_SCHEMA_VERSION,
     outcomeId: fixedOutcomeId(namespace),
@@ -278,19 +304,21 @@ export async function runCodingVirtualRepositoryScenario(): Promise<CodingScenar
 
   const expectedTranscript: readonly AgentTurnRequest[] = immutable([
     turnRequest(namespace, 1, objective, advertised, []),
-    turnRequest(namespace, 2, objective, advertised, [listObservation]),
+    turnRequest(namespace, 2, objective, advertised, [
+      preview.agentObservations[0]!,
+    ]),
     turnRequest(namespace, 3, objective, advertised, [
-      listObservation,
-      readObservation,
+      preview.agentObservations[0]!,
+      preview.agentObservations[1]!,
     ]),
     turnRequest(namespace, 4, objective, advertised, [
-      listObservation,
-      readObservation,
-      patchObservation,
+      preview.agentObservations[0]!,
+      preview.agentObservations[1]!,
+      preview.agentObservations[2]!,
     ]),
   ]);
   const script: ScriptedAgentDriverScript = immutable({
-    scriptId: "coding-virtual-golden",
+    scriptId: "coding-virtual-broker-current",
     turns: [
       {
         expectedRequest: expectedTranscript[0]!,
@@ -298,7 +326,7 @@ export async function runCodingVirtualRepositoryScenario(): Promise<CodingScenar
           namespace,
           1,
           VIRTUAL_REPOSITORY_REFERENCES.list,
-          { root: "", maxResults: 10 },
+          actionInputs[0]!,
           { inputTokens: 10, outputTokens: 3 },
         ),
       },
@@ -308,7 +336,7 @@ export async function runCodingVirtualRepositoryScenario(): Promise<CodingScenar
           namespace,
           2,
           VIRTUAL_REPOSITORY_REFERENCES.read,
-          { path: GREETING_PATH, startLine: 1, endLine: 3, maxBytes: 1_024 },
+          actionInputs[1]!,
           { inputTokens: 14, outputTokens: 5 },
         ),
       },
@@ -318,7 +346,7 @@ export async function runCodingVirtualRepositoryScenario(): Promise<CodingScenar
           namespace,
           3,
           VIRTUAL_REPOSITORY_REFERENCES.patch,
-          { path: GREETING_PATH, replacement: REPLACEMENT_GREETING },
+          actionInputs[2]!,
           { inputTokens: 18, outputTokens: 9 },
         ),
       },
@@ -337,12 +365,6 @@ export async function runCodingVirtualRepositoryScenario(): Promise<CodingScenar
   const profileRegistry = new InMemoryTaskProfileRegistry();
   profileRegistry.register(CODING_VIRTUAL_TASK_PROFILE);
   const eventStore = new InMemoryEventStore({ now: () => SCENARIO_RECORDED_AT });
-  const gateway = new CapabilityGateway(
-    packRegistry,
-    createPinnedPolicyEvaluator(CODING_VIRTUAL_POLICY_SNAPSHOT, {
-      secretCorrelationToken: "coding-scenario-policy-token-0001",
-    }),
-  );
   const host = new SynchronousRuntimeHost({
     eventStore,
     profileRegistry,
@@ -351,13 +373,13 @@ export async function runCodingVirtualRepositoryScenario(): Promise<CodingScenar
       componentVersion: 1,
       driver,
     },
-    contextSources: new ContextSourceRegistry([]),
+    contextBrokerFactory: liveBrokerFactory,
     capabilityPacks: packRegistry,
     capabilityGateway: gateway,
     contextPlanner: Object.freeze({ plan: () => [] }),
     installedPolicy: {
       componentId: "coding-fixture-safe-default",
-      componentVersion: 1,
+      componentVersion: 2,
       snapshot: CODING_VIRTUAL_POLICY_SNAPSHOT,
     },
     normalizationSubject: {
@@ -375,6 +397,13 @@ export async function runCodingVirtualRepositoryScenario(): Promise<CodingScenar
   });
 
   const execution = await host.run(objective);
+  if (execution.state.status !== "completed") {
+    throw new Error(
+      `The coding broker-current scenario did not complete: ${JSON.stringify(
+        execution.state.result,
+      )}`,
+    );
+  }
   driver.assertExhausted();
   const fixtureAfter = repositorySnapshot(repository);
   const failClosedReplay = await replayWithFailOnEffectPorts(eventStore, runId);
@@ -390,6 +419,106 @@ export async function runCodingVirtualRepositoryScenario(): Promise<CodingScenar
     fixtureAfter,
     patchObservationId: fixedObservationId(namespace, 3),
   });
+}
+
+async function previewCodingActions(
+  gateway: CapabilityGateway,
+  advertisement: CapabilityAdvertisement,
+  broker: ContextBrokerIntegration,
+  references: readonly CapabilityOperationReference[],
+  inputs: readonly JsonObject[],
+): Promise<{
+  readonly eventObservations: readonly Observation[];
+  readonly agentObservations: readonly AgentObservation[];
+}> {
+  const eventObservations: Observation[] = [];
+  const agentObservations: AgentObservation[] = [];
+  const releasedItemIds: string[] = [];
+  for (let index = 0; index < references.length; index += 1) {
+    const ordinal = index + 1;
+    const reference = references[index]!;
+    const input = inputs[index]!;
+    const prepared = await gateway.normalize(
+      { schemaVersion: CONTRACT_SCHEMA_VERSION, ...reference, input },
+      {
+        actionId: fixedActionId(CODING_SCENARIO_NAMESPACE, ordinal),
+        subject: {
+          kind: "scripted",
+          driverId: "driver:milestone-a-coding",
+        },
+        environment: {
+          profileId: CODING_VIRTUAL_TASK_PROFILE.profileId,
+          sandboxed: true,
+          networkProfile: "disabled",
+          trustLevel: "trusted_fixture",
+        },
+      },
+      advertisement,
+    );
+    let evaluated: ReturnType<CapabilityGateway["evaluate"]>;
+    try {
+      evaluated = gateway.evaluate(prepared);
+    } catch (error: unknown) {
+      throw new Error(`Coding preview gateway evaluation failed at action ${String(ordinal)}.`, {
+        cause: error,
+      });
+    }
+    const result = await gateway.execute(evaluated, {
+      signal: new AbortController().signal,
+    });
+    const nextAttemptId = fixedAttemptId(
+      CODING_SCENARIO_NAMESPACE,
+      ordinal + 1,
+    );
+    const release = await releasePreviewCapabilityOutput(
+      broker,
+      nextAttemptId,
+      result,
+    );
+    releasedItemIds.push(release.item.itemId);
+    const outputBlock = brokerJsonContentBlock(release.item, release.manifest);
+    const expected = successfulBrokeredObservation({
+      namespace: CODING_SCENARIO_NAMESPACE,
+      observationOrdinal: ordinal,
+      actionOrdinal: ordinal,
+      humanBlockOrdinal: ordinal,
+      capabilityPackId: reference.packId,
+      audit: result.audit,
+      human: result.human,
+      agentContent: [outputBlock],
+    });
+    eventObservations.push(expected.eventObservation);
+    agentObservations.push(expected.agentObservation);
+    await broker.assembleAgentContext({
+      turnId: nextAttemptId,
+      agentRequestId: nextAttemptId,
+      orderedItemIds: [...releasedItemIds],
+    });
+  }
+  return Object.freeze({
+    eventObservations: Object.freeze(eventObservations),
+    agentObservations: Object.freeze(agentObservations),
+  });
+}
+
+async function releasePreviewCapabilityOutput(
+  broker: ContextBrokerIntegration,
+  turnId: string,
+  result: CapabilityExecutionResult,
+) {
+  const release = await broker.releaseCapabilityAgentView({
+    turnId,
+    sourceVersion: result.agentContextRelease.sourceVersion,
+    resource: result.agentContextRelease.resource,
+    policyProjection: result.agentContextRelease.policyProjection,
+    output: result.agent,
+    classification: result.agentContextRelease.classification,
+    reason: result.agentContextRelease.reason,
+  });
+  if (release.status !== "released") {
+    throw new Error("A coding preview capability output was denied unexpectedly.");
+  }
+  return release;
 }
 
 function turnRequest(
@@ -414,7 +543,7 @@ function turnRequest(
 function actionTurn(
   namespace: number,
   ordinal: number,
-  reference: (typeof VIRTUAL_REPOSITORY_REFERENCES)[keyof typeof VIRTUAL_REPOSITORY_REFERENCES],
+  reference: CapabilityOperationReference,
   input: JsonObject,
   dimensions: Readonly<Record<string, number>>,
 ): ScriptedAgentDriverScript["turns"][number]["events"] {
@@ -431,6 +560,19 @@ function actionTurn(
     { type: "usage_reported", dimensions },
     { type: "completed" },
   ];
+}
+
+function createCodingBrokerFactory(evaluator: PinnedPolicyEvaluator) {
+  return createContextBrokerIntegrationFactory({
+    policySnapshotId: CODING_VIRTUAL_POLICY_SNAPSHOT.policyVersionId,
+    releasePolicy: CODING_RELEASE_POLICY,
+    sources: new BrokerContextSourceRegistry([]),
+    policy: createPinnedContextPolicyAdapter({
+      evaluator,
+      releasePolicy: CODING_RELEASE_POLICY,
+    }),
+    budgets: CODING_BROKER_BUDGETS,
+  });
 }
 
 function repositorySnapshot(repository: VirtualRepository): JsonObject {
@@ -461,12 +603,33 @@ function logicalLines(content: string): string[] {
 }
 
 function compileCodingPolicy(): PolicySnapshot {
-  const result = compilePolicySnapshot({
-    policyVersionId: fixedPolicyVersionId(CODING_SCENARIO_NAMESPACE),
-    source: CODING_POLICY_SOURCE,
-    sourceId: "coding-virtual-fixture.guard",
-    defaultEffect: "deny",
-  });
+  const catalogs = composePolicyAttributeCatalogs([
+    BASE_POLICY_ATTRIBUTE_CATALOG,
+    CONTEXT_POLICY_ATTRIBUTE_CATALOG,
+    REPOSITORY_POLICY_ATTRIBUTE_CATALOG,
+  ]);
+  const result = compilePolicySnapshotSet(
+    {
+      policyVersionId: fixedPolicyVersionId(0xb102),
+      sources: [
+        {
+          sourceId: "coding-virtual-fixture.guard",
+          source: CODING_POLICY_SOURCE,
+        },
+        {
+          sourceId: "policies/context.guard",
+          source: ROOT_CONTEXT_POLICY_SOURCE,
+        },
+        {
+          sourceId: "packages/capability-repository/policies/context.guard",
+          source: REPOSITORY_CONTEXT_POLICY_SOURCE,
+        },
+      ],
+      defaultEffect: "deny",
+    },
+    {},
+    catalogs,
+  );
   if (!result.ok) {
     throw new Error(
       `The deterministic coding scenario policy did not compile: ${JSON.stringify(

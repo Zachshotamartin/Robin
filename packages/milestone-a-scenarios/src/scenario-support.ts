@@ -1,15 +1,25 @@
 import type {
   AdvertisedOperation,
+  AgentObservation,
   AgentDriver,
   AgentDriverDescriptor,
   AgentTurnRequest,
 } from "@guard/agent-driver";
+import { parseAgentObservation } from "@guard/agent-driver";
 import {
   CapabilityGateway,
   CapabilityPackRegistry,
   type CapabilityOperationReference,
 } from "@guard/capability-gateway";
-import { ContextSourceRegistry } from "@guard/context-broker";
+import {
+  BrokerContextSourceRegistry,
+  CONTEXT_POLICY_ATTRIBUTE_CATALOG,
+  createContextBrokerIntegrationFactory,
+  createContextReleasePolicySnapshot,
+  createPinnedContextPolicyAdapter,
+  type ContextManifestEntry,
+  type ReleasedContextItem,
+} from "@guard/context-broker";
 import {
   CONTRACT_SCHEMA_VERSION,
   ActionIdKind,
@@ -24,6 +34,7 @@ import {
   canonicalize,
   parseContentBlock,
   parseObservation,
+  parseResourceRef,
   type ActionId,
   type AgentAttemptId,
   type ApprovalId,
@@ -39,7 +50,9 @@ import {
 import type { EventStore } from "@guard/event-store";
 import type { TaskProfileRegistry } from "@guard/profile-registry";
 import {
+  BASE_POLICY_ATTRIBUTE_CATALOG,
   compilePolicySnapshot,
+  composePolicyAttributeCatalogs,
   createPinnedPolicyEvaluator,
   type PolicySnapshot,
 } from "@guard/policy-engine";
@@ -53,6 +66,40 @@ import {
 
 export const SCENARIO_OCCURRED_AT = "2026-01-02T03:04:05.000Z";
 export const SCENARIO_RECORDED_AT = "2026-01-02T03:04:06.000Z";
+
+/** Kept byte-identical to policies/context.guard; the tests guard that pin. */
+export const ROOT_CONTEXT_POLICY_SOURCE = `policy "deny-restricted-context" priority 1000 {
+  when action.pack == "guard.context" and resource.classification in ["restricted", "secret"]
+  deny
+  reason "Restricted or secret-classified resources cannot enter agent context"
+}
+
+policy "deny-networked-context-boundary" priority 900 {
+  when action.pack == "guard.context" and environment.network_profile != "disabled"
+  deny
+  reason "Context processing requires the network-disabled broker profile"
+}
+
+policy "allow-reviewed-context-reads" priority 600 {
+  when action.pack == "guard.context" and action.operation == "context.read" and action.side_effect == "none" and environment.sandboxed == true and environment.network_profile == "disabled" and resource.classification in ["public", "internal", "synthetic", "fixture"]
+  allow
+  reason "Reviewed metadata reads may proceed through the sandboxed context broker"
+}
+
+policy "allow-reviewed-context-releases" priority 600 {
+  when action.pack == "guard.context" and action.operation == "context.release" and action.side_effect == "none" and environment.sandboxed == true and environment.network_profile == "disabled" and resource.classification in ["public", "internal", "synthetic", "fixture"] and context.truncated == false
+  allow
+  reason "Complete reviewed content may be released through the context broker"
+}
+`;
+
+/** Kept byte-identical to capability-repository/policies/context.guard. */
+export const REPOSITORY_CONTEXT_POLICY_SOURCE = `policy "deny-secret-repository-context-paths" priority 950 {
+  when action.pack == "guard.context" and repo.path matches "**/.env*"
+  deny
+  reason "Secret-bearing repository paths cannot enter agent context"
+}
+`;
 
 const CATEGORY = Object.freeze({
   run: 0x01,
@@ -299,6 +346,118 @@ export function successfulObservation(input: {
   });
 }
 
+/**
+ * Independently projects a broker item into the exact JSON block shape used by
+ * the runtime-host driver boundary. Safe scenarios use this with a preview
+ * broker, while the live host builds its own blocks from its run broker.
+ */
+export function brokerJsonContentBlock(
+  item: ReleasedContextItem,
+  manifest: ContextManifestEntry,
+): JsonContentBlock {
+  if (
+    manifest.status !== "released" ||
+    manifest.itemId !== item.itemId ||
+    manifest.releasedContentHash !== item.contentHash ||
+    item.serializedValue !== canonicalize(item.value) ||
+    canonicalBytes(item.value).byteLength !== item.byteLength ||
+    canonicalSha256Hex(item.value) !== item.contentHash
+  ) {
+    throw new Error("Preview broker item and release manifest diverged.");
+  }
+  const valueRecord =
+    typeof item.value === "object" &&
+    item.value !== null &&
+    !Array.isArray(item.value)
+      ? (item.value as JsonObject)
+      : null;
+  const capabilityOutput = valueRecord?.["kind"] === "capability_output";
+  const parsed = parseContentBlock({
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    blockId: item.itemId,
+    modality: "json",
+    mediaType: item.mediaType,
+    byteLength: item.byteLength,
+    contentHash: item.contentHash,
+    classification: item.classification,
+    provenance: {
+      source: parseResourceRef(item.resource),
+      producer: {
+        kind: capabilityOutput ? "capability_worker" : "context_source",
+        id: item.resource.sourceId,
+      },
+      capturedAt: SCENARIO_OCCURRED_AT,
+    },
+    retentionClass: "run",
+    transformation:
+      manifest.redactions.length === 0
+        ? null
+        : {
+            schemaVersion: CONTRACT_SCHEMA_VERSION,
+            transformationId: "context-broker.redaction",
+            transformationVersion: 1,
+            inputContentHashes: [],
+          },
+    value: item.value,
+    jsonSchema: null,
+  });
+  if (parsed.modality !== "json") {
+    throw new Error("The preview broker JSON block changed modality.");
+  }
+  return parsed;
+}
+
+export function successfulBrokeredObservation(input: {
+  readonly namespace: number;
+  readonly observationOrdinal: number;
+  readonly actionOrdinal: number;
+  readonly humanBlockOrdinal: number;
+  readonly capabilityPackId: string;
+  readonly audit: JsonObject;
+  readonly human: JsonObject;
+  readonly agentContent: readonly JsonContentBlock[];
+}): {
+  readonly eventObservation: Observation;
+  readonly agentObservation: AgentObservation;
+} {
+  const observationId = fixedObservationId(
+    input.namespace,
+    input.observationOrdinal,
+  );
+  const actionId = fixedActionId(input.namespace, input.actionOrdinal);
+  const eventObservation = parseObservation({
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    observationId,
+    actionId,
+    status: "succeeded",
+    audit: input.audit,
+    human: [
+      jsonContentBlock({
+        namespace: input.namespace,
+        ordinal: input.humanBlockOrdinal,
+        value: input.human,
+        source: null,
+        producerKind: "capability_worker",
+        producerId: input.capabilityPackId,
+        classification: "internal",
+      }),
+    ],
+    agent: input.agentContent,
+    error: null,
+    occurredAt: SCENARIO_OCCURRED_AT,
+  });
+  const agentObservation = parseAgentObservation({
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    observationId,
+    actionId,
+    status: "succeeded",
+    content: input.agentContent,
+    error: null,
+    occurredAt: SCENARIO_OCCURRED_AT,
+  });
+  return Object.freeze({ eventObservation, agentObservation });
+}
+
 export async function replayWithFailOnEffectPorts(
   eventStore: EventStore,
   runId: RunId,
@@ -330,6 +489,37 @@ export async function replayWithFailOnEffectPorts(
     },
   });
   const capabilityPacks = new FailOnCallCapabilityPackRegistry(fail);
+  const replayReleasePolicy = createContextReleasePolicySnapshot({
+    releasePolicyId: "scenario.replay",
+    releasePolicyVersion: 1,
+    secretDisposition: "deny",
+    promptInjectionDisposition: "tag",
+    truncatedDisposition: "deny",
+  });
+  const replayEvaluator = createPinnedPolicyEvaluator(REPLAY_POLICY_SNAPSHOT, {
+    secretCorrelationToken: "scenario-replay-context-token-0001",
+  });
+  const contextBrokerFactory = createContextBrokerIntegrationFactory({
+    policySnapshotId: REPLAY_POLICY_SNAPSHOT.policyVersionId,
+    releasePolicy: replayReleasePolicy,
+    sources: new BrokerContextSourceRegistry([]),
+    policy: createPinnedContextPolicyAdapter({
+      evaluator: replayEvaluator,
+      releasePolicy: replayReleasePolicy,
+    }),
+    budgets: {
+      maximumResourceBytes: 256,
+      maximumRequestBytes: 256,
+      maximumItemsPerTurn: 1,
+      maximumBytesPerTurn: 256,
+      maximumItemsPerRun: 1,
+      maximumBytesPerRun: 256,
+      maximumControlCharacterRatio: 0.05,
+    },
+  });
+  // Reserve this run before replay. If replay ever attempts to create a live
+  // broker, the recognized factory fails instead of silently performing work.
+  contextBrokerFactory.createForRun({ runId });
 
   const options: SynchronousRuntimeHostOptions = {
     eventStore,
@@ -339,7 +529,7 @@ export async function replayWithFailOnEffectPorts(
       componentVersion: 1,
       driver,
     },
-    contextSources: new FailOnCallContextSourceRegistry(fail),
+    contextBrokerFactory,
     capabilityPacks,
     capabilityGateway: new FailOnCallCapabilityGateway(capabilityPacks, fail),
     contextPlanner: Object.freeze({
@@ -439,20 +629,6 @@ class FailOnCallTaskProfileRegistry implements TaskProfileRegistry {
     _value: unknown,
   ): ReturnType<TaskProfileRegistry["validateOutcome"]> {
     return failEffect(this, "profile-registry.validateOutcome");
-  }
-}
-
-class FailOnCallContextSourceRegistry extends ContextSourceRegistry {
-  public constructor(fail: EffectFailure) {
-    super([]);
-    EFFECT_FAILURES.set(this, fail);
-  }
-
-  public override resolve(
-    _sourceId: string,
-    _sourceVersion: number,
-  ): ReturnType<ContextSourceRegistry["resolve"]> {
-    return failEffect(this, "context-sources.resolve");
   }
 }
 
@@ -562,6 +738,10 @@ function deepFreeze<T>(value: T): T {
 }
 
 function compileReplayPolicy(): PolicySnapshot {
+  const catalogs = composePolicyAttributeCatalogs([
+    BASE_POLICY_ATTRIBUTE_CATALOG,
+    CONTEXT_POLICY_ATTRIBUTE_CATALOG,
+  ]);
   const result = compilePolicySnapshot({
     policyVersionId: fixedPolicyVersionId(0xfffe),
     source: `policy "allow-replay-fixture" priority 1 {
@@ -572,7 +752,7 @@ function compileReplayPolicy(): PolicySnapshot {
 `,
     sourceId: "scenario-replay.guard",
     defaultEffect: "deny",
-  });
+  }, {}, catalogs);
   if (!result.ok) {
     throw new Error(
       `The deterministic replay policy did not compile: ${JSON.stringify(

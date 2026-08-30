@@ -13,6 +13,7 @@ import {
   type CapabilityPack,
 } from "@guard/capability-gateway";
 import {
+  InMemoryBrokerSource,
   InMemoryContextSource,
   MEMORY_POLICY_ATTRIBUTE_CATALOG,
 } from "@guard/context-broker";
@@ -68,6 +69,37 @@ export function createSyntheticContextSource(): InMemoryContextSource {
       },
     ],
     limits: { maximumRecords: 2, maximumRecordBytes: 256 },
+  });
+}
+
+/**
+ * Broker-native form of the deterministic synthetic context fixture.
+ *
+ * The legacy `InMemoryContextSource` export above remains available for
+ * replaying pre-broker Milestone A evidence. New runtime compositions must use
+ * this strict normalize/inspect/open source so metadata policy runs before any
+ * content bytes are opened.
+ */
+export function createSyntheticBrokerContextSource(): InMemoryBrokerSource {
+  return new InMemoryBrokerSource({
+    descriptor: {
+      sourceId: "synthetic:transform-input",
+      sourceVersion: 2,
+      scheme: "memory",
+      description: "Bounded synthetic input for a domain-neutral transform.",
+    },
+    records: [
+      {
+        recordId: "greeting",
+        content: canonicalize({
+          text: "  Guarded agents transform bounded data.  ",
+        }),
+        mediaType: "application/json",
+        classification: "synthetic",
+      },
+    ],
+    maximumRecords: 2,
+    maximumRecordBytes: 256,
   });
 }
 
