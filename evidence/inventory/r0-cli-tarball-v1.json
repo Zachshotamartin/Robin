@@ -4,23 +4,33 @@
   "archive": {
     "filename": "zachshotamartin-robin-0.0.0.tgz",
     "tar": {
-      "bytes": 211968,
-      "sha256": "e393752d784d2a5fc116ad5c70d0f997a0ae3124b69b8b5abd178c35bbc6c3f4"
+      "bytes": 212480,
+      "sha256": "3fed3e5da67271521247633cb40ccbb1ea1b8fe9b46cc592d72bcdd4846675bd"
     },
     "compressionProfiles": [
       {
-        "id": "darwin-arm64-npm-gzip-v1",
+        "id": "darwin-arm64-npm-11-19-0-gzip-v1",
         "platform": "darwin",
         "arch": "arm64",
-        "bytes": 38263,
-        "sha256": "001548dd69f74e0d2322ca36241613c0ecb6e16dfb1bba107d477036a6d82725"
+        "npmVersion": "11.19.0",
+        "bytes": 38290,
+        "sha256": "09517ac6bce3eef26de165068f05eed151833ed92aa1f9a41e6afad92c7c01a9"
       },
       {
-        "id": "linux-x64-npm-gzip-v1",
+        "id": "darwin-arm64-npm-10-9-8-gzip-v1",
+        "platform": "darwin",
+        "arch": "arm64",
+        "npmVersion": "10.9.8",
+        "bytes": 38438,
+        "sha256": "d8fd3fb748b79a0bff12204f547931aaf66290e9bbcd2c61c8478cfc05a888e4"
+      },
+      {
+        "id": "linux-x64-npm-10-9-8-gzip-v1",
         "platform": "linux",
         "arch": "x64",
-        "bytes": 38411,
-        "sha256": "c3de0766f22d9b7e2e6b4895e148a6a3b55461b3dc2bf132c90c7dc47254fa4f"
+        "npmVersion": "10.9.8",
+        "bytes": 38438,
+        "sha256": "d8fd3fb748b79a0bff12204f547931aaf66290e9bbcd2c61c8478cfc05a888e4"
       }
     ]
   },
@@ -351,8 +361,8 @@
       "path": "package.json",
       "type": "file",
       "mode": "0644",
-      "bytes": 1491,
-      "sha256": "7a8d082bf5f5c7efaea0f59b78810299811e85ce181b0516d325b6f8aecf4a6f"
+      "bytes": 1553,
+      "sha256": "f88a1401805d57974cf137216f30fdc8f38caf46cd6f73d63abd96da4d014b3c"
     }
   ]
 }

@@ -38,7 +38,7 @@
     "build": "npm run generate:build-metadata && tsc --build && node scripts/ensure-bin-executable.mjs",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "typecheck": "npm run check:build-metadata && tsc --build",
-    "test": "npm run build && node --test dist/*.test.js"
+    "test": "npm run build && node --test --test-reporter=../../scripts/deterministic-test-reporter.mjs dist/*.test.js"
   },
   "dependencies": {
     "@guard/contracts": "0.0.0",

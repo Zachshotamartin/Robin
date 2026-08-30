@@ -187,6 +187,11 @@ test("boundary mutation configuration pins critical scope and argv-only isolatio
   assert.match(runner, /"typescript", "bin", "tsc"/u);
   assert.match(runner, /GUARD_MUTATION_ENV_CANARY/u);
   assert.match(runner, /process\.kill\(-child\.pid, "SIGKILL"\)/u);
+  assert.match(runner, /mode:\s*"timeouts-enforced-not-reported"/u);
+  assert.doesNotMatch(
+    runner,
+    /\b(?:buildDurationMs|mutationDurationMs|durationMs)\b/u,
+  );
   assert.match(runner, /mkdtemp\(/u);
   assert.match(runner, /await rm\(temporaryRoot, \{ recursive: true, force: true \}\)/u);
   for (const mutationId of requiredBoundaryMutationIds) {

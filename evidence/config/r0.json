@@ -1,0 +1,236 @@
+{
+  "schemaVersion": 1,
+  "gate": "R0",
+  "versionManifest": "package.json",
+  "cliVersionManifest": "apps/cli/package.json",
+  "dependencyLock": "package-lock.json",
+  "traceability": {
+    "buildPlan": "docs/BUILD_PLAN.md",
+    "operationsTestPlan": "docs/OPERATIONS_TEST_PLAN.md"
+  },
+  "commands": [
+    {
+      "id": "dependency-install",
+      "executable": "npm",
+      "args": ["ci", "--ignore-scripts", "--silent", "--no-audit", "--no-fund"],
+      "timeoutMs": 900000
+    },
+    {
+      "id": "dependency-tree",
+      "executable": "npm",
+      "args": ["ls", "--all", "--json"],
+      "timeoutMs": 300000
+    },
+    {
+      "id": "docs-policy",
+      "executable": "npm",
+      "args": ["run", "test:repository"],
+      "timeoutMs": 300000
+    },
+    {
+      "id": "static",
+      "executable": "npm",
+      "args": ["run", "static"],
+      "timeoutMs": 900000
+    },
+    {
+      "id": "unit-contract",
+      "executable": "npm",
+      "args": ["run", "test:unit"],
+      "timeoutMs": 1200000
+    },
+    {
+      "id": "package-smoke",
+      "executable": "npm",
+      "args": ["run", "test", "--workspace", "@zachshotamartin/robin"],
+      "timeoutMs": 900000
+    },
+    {
+      "id": "gate-a",
+      "executable": "npm",
+      "args": ["run", "test:gate:a"],
+      "timeoutMs": 1200000
+    },
+    {
+      "id": "gate-b",
+      "executable": "npm",
+      "args": ["run", "test:gate:b"],
+      "timeoutMs": 3600000
+    }
+  ],
+  "requirements": [
+    {
+      "requirementId": "FR-CLI-004",
+      "terminalGate": "R10",
+      "status": "partial",
+      "ticketIds": ["R0.05", "R0.06"],
+      "testIds": ["UNIT-001", "SEC-001"],
+      "commandIds": ["unit-contract"],
+      "note": "R0 establishes the side-effect-free parser and cold paths; R10 owns completion over the full administrative grammar."
+    },
+    {
+      "requirementId": "FR-CLI-005",
+      "terminalGate": "R1",
+      "status": "partial",
+      "ticketIds": ["R0.05"],
+      "testIds": ["UNIT-001"],
+      "commandIds": ["unit-contract"],
+      "note": "R0 reserves and tests command parsing; R1 owns completion of the interactive prompt-versus-command behavior."
+    },
+    {
+      "requirementId": "FR-CLI-006",
+      "terminalGate": "R10",
+      "status": "partial",
+      "ticketIds": ["R0.06", "R0.09"],
+      "testIds": ["UNIT-001", "PTY-014"],
+      "commandIds": ["package-smoke"],
+      "note": "R0 establishes cold installed help and version paths; R10 owns the complete public command-tree and release snapshots."
+    },
+    {
+      "requirementId": "FR-AUTO-004",
+      "terminalGate": "R7",
+      "status": "partial",
+      "ticketIds": ["R0.06"],
+      "testIds": ["TERM-012", "PTY-011"],
+      "commandIds": ["package-smoke"],
+      "note": "R0 preserves flat machine output for implemented paths; R7 owns completion across supported headless modes."
+    },
+    {
+      "requirementId": "NFR-PERF-001",
+      "terminalGate": "R10",
+      "status": "partial",
+      "ticketIds": ["R0.06"],
+      "testIds": ["UNIT-001", "PTY-014"],
+      "commandIds": ["package-smoke"],
+      "note": "R0 proves forbidden subsystem imports are absent from cold paths; R10 owns supported-platform percentile thresholds."
+    },
+    {
+      "requirementId": "NFR-MAINT-004",
+      "terminalGate": "R10",
+      "status": "partial",
+      "ticketIds": ["R0.10"],
+      "testIds": ["SEC-019"],
+      "commandIds": ["docs-policy"],
+      "note": "R0 aligns coding-agent-first current and planned claims; R10 owns complete release-claim closure."
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "cli-synthetic-payload",
+      "path": "apps/cli/testdata/synthetic-payload.json",
+      "schemaVersion": 1
+    },
+    {
+      "id": "runtime-generic-events",
+      "path": "packages/runtime/testdata/generic-events-v1.json",
+      "schemaVersion": 1
+    },
+    {
+      "id": "policy-generator-seeds",
+      "path": "packages/policy-engine/testdata/policy-generator-seeds-v1.json",
+      "schemaVersion": 1
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "root-package-manifest",
+      "path": "package.json",
+      "mediaType": "application/json"
+    },
+    {
+      "id": "cli-package-manifest",
+      "path": "apps/cli/package.json",
+      "mediaType": "application/json"
+    },
+    {
+      "id": "repository-license",
+      "path": "LICENSE",
+      "mediaType": "text/plain"
+    },
+    {
+      "id": "cli-package-license",
+      "path": "apps/cli/LICENSE",
+      "mediaType": "text/plain"
+    },
+    {
+      "id": "cli-tarball-inventory",
+      "path": "evidence/inventory/r0-cli-tarball-v1.json",
+      "mediaType": "application/json"
+    },
+    {
+      "id": "manifest-schema",
+      "path": "evidence/schema/gate-evidence-manifest-v1.schema.json",
+      "mediaType": "application/schema+json"
+    },
+    {
+      "id": "deterministic-test-reporter",
+      "path": "scripts/deterministic-test-reporter.mjs",
+      "mediaType": "text/javascript"
+    }
+  ],
+  "supportedClaims": [
+    "This manifest records only local deterministic R0 candidate commands at the recorded tested commit; it does not by itself establish R0 acceptance.",
+    "The accepted pre-pivot Gate A and Gate B deterministic suites remained green at the recorded tested commit.",
+    "The private development CLI tarball package smoke passed at the recorded tested commit."
+  ],
+  "deferredClaims": [
+    "A complete raw-mode interactive R1 coding-agent terminal is not established by R0.",
+    "A production model provider, API-key flow, or provider compatibility claim is not established by R0.",
+    "Physical repository tools, process execution, Git mutation, and sandbox enforcement are not established by R0.",
+    "Durable sessions, resume, credential storage, daemon operation, and editor integration are not established by R0.",
+    "A public package publication, production installation channel, or user-data migration is not established by R0.",
+    "GitHub repository settings, branch protection, pull-request linkage, hosted CI identity, and mainline merge acceptance are external R0 records not established by this local manifest."
+  ],
+  "knownLimitations": [
+    {
+      "id": "tested-commit-semantics",
+      "summary": "The commit field identifies the clean source commit tested before the manifest file is written.",
+      "impact": "A manifest committed later intentionally points to its tested parent/source commit and never claims to hash itself."
+    },
+    {
+      "id": "single-host-capture",
+      "summary": "This local manifest records one host environment only.",
+      "impact": "It does not establish a supported operating-system or architecture matrix beyond separately linked CI evidence."
+    },
+    {
+      "id": "r1-preview-unaccepted",
+      "summary": "The existing ephemeral synthetic conversation remains an unaccepted preview.",
+      "impact": "R0 evidence cannot be used to claim the complete R1 coding-agent or terminal journey."
+    },
+    {
+      "id": "partial-requirement-evidence",
+      "summary": "Evidence schema v1 records partial requirement progress only.",
+      "impact": "No requirement can be marked complete until a later schema binds implemented test identities to reviewed jobs and enforcement points."
+    },
+    {
+      "id": "tracked-evidence-inputs",
+      "summary": "Every R0 fixture and artifact hashed by the manifest is a tracked input at the tested commit.",
+      "impact": "Generated reports need a later provenance-bearing output descriptor rather than being treated as committed R0 input evidence."
+    },
+    {
+      "id": "trusted-gate-commands",
+      "summary": "R0 gate commands run in an isolated disposable checkout; macOS capture additionally denies source-tree reads and writes with inherited sandbox-exec policy, while non-macOS POSIX capture retains process-group/source-audit isolation. Schema v1 capture and replay fail closed on Windows until descendant process-tree containment exists.",
+      "impact": "The manifest records source isolation, not complete process-lifecycle containment. A descendant that creates a new session can escape the original process group and may briefly outlive capture; timeout handling closes retained pipes after a fixed grace so evidence fails instead of hanging, and the inherited macOS source denial still applies. Non-macOS POSIX capture assumes reviewed commands and locked dependencies are not actively malicious; stronger cross-platform process-tree isolation remains later work."
+    },
+    {
+      "id": "command-resource-quotas",
+      "summary": "R0 bounds command wall time and each stdout/stderr stream, but does not impose OS-level CPU, memory, PID, disk, or ignored-output quotas.",
+      "impact": "Only reviewed locked gate commands are eligible for R0 capture. Host resource containment requires a future cgroup, container, job-object, or equivalent platform boundary and is not claimed by this manifest."
+    },
+    {
+      "id": "external-r0-acceptance",
+      "summary": "The local manifest contains no GitHub, pull-request, hosted-run, branch-protection, or merge identity.",
+      "impact": "R0 remains a candidate until those external records pass review and the candidate is merged to mainline."
+    },
+    {
+      "id": "ephemeral-package-archive",
+      "summary": "R0 package smoke verifies the actual temporary tarball against a reviewed platform/architecture/npm-version gzip SHA-256/size, the cross-platform tar SHA-256/size, npm's SHA-1/SHA-512 metadata, and the exact 47-file type/mode/size/SHA-256 inventory before removing it.",
+      "impact": "The local R0 manifest retains reviewed macOS-arm64/npm-10, macOS-arm64/npm-11, and Linux-x64/npm-10 compression profiles plus the canonical tar digest through the hashed inventory, but not the distributable archive or a release signature; immutable artifact retention and provenance remain R10 work."
+    },
+    {
+      "id": "operational-duration-metadata",
+      "summary": "Command duration is retained as operational metadata and checked only against a bounded replay plausibility envelope.",
+      "impact": "R0 evidence attests exact command output bytes, digests, status, inputs, and environment, but it is not a performance benchmark or duration attestation; supported-platform percentile evidence remains R10 work."
+    }
+  ]
+}

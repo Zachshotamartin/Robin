@@ -44,6 +44,7 @@ interface PackResult {
   }[];
   readonly integrity: string;
   readonly name: string;
+  readonly npmVersion: string;
   readonly shasum: string;
   readonly size: number;
   readonly unpackedSize: number;
@@ -63,6 +64,7 @@ interface ReviewedPackInventory {
       readonly id: string;
       readonly platform: NodeJS.Platform;
       readonly arch: NodeJS.Architecture;
+      readonly npmVersion: string;
       readonly bytes: number;
       readonly sha256: string;
     }[];
@@ -424,7 +426,7 @@ function assertReviewedPackInventory(result: PackResult): void {
   assert.equal(paths.size, actual.length, "tarball inventory repeats a path");
   assert.deepEqual(actual, expected);
   assert.equal(result.filename, REVIEWED_PACK_INVENTORY.archive.filename);
-  assert.equal(result.size, currentCompressionProfile().bytes);
+  assert.equal(result.size, currentCompressionProfile(result.npmVersion).bytes);
   assert.ok(result.size <= MAXIMUM_PACK_ARCHIVE_BYTES);
   assert.ok(result.unpackedSize <= MAXIMUM_PACK_UNPACKED_BYTES);
   assert.equal([...paths].some((path) => /(?:^|\/)src\//u.test(path)), false);
@@ -449,7 +451,7 @@ async function assertPackArchiveIntegrity(
   );
   assert.equal(contents.length, pack.size, "npm-reported tarball size differs from bytes");
   assert.equal(pack.filename, REVIEWED_PACK_INVENTORY.archive.filename);
-  const compressionProfile = currentCompressionProfile();
+  const compressionProfile = currentCompressionProfile(pack.npmVersion);
   assert.equal(contents.length, compressionProfile.bytes);
   assert.equal(
     createHash("sha256").update(contents).digest("hex"),
@@ -598,6 +600,7 @@ async function loadReviewedPackInventory(): Promise<ReviewedPackInventory> {
       "arch",
       "bytes",
       "id",
+      "npmVersion",
       "platform",
       "sha256",
     ]);
@@ -610,7 +613,11 @@ async function loadReviewedPackInventory(): Promise<ReviewedPackInventory> {
     compressionProfileIds.add(profile.id);
     assert.match(profile.platform, /^[a-z0-9]+$/u);
     assert.match(profile.arch, /^[a-z0-9_]+$/u);
-    const cell = `${profile.platform}/${profile.arch}`;
+    assert.match(
+      profile.npmVersion,
+      /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u,
+    );
+    const cell = `${profile.platform}/${profile.arch}/npm-${profile.npmVersion}`;
     assert.equal(
       compressionPlatformCells.has(cell),
       false,
@@ -660,15 +667,19 @@ async function loadReviewedPackInventory(): Promise<ReviewedPackInventory> {
   return inventory as ReviewedPackInventory;
 }
 
-function currentCompressionProfile(): ReviewedPackInventory["archive"]["compressionProfiles"][number] {
+function currentCompressionProfile(
+  npmVersion: string,
+): ReviewedPackInventory["archive"]["compressionProfiles"][number] {
   const matches = REVIEWED_PACK_INVENTORY.archive.compressionProfiles.filter(
     (profile) =>
-      profile.platform === process.platform && profile.arch === process.arch,
+      profile.platform === process.platform &&
+      profile.arch === process.arch &&
+      profile.npmVersion === npmVersion,
   );
   assert.equal(
     matches.length,
     1,
-    `npm archive compression is not reviewed for ${process.platform}/${process.arch}`,
+    `npm archive compression is not reviewed for ${process.platform}/${process.arch}/npm-${npmVersion}`,
   );
   return matches[0]!;
 }
@@ -761,9 +772,22 @@ async function readBoundedFile(
 async function npmPack(extra: readonly string[]): Promise<PackResult> {
   const environmentRoot = await mkdtemp(join(tmpdir(), "robin-cli-pack-npm-"));
   try {
+    const environment = await isolatedNpmEnvironment(environmentRoot);
+    const versionResult = await execFile("npm", ["--version"], {
+      cwd: APP_ROOT,
+      env: environment,
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024,
+    });
+    const npmVersion = versionResult.stdout.trim();
+    assert.match(
+      npmVersion,
+      /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u,
+    );
     const result = await execFile("npm", ["pack", ...extra], {
       cwd: APP_ROOT,
-      env: await isolatedNpmEnvironment(environmentRoot),
+      env: environment,
       encoding: "utf8",
       timeout: 60_000,
       maxBuffer: 16 * 1024 * 1024,
@@ -772,7 +796,7 @@ async function npmPack(extra: readonly string[]): Promise<PackResult> {
     assert.equal(Array.isArray(decoded), true);
     const first = (decoded as PackResult[])[0];
     assert.notEqual(first, undefined);
-    return first!;
+    return Object.freeze({ ...first!, npmVersion });
   } finally {
     await rm(environmentRoot, { recursive: true, force: true });
   }

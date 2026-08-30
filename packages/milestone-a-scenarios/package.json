@@ -19,7 +19,7 @@
     "build": "tsc --build",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "typecheck": "tsc --build",
-    "test": "npm run build && node --test dist/*.test.js"
+    "test": "npm run build && node --test --test-reporter=../../scripts/deterministic-test-reporter.mjs dist/*.test.js"
   },
   "dependencies": {
     "@guard/agent-driver": "0.0.0",

@@ -24,9 +24,14 @@
   "scripts": {
     "build": "node scripts/run-workspace-script.mjs build",
     "check": "npm run static && npm run test:unit",
+    "evidence:capture:r0": "node scripts/gate-evidence.mjs capture --config evidence/config/r0.json --output evidence/manifests/r0.json",
+    "evidence:validate": "node scripts/gate-evidence.mjs validate",
+    "evidence:validate-config:r0": "node scripts/gate-evidence.mjs validate-config --config evidence/config/r0.json",
     "static": "npm run typecheck && npm run test:repository",
     "test": "npm run test:repository && npm run test:unit",
-    "test:repository": "node --test scripts/check-docs.test.mjs scripts/check-architecture.test.mjs scripts/check-gate-b-configuration.test.mjs scripts/check-repository-policy.test.mjs scripts/workspace-graph.test.mjs",
+    "test:evidence": "node --test --test-reporter=./scripts/deterministic-test-reporter.mjs scripts/gate-evidence.test.mjs",
+    "test:reporter": "node --test --test-reporter=./scripts/deterministic-test-reporter.mjs scripts/deterministic-test-reporter.test.mjs",
+    "test:repository": "node --test --test-reporter=./scripts/deterministic-test-reporter.mjs scripts/check-docs.test.mjs scripts/check-architecture.test.mjs scripts/check-gate-b-configuration.test.mjs scripts/check-repository-policy.test.mjs scripts/deterministic-test-reporter.test.mjs scripts/gate-evidence.test.mjs scripts/workspace-graph.test.mjs",
     "test:unit": "node scripts/run-workspace-script.mjs test",
     "test:contracts": "npm run test:gate:b:contracts",
     "pretest:gate:b:contracts": "npm run build",
@@ -49,6 +54,7 @@
   },
   "devDependencies": {
     "@types/node": "26.4.0",
+    "ajv": "8.20.0",
     "typescript": "7.0.2"
   }
 }
