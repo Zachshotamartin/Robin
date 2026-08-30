@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "seeds": [305419896, 2654435769, 3735928559, 608135816],
+  "rulesPerSeed": 12,
+  "actionsPerSeed": 128
+}

@@ -672,6 +672,80 @@ test("every rule in the shipped default policy has a match and near miss", async
   assert.equal(run.passed, 6);
 });
 
+test("seeded generated decisions match an independent three-valued reference", async () => {
+  const raw: unknown = JSON.parse(
+    await readFile(
+      new URL("../testdata/policy-generator-seeds-v1.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  assert.equal(typeof raw, "object");
+  assert.notEqual(raw, null);
+  assert.equal(Array.isArray(raw), false);
+  const configuration = raw as Readonly<Record<string, unknown>>;
+  assert.deepEqual(Object.keys(configuration).sort(), [
+    "actionsPerSeed",
+    "rulesPerSeed",
+    "schemaVersion",
+    "seeds",
+  ]);
+  assert.equal(configuration["schemaVersion"], 1);
+  assert.ok(Array.isArray(configuration["seeds"]));
+  const seeds = configuration["seeds"] as readonly unknown[];
+  assert.ok(seeds.length > 0 && seeds.length <= 16);
+  assert.ok(seeds.every((seed) => Number.isSafeInteger(seed) && (seed as number) > 0));
+  const rulesPerSeed = configuration["rulesPerSeed"];
+  const actionsPerSeed = configuration["actionsPerSeed"];
+  assert.ok(Number.isSafeInteger(rulesPerSeed) && (rulesPerSeed as number) >= 8);
+  assert.ok(Number.isSafeInteger(actionsPerSeed) && (actionsPerSeed as number) >= 125);
+
+  let evaluatedCases = 0;
+  for (const [seedIndex, seedValue] of seeds.entries()) {
+    const random = xorshift32(seedValue as number);
+    const rules = Array.from(
+      { length: rulesPerSeed as number },
+      (_, ruleIndex) => generatedRule(random, seedIndex, ruleIndex),
+    );
+    const snapshot = compile(
+      `${rules.map((rule) => rule.source).join("\n\n")}\n`,
+    );
+    for (let index = 0; index < (actionsPerSeed as number); index += 1) {
+      const operationId = choose(random, [
+        "read_file",
+        "list_files",
+        "run_tests",
+        "publish",
+      ] as const);
+      const sideEffectClass = choose(random, [
+        "none",
+        "local_reversible",
+        "external",
+      ] as const);
+      const omitIntent = random() % 4 === 0;
+      const intent = omitIntent
+        ? undefined
+        : choose(random, ["inspect", "install_dependency", operationId] as const);
+      const candidate = action({
+        actionOrdinal: seedIndex * (actionsPerSeed as number) + index + 1,
+        operationId,
+        sideEffectClass,
+        sandboxed: random() % 2 === 0,
+        omitIntent,
+        ...(intent === undefined ? {} : { intent }),
+      });
+      const actual = evaluatePolicySnapshot(snapshot, candidate, {
+        secretCorrelationToken: TOKEN,
+      });
+      const expected = referenceDecision(rules, candidate);
+      assert.equal(actual.effect, expected.effect);
+      assert.equal(actual.winningPolicyName, expected.winningPolicyName);
+      assert.deepEqual(actual.matchedPolicyNames, expected.matchedPolicyNames);
+      evaluatedCases += 1;
+    }
+  }
+  assert.ok(evaluatedCases >= 500);
+});
+
 function compile(
   source: string,
   policyVersionId = POLICY_ID,
@@ -711,6 +785,7 @@ function action(options: {
   readonly executable?: string;
   readonly argv?: readonly string[];
   readonly intent?: string;
+  readonly omitIntent?: boolean;
   readonly sandboxed?: boolean;
   readonly networkProfile?: string;
 }): NormalizedAction {
@@ -722,9 +797,10 @@ function action(options: {
     classification: options.classification ?? "internal",
   };
   if (options.path !== undefined) resource["path"] = options.path;
-  const request: Record<string, unknown> = {
-    intent: options.intent ?? options.operationId,
-  };
+  const request: Record<string, unknown> = {};
+  if (options.omitIntent !== true) {
+    request["intent"] = options.intent ?? options.operationId;
+  }
   if (options.executable !== undefined) request["executable"] = options.executable;
   if (options.argv !== undefined) request["argv"] = [...options.argv];
   return parseNormalizedAction({
@@ -751,4 +827,207 @@ function action(options: {
     sideEffectClass: options.sideEffectClass ?? "none",
     preconditions: [],
   });
+}
+
+type GeneratedEffect = "allow" | "deny" | "require_approval";
+
+interface GeneratedPredicate {
+  readonly source: string;
+  evaluate(action: NormalizedAction): TruthValue;
+}
+
+interface GeneratedRule {
+  readonly name: string;
+  readonly priority: number;
+  readonly effect: GeneratedEffect;
+  readonly source: string;
+  readonly predicate: GeneratedPredicate;
+}
+
+function generatedRule(
+  random: () => number,
+  seedIndex: number,
+  ruleIndex: number,
+): GeneratedRule {
+  const name = `generated-${String(seedIndex)}-${String(ruleIndex).padStart(2, "0")}`;
+  const priority = random() % 5;
+  const effect = choose(random, ["allow", "deny", "require_approval"] as const);
+  const left = generatedAtom(random);
+  const right = generatedAtom(random);
+  const form = random() % 4;
+  const predicate: GeneratedPredicate = form === 0
+    ? left
+    : form === 1
+      ? {
+          source: `not (${left.source})`,
+          evaluate: (candidate) => referenceNot(left.evaluate(candidate)),
+        }
+      : form === 2
+        ? {
+            source: `(${left.source}) and (${right.source})`,
+            evaluate: (candidate) =>
+              referenceAnd(left.evaluate(candidate), right.evaluate(candidate)),
+          }
+        : {
+            source: `(${left.source}) or (${right.source})`,
+            evaluate: (candidate) =>
+              referenceOr(left.evaluate(candidate), right.evaluate(candidate)),
+          };
+  return Object.freeze({
+    name,
+    priority,
+    effect,
+    predicate,
+    source: `policy "${name}" priority ${String(priority)} {\n  when ${predicate.source}\n  ${effect}\n  reason "Generated reference rule ${String(seedIndex)}:${String(ruleIndex)}."\n}`,
+  });
+}
+
+function generatedAtom(random: () => number): GeneratedPredicate {
+  const operation = choose(random, ["read_file", "run_tests", "publish"] as const);
+  const intent = choose(random, ["inspect", "install_dependency"] as const);
+  const sideEffect = choose(random, ["none", "external"] as const);
+  const sandboxed = random() % 2 === 0;
+  switch (random() % 8) {
+    case 0:
+      return comparisonAtom(
+        `action.operation == "${operation}"`,
+        (candidate) => candidate.operationId === operation,
+      );
+    case 1:
+      return comparisonAtom(
+        `action.operation != "${operation}"`,
+        (candidate) => candidate.operationId !== operation,
+      );
+    case 2:
+      return optionalStringAtom(
+        `request.intent == "${intent}"`,
+        intent,
+        false,
+      );
+    case 3:
+      return optionalStringAtom(
+        `request.intent != "${intent}"`,
+        intent,
+        true,
+      );
+    case 4:
+      return {
+        source: "exists(request.intent)",
+        evaluate: (candidate) =>
+          Object.hasOwn(candidate.request, "intent") ? "true" : "false",
+      };
+    case 5:
+      return comparisonAtom(
+        `environment.sandboxed == ${String(sandboxed)}`,
+        (candidate) => candidate.environment["sandboxed"] === sandboxed,
+      );
+    case 6:
+      return comparisonAtom(
+        `action.side_effect in ["${sideEffect}", "local_reversible"]`,
+        (candidate) =>
+          candidate.sideEffectClass === sideEffect ||
+          candidate.sideEffectClass === "local_reversible",
+      );
+    default:
+      return comparisonAtom(
+        'action.operation starts_with "r"',
+        (candidate) => candidate.operationId.startsWith("r"),
+      );
+  }
+}
+
+function comparisonAtom(
+  source: string,
+  predicate: (action: NormalizedAction) => boolean,
+): GeneratedPredicate {
+  return Object.freeze({
+    source,
+    evaluate: (candidate: NormalizedAction) =>
+      predicate(candidate) ? "true" : "false",
+  });
+}
+
+function optionalStringAtom(
+  source: string,
+  expected: string,
+  inequality: boolean,
+): GeneratedPredicate {
+  return Object.freeze({
+    source,
+    evaluate(candidate: NormalizedAction) {
+      const actual = candidate.request["intent"];
+      if (actual === undefined) return "unknown";
+      const equal = actual === expected;
+      return (inequality ? !equal : equal) ? "true" : "false";
+    },
+  });
+}
+
+function referenceDecision(
+  rules: readonly GeneratedRule[],
+  candidate: NormalizedAction,
+): {
+  readonly effect: GeneratedEffect;
+  readonly winningPolicyName: string | null;
+  readonly matchedPolicyNames: readonly string[];
+} {
+  const matched = rules.filter((rule) => rule.predicate.evaluate(candidate) === "true");
+  const ordered = (effect: GeneratedEffect): GeneratedRule[] =>
+    matched
+      .filter((rule) => rule.effect === effect)
+      .sort(
+        (left, right) =>
+          right.priority - left.priority || compareReferenceUtf8(left.name, right.name),
+      );
+  const denies = ordered("deny");
+  const approvals = ordered("require_approval");
+  const allows = ordered("allow");
+  const winner = denies[0] ?? approvals[0] ?? allows[0] ?? null;
+  return Object.freeze({
+    effect: denies.length > 0
+      ? "deny"
+      : approvals.length > 0
+        ? "require_approval"
+        : allows.length > 0
+          ? "allow"
+          : "deny",
+    winningPolicyName: winner?.name ?? null,
+    matchedPolicyNames: Object.freeze(
+      [...denies, ...approvals, ...allows].map((rule) => rule.name),
+    ),
+  });
+}
+
+function referenceNot(value: TruthValue): TruthValue {
+  return value === "unknown" ? "unknown" : value === "true" ? "false" : "true";
+}
+
+function referenceAnd(left: TruthValue, right: TruthValue): TruthValue {
+  if (left === "false" || right === "false") return "false";
+  return left === "unknown" || right === "unknown" ? "unknown" : "true";
+}
+
+function referenceOr(left: TruthValue, right: TruthValue): TruthValue {
+  if (left === "true" || right === "true") return "true";
+  return left === "unknown" || right === "unknown" ? "unknown" : "false";
+}
+
+function compareReferenceUtf8(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+}
+
+function choose<T>(random: () => number, values: readonly T[]): T {
+  const selected = values[random() % values.length];
+  if (selected === undefined) throw new Error("generated choice set was empty");
+  return selected;
+}
+
+function xorshift32(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return state >>> 0;
+  };
 }
