@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -56,6 +63,7 @@ test("the actual tarball installs with its local workspace closure and runs offl
     `${JSON.stringify({ name: "robin-cli-install-smoke", private: true })}\n`,
     "utf8",
   );
+  const dependencyPaths = await localDependencyPaths(directory);
   await execFile(
     "npm",
     [
@@ -67,7 +75,7 @@ test("the actual tarball installs with its local workspace closure and runs offl
       "--package-lock=false",
       "--no-save",
       tarball,
-      ...localDependencyPaths(),
+      ...dependencyPaths,
     ],
     { cwd: installRoot, env: NPM_ENV, timeout: 60_000, maxBuffer: 4 * 1024 * 1024 },
   );
@@ -252,7 +260,9 @@ async function npmPack(extra: readonly string[]): Promise<PackResult> {
   return first!;
 }
 
-function localDependencyPaths(): readonly string[] {
+async function localDependencyPaths(
+  temporaryRoot: string,
+): Promise<readonly string[]> {
   const workspacePackages = [
     "milestone-a-scenarios",
     "agent-driver",
@@ -272,13 +282,45 @@ function localDependencyPaths(): readonly string[] {
     "runtime",
     "schema-validation",
   ].map((name) => join(REPOSITORY_ROOT, "packages", name));
-  const registryPackages = [
+  const registryPackageNames = [
     "uuid",
     "ajv",
     "fast-deep-equal",
     "fast-uri",
     "json-schema-traverse",
     "require-from-string",
-  ].map((name) => join(REPOSITORY_ROOT, "node_modules", name));
+  ];
+  const stagedRegistryRoot = join(temporaryRoot, "registry-packages");
+  await mkdir(stagedRegistryRoot);
+  const registryPackages = await Promise.all(
+    registryPackageNames.map(async (name) => {
+      const source = join(REPOSITORY_ROOT, "node_modules", name);
+      const destination = join(stagedRegistryRoot, name);
+      await cp(source, destination, {
+        recursive: true,
+        force: false,
+        errorOnExist: true,
+      });
+
+      // The smoke test installs already-built runtime bytes. Local-directory
+      // dependencies must not execute upstream development hooks such as
+      // prepare while npm materializes the isolated offline installation.
+      const manifestPath = join(destination, "package.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+        scripts?: unknown;
+        devDependencies?: unknown;
+        optionalDevDependencies?: unknown;
+      };
+      delete manifest.scripts;
+      delete manifest.devDependencies;
+      delete manifest.optionalDevDependencies;
+      await writeFile(
+        manifestPath,
+        `${JSON.stringify(manifest, null, 2)}\n`,
+        "utf8",
+      );
+      return destination;
+    }),
+  );
   return Object.freeze([...workspacePackages, ...registryPackages]);
 }
