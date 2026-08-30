@@ -2,20 +2,29 @@ import { isProxy } from "node:util/types";
 
 import type {
   AdvertisedOperation,
+  AgentObservation,
   AgentDriverEvent,
   AgentTurnRequest,
 } from "@guard/agent-driver";
+import { parseAgentObservation } from "@guard/agent-driver";
 import type {
   CapabilityAdvertisement,
+  CapabilityExecutionResult,
   EvaluatedCapabilityAction,
   PreparedCapabilityAction,
 } from "@guard/capability-gateway";
+import {
+  captureContextBrokerIntegration,
+  captureContextBrokerIntegrationFactory,
+} from "@guard/context-broker";
 import type {
-  BoundedContextResult,
-  ContextReadBudget,
-  ContextSource,
+  AgentContextAssembly,
+  ContextBrokerIntegration,
+  ContextBrokerIntegrationFactory,
+  ContextReleaseResult,
   ContextSourceDescriptor,
-  NormalizedContextRequest,
+  ContextManifestEntry,
+  ReleasedContextItem,
 } from "@guard/context-broker";
 import {
   CONTRACT_SCHEMA_VERSION,
@@ -87,9 +96,10 @@ interface HostLimits {
 interface PlannedContextRead {
   readonly requestId: string;
   readonly bindingId: string;
-  readonly source: BoundContextSource;
-  readonly request: NormalizedContextRequest;
-  readonly budget: ContextReadBudget;
+  readonly sourceDescriptor: ContextSourceDescriptor;
+  readonly rawRequest: JsonObject;
+  readonly safeResource: ResourceRef;
+  readonly budget: RuntimeContextPlanItem["budget"];
   released: boolean;
 }
 
@@ -98,10 +108,18 @@ interface EvaluatedActionOwnership {
   readonly evaluated: EvaluatedCapabilityAction;
 }
 
-interface BoundContextSource {
-  readonly descriptor: ContextSourceDescriptor;
-  readonly normalizeRequest: ContextSource["normalizeRequest"];
-  readonly readBounded: ContextSource["readBounded"];
+interface AgentObservationRecord {
+  readonly observationId: string;
+  readonly actionId: ActionId;
+  readonly status: AgentObservation["status"];
+  readonly error: AgentObservation["error"];
+  readonly occurredAt: string;
+  readonly itemIds: readonly string[];
+}
+
+interface PreallocatedAgentAttempt {
+  readonly turn: number;
+  readonly attemptId: AgentAttemptId;
 }
 
 interface CapturedOptions {
@@ -118,7 +136,7 @@ interface CapturedOptions {
       readonly advance: SynchronousRuntimeHostOptions["installedDriver"]["driver"]["advance"];
     };
   };
-  readonly contextSources: Pick<SynchronousRuntimeHostOptions["contextSources"], "resolve">;
+  readonly contextBrokerFactory: ContextBrokerIntegrationFactory;
   readonly capabilityPacks: Pick<
     SynchronousRuntimeHostOptions["capabilityPacks"],
     "listPacks" | "createAdvertisement"
@@ -186,17 +204,22 @@ export class SynchronousRuntimeHost {
   #advertisement: CapabilityAdvertisement | null = null;
   #driverAdvertisement: readonly AdvertisedOperation[] = Object.freeze([]);
   #driverFingerprint: string | null = null;
+  #contextBroker: ContextBrokerIntegration | null = null;
   #history: GenericEventEnvelope[] = [];
   #commands: RuntimeCommand[] = [];
   #plannedContext = new Map<string, PlannedContextRead>();
-  #releasedContext: ContentBlock[] = [];
-  #releasedObservations: Observation[] = [];
+  #releasedSourceItemIds: string[] = [];
+  #releasedItemsById = new Map<string, ReleasedContextItem>();
+  #releasedItemCapturedAt = new Map<string, string>();
+  #agentObservationRecords: AgentObservationRecord[] = [];
+  #preallocatedAttempt: PreallocatedAgentAttempt | null = null;
   #evaluatedActions = new Map<ActionId, EvaluatedActionOwnership>();
   #evidence = new Map<string, EvidenceEntry>();
   #usedEventIds = new Set<EventId>();
   #usedContextRequestIds = new Set<string>();
   #usedContentBlockIds = new Set<string>();
   #usedObservationIds = new Set<string>();
+  #usedAgentAttemptIds = new Set<AgentAttemptId>();
   #started = false;
   #draining = false;
   #activeAbortController: AbortController | null = null;
@@ -239,8 +262,25 @@ export class SynchronousRuntimeHost {
       throw invalidInput("The runtime ID factory returned an invalid run identifier.");
     }
 
+    let contextBroker: ContextBrokerIntegration;
+    try {
+      contextBroker = captureContextBrokerIntegration(
+        this.#options.contextBrokerFactory.createForRun({ runId }),
+      );
+    } catch {
+      throw externalError(
+        "infrastructure_failed",
+        "The context-broker integration could not be created for this run.",
+      );
+    }
+    this.#validateContextBrokerComposition(profile, runId, contextBroker);
+
     const advertisement = this.#createAdvertisement(profile);
-    const plannedContext = this.#createContextPlan(objective, profile);
+    const plannedContext = this.#createContextPlan(
+      objective,
+      profile,
+      contextBroker,
+    );
     const driverFingerprint = this.#createDriverFingerprint(profile);
 
     this.#started = true;
@@ -250,6 +290,7 @@ export class SynchronousRuntimeHost {
     this.#advertisement = advertisement.gateway;
     this.#driverAdvertisement = advertisement.driver;
     this.#driverFingerprint = driverFingerprint;
+    this.#contextBroker = contextBroker;
     this.#plannedContext = plannedContext;
 
     await this.#appendIntent("create_run", "RunCreated", { objective });
@@ -326,12 +367,6 @@ export class SynchronousRuntimeHost {
 
     assertNoDuplicateComponentIdentities(profile.contextSources, "context source");
     assertNoDuplicateComponentIdentities(profile.capabilityPacks, "capability pack");
-    for (const binding of profile.contextSources) {
-      this.#options.contextSources.resolve(
-        binding.componentId,
-        binding.componentVersion,
-      );
-    }
 
     const installedPacks = this.#options.capabilityPacks.listPacks();
     for (const binding of profile.capabilityPacks) {
@@ -345,6 +380,66 @@ export class SynchronousRuntimeHost {
           "A pinned capability pack must resolve to exactly one installed version.",
         );
       }
+    }
+  }
+
+  #validateContextBrokerComposition(
+    profile: TaskProfile,
+    runId: RunId,
+    integration: ContextBrokerIntegration,
+  ): void {
+    const descriptor = integration.descriptor;
+    const configurationDescriptor =
+      this.#options.contextBrokerFactory.configurationDescriptor;
+    const configured = profile.budgetPolicy.extensions["contextBroker"];
+    if (!isJsonRecord(configured)) {
+      throw invalidInput(
+        "The task profile must pin an exact context-broker configuration descriptor.",
+      );
+    }
+    if (
+      descriptor.runId !== runId ||
+      descriptor.policySnapshotId !== this.#options.installedPolicy.policyVersionId
+    ) {
+      throw invalidInput(
+        "The run context broker does not match the run or installed policy identity.",
+      );
+    }
+    const runConfiguration = {
+      schemaVersion: descriptor.schemaVersion,
+      policySnapshotId: descriptor.policySnapshotId,
+      releasePolicyId: descriptor.releasePolicyId,
+      releasePolicyVersion: descriptor.releasePolicyVersion,
+      releasePolicyContentHash: descriptor.releasePolicyContentHash,
+      sourceDescriptors: descriptor.sourceDescriptors,
+      budgets: descriptor.budgets,
+      configurationContentHash: descriptor.configurationContentHash,
+    } as const;
+    if (
+      canonicalize(configured) !== canonicalize(configurationDescriptor) ||
+      canonicalize(runConfiguration) !== canonicalize(configurationDescriptor)
+    ) {
+      throw invalidInput(
+        "The context-broker factory, run integration, and pinned profile configuration differ.",
+      );
+    }
+
+    const pinnedSources = profile.contextSources
+      .map((binding) => ({
+        sourceId: binding.componentId,
+        sourceVersion: binding.componentVersion,
+      }))
+      .sort(compareSourceIdentity);
+    const installedSources = descriptor.sourceDescriptors
+      .map((source) => ({
+        sourceId: source.sourceId,
+        sourceVersion: source.sourceVersion,
+      }))
+      .sort(compareSourceIdentity);
+    if (canonicalize(pinnedSources) !== canonicalize(installedSources)) {
+      throw invalidInput(
+        "The task profile context bindings do not exactly match broker source descriptors.",
+      );
     }
   }
 
@@ -409,14 +504,15 @@ export class SynchronousRuntimeHost {
   #createContextPlan(
     objective: ObjectiveEnvelope,
     profile: TaskProfile,
+    contextBroker: ContextBrokerIntegration,
   ): Map<string, PlannedContextRead> {
     let plannedUnknown: unknown;
     try {
       plannedUnknown = this.#options.contextPlanner.plan(
         Object.freeze({ objective, taskProfile: profile }),
       );
-    } catch (error: unknown) {
-      throw safeError(error, "invalid_input", "The context planner failed safely.");
+    } catch {
+      throw externalError("invalid_input", "The context planner failed safely.");
     }
     const wrapper = snapshotBoundaryJsonObject({ items: plannedUnknown });
     const items = wrapper["items"];
@@ -430,14 +526,9 @@ export class SynchronousRuntimeHost {
     }
 
     const plan = new Map<string, PlannedContextRead>();
-    const seenBindings = new Set<string>();
     let plannedBytes = 0;
     for (const candidate of items) {
       const item = parseContextPlanItem(candidate);
-      if (seenBindings.has(item.bindingId)) {
-        throw invalidInput("A context binding may be planned only once per run.");
-      }
-      seenBindings.add(item.bindingId);
       if (
         item.budget.maximumItems > this.#limits.maximumContextItemsPerRequest ||
         item.budget.maximumBytes > this.#limits.maximumContextBytesPerRequest
@@ -446,6 +537,11 @@ export class SynchronousRuntimeHost {
           maximumContextItemsPerRequest: this.#limits.maximumContextItemsPerRequest,
           maximumContextBytesPerRequest: this.#limits.maximumContextBytesPerRequest,
         });
+      }
+      if (item.budget.maximumItems !== 1) {
+        throw invalidInput(
+          "A planned broker source release must reserve exactly one context item.",
+        );
       }
       plannedBytes = safeAdd(plannedBytes, item.budget.maximumBytes, "planned context bytes");
       if (plannedBytes > profile.budgetPolicy.maxInputBytes) {
@@ -460,18 +556,24 @@ export class SynchronousRuntimeHost {
       if (binding === undefined) {
         throw invalidInput("The context planner requested an unpinned binding.");
       }
-      const source = bindContextSource(
-        this.#options.contextSources.resolve(
-          binding.componentId,
-          binding.componentVersion,
-        ),
-        binding.componentId,
-        binding.componentVersion,
+      const sourceDescriptor = contextBroker.descriptor.sourceDescriptors.find(
+        (source) =>
+          source.sourceId === binding.componentId &&
+          source.sourceVersion === binding.componentVersion,
       );
-      const normalized = parseNormalizedContextRequest(
-        source.normalizeRequest(item.input),
-        source,
-      );
+      if (sourceDescriptor === undefined) {
+        throw invalidInput(
+          "The context planner binding has no exact broker source descriptor.",
+        );
+      }
+      const safeResource = parseResourceRef({
+        schemaVersion: CONTRACT_SCHEMA_VERSION,
+        scheme: sourceDescriptor.scheme,
+        sourceId: sourceDescriptor.sourceId,
+        locator: { bindingId: binding.bindingId },
+        mediaType: null,
+        classification: "unreviewed",
+      });
       const requestId = this.#options.ids.nextContextRequestId();
       requireNonEmpty(requestId, "context request ID");
       if (plan.has(requestId) || this.#usedContextRequestIds.has(requestId)) {
@@ -481,8 +583,9 @@ export class SynchronousRuntimeHost {
       plan.set(requestId, {
         requestId,
         bindingId: item.bindingId,
-        source,
-        request: normalized,
+        sourceDescriptor,
+        rawRequest: item.input,
+        safeResource,
         budget: item.budget,
         released: false,
       });
@@ -712,10 +815,7 @@ export class SynchronousRuntimeHost {
     let attempt = this.#state.currentAttempt;
     if (attempt === null || attempt.status !== "active") {
       const turn = this.#state.budget.turnsStarted + 1;
-      const attemptId = this.#options.ids.nextAgentAttemptId(turn);
-      if (!AgentAttemptIdKind.is(attemptId)) {
-        throw invalidInput("The runtime ID factory returned an invalid agent-attempt identifier.");
-      }
+      const attemptId = this.#takeAgentAttemptId(turn);
       await this.#append(
         this.#makeEvent(
           "AgentAttemptStarted",
@@ -739,7 +839,7 @@ export class SynchronousRuntimeHost {
           "ContextRequested",
           {
             requestId: pendingContext.requestId,
-            resource: pendingContext.request.resource,
+            resource: pendingContext.safeResource,
           },
           RUNTIME_ACTOR,
           takeCausation(),
@@ -748,16 +848,43 @@ export class SynchronousRuntimeHost {
       return;
     }
 
-    const request: AgentTurnRequest = Object.freeze({
-      schemaVersion: CONTRACT_SCHEMA_VERSION,
-      runId: this.#requireRunId(),
-      attemptId: attempt.attemptId,
-      turnNumber: attempt.turn,
-      objective: this.#requireObjective(),
-      advertisedOperations: this.#driverAdvertisement,
-      context: Object.freeze([...this.#releasedContext]),
-      observations: Object.freeze([...this.#releasedObservations]),
-    });
+    let request: AgentTurnRequest;
+    let assembly: AgentContextAssembly;
+    try {
+      assembly = await this.#requireContextBroker().assembleAgentContext({
+        turnId: attempt.attemptId,
+        agentRequestId: attempt.attemptId,
+        orderedItemIds: this.#orderedReleasedItemIds(),
+      });
+      request = this.#agentTurnRequest(attempt, assembly);
+    } catch (error: unknown) {
+      await this.#settleDriverFailure(
+        attempt.attemptId,
+        safeError(
+          error,
+          "infrastructure_failed",
+          "The context broker failed to assemble the exact agent input.",
+        ),
+      );
+      return;
+    }
+    const requestHash = canonicalSha256Hex(request);
+    await this.#append(
+      this.#makeEvent(
+        "ContextManifestRecorded",
+        {
+          manifestKind: "agent_input",
+          referenceId: attempt.attemptId,
+          manifest: snapshotBoundaryJsonObject({
+            schemaVersion: CONTRACT_SCHEMA_VERSION,
+            assemblyManifest: assembly.manifest,
+            agentTurnRequestHash: requestHash,
+          }),
+        },
+        RUNTIME_ACTOR,
+        takeCausation(),
+      ),
+    );
 
     const controller = new AbortController();
     this.#activeAbortController = controller;
@@ -779,10 +906,9 @@ export class SynchronousRuntimeHost {
           ),
         );
       }
-    } catch (error: unknown) {
+    } catch {
       parsedEvents = [];
-      streamError = safeError(
-        error,
+      streamError = externalError(
         "driver_failed",
         "The agent driver failed while producing a turn.",
       );
@@ -909,6 +1035,241 @@ export class SynchronousRuntimeHost {
     await this.#failRun(error);
   }
 
+  #takeAgentAttemptId(turn: number): AgentAttemptId {
+    const preallocated = this.#preallocatedAttempt;
+    if (preallocated !== null) {
+      if (preallocated.turn !== turn) {
+        throw invariant(
+          "A preallocated agent-attempt identifier is bound to another turn.",
+        );
+      }
+      this.#preallocatedAttempt = null;
+      return preallocated.attemptId;
+    }
+    return this.#allocateAgentAttemptId(turn);
+  }
+
+  #preallocateNextAgentAttemptId(): AgentAttemptId {
+    const turn = this.#state.budget.turnsStarted + 1;
+    const existing = this.#preallocatedAttempt;
+    if (existing !== null) {
+      if (existing.turn !== turn) {
+        throw invariant(
+          "The cached agent-attempt identifier is bound to an unexpected turn.",
+        );
+      }
+      return existing.attemptId;
+    }
+    const attemptId = this.#allocateAgentAttemptId(turn);
+    this.#preallocatedAttempt = Object.freeze({ turn, attemptId });
+    return attemptId;
+  }
+
+  #allocateAgentAttemptId(turn: number): AgentAttemptId {
+    const attemptId = this.#options.ids.nextAgentAttemptId(turn);
+    if (!AgentAttemptIdKind.is(attemptId)) {
+      throw invalidInput(
+        "The runtime ID factory returned an invalid agent-attempt identifier.",
+      );
+    }
+    if (this.#usedAgentAttemptIds.has(attemptId)) {
+      throw conflict("The runtime ID factory reused an agent-attempt identifier.");
+    }
+    this.#usedAgentAttemptIds.add(attemptId);
+    return attemptId;
+  }
+
+  #agentTurnRequest(
+    attempt: { readonly attemptId: AgentAttemptId; readonly turn: number },
+    assembly: AgentContextAssembly,
+  ): AgentTurnRequest {
+    const orderedItemIds = this.#orderedReleasedItemIds();
+    const brokerDescriptor = this.#requireContextBroker().descriptor;
+    const serializedValues = assembly.items.map((item) => item.serializedValue);
+    const utf8Text = serializedValues.join("\n");
+    const utf8ByteLength = Buffer.byteLength(utf8Text, "utf8");
+    if (
+      assembly.schemaVersion !== CONTRACT_SCHEMA_VERSION ||
+      assembly.manifest.runId !== this.#requireRunId() ||
+      assembly.manifest.turnId !== attempt.attemptId ||
+      assembly.manifest.agentRequestId !== attempt.attemptId ||
+      assembly.manifest.policySnapshotId !== brokerDescriptor.policySnapshotId ||
+      assembly.manifest.releasePolicyId !== brokerDescriptor.releasePolicyId ||
+      assembly.manifest.releasePolicyVersion !==
+        brokerDescriptor.releasePolicyVersion ||
+      assembly.manifest.releasePolicyContentHash !==
+        brokerDescriptor.releasePolicyContentHash ||
+      canonicalize(assembly.manifest.orderedItemIds) !==
+        canonicalize(orderedItemIds) ||
+      canonicalize(assembly.items.map((item) => item.itemId)) !==
+        canonicalize(orderedItemIds) ||
+      canonicalize(assembly.manifest.entries.map((entry) => entry.itemId)) !==
+        canonicalize(orderedItemIds) ||
+      canonicalize(assembly.serializedValues) !==
+        canonicalize(serializedValues) ||
+      assembly.utf8Text !== utf8Text ||
+      assembly.utf8ByteLength !== utf8ByteLength ||
+      assembly.manifest.totalBytes !== utf8ByteLength ||
+      assembly.manifest.conservativeTokenEstimate !== utf8ByteLength ||
+      assembly.manifest.tokenEstimator !== "utf8-byte-upper-bound-v1"
+    ) {
+      throw invariant(
+        "The context broker returned an assembly that differs from the requested item order.",
+      );
+    }
+    const itemById = new Map(
+      assembly.items.map((item) => [item.itemId, item] as const),
+    );
+    const entryById = new Map(
+      assembly.manifest.entries.map((entry) => [entry.itemId, entry] as const),
+    );
+    const blockFor = (itemId: string): JsonContentBlock => {
+      const item = itemById.get(itemId);
+      const entry = entryById.get(itemId);
+      if (item === undefined || entry === undefined) {
+        throw invariant("An assembled context item has no exact manifest entry.");
+      }
+      return this.#brokerContentBlock(item, entry);
+    };
+    const context = Object.freeze(
+      this.#releasedSourceItemIds.map((itemId) => blockFor(itemId)),
+    );
+    const observations = Object.freeze(
+      this.#agentObservationRecords.map((record) =>
+        parseAgentObservation({
+          schemaVersion: CONTRACT_SCHEMA_VERSION,
+          observationId: record.observationId,
+          actionId: record.actionId,
+          status: record.status,
+          content: record.itemIds.map((itemId) => blockFor(itemId)),
+          error: record.error,
+          occurredAt: record.occurredAt,
+        }),
+      ),
+    );
+    return Object.freeze({
+      schemaVersion: CONTRACT_SCHEMA_VERSION,
+      runId: this.#requireRunId(),
+      attemptId: attempt.attemptId,
+      turnNumber: attempt.turn,
+      objective: this.#requireObjective(),
+      advertisedOperations: this.#driverAdvertisement,
+      context,
+      observations,
+    });
+  }
+
+  #orderedReleasedItemIds(): readonly string[] {
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    for (const itemId of [
+      ...this.#releasedSourceItemIds,
+      ...this.#agentObservationRecords.flatMap((record) => record.itemIds),
+    ]) {
+      if (seen.has(itemId)) continue;
+      seen.add(itemId);
+      ordered.push(itemId);
+    }
+    return Object.freeze(ordered);
+  }
+
+  #brokerContentBlock(
+    item: ReleasedContextItem,
+    entry: ContextManifestEntry,
+  ): JsonContentBlock {
+    const capturedAt = this.#releasedItemCapturedAt.get(item.itemId);
+    if (
+      capturedAt === undefined ||
+      entry.status !== "released" ||
+      entry.itemId !== item.itemId ||
+      entry.releasedContentHash !== item.contentHash ||
+      entry.runId !== item.runId ||
+      entry.turnId !== item.turnId ||
+      entry.sourceId !== item.resource.sourceId ||
+      canonicalize(entry.resource) !== canonicalize(item.resource) ||
+      entry.policySnapshotId !==
+        this.#requireContextBroker().descriptor.policySnapshotId ||
+      entry.releasePolicyId !==
+        this.#requireContextBroker().descriptor.releasePolicyId ||
+      entry.releasePolicyVersion !==
+        this.#requireContextBroker().descriptor.releasePolicyVersion ||
+      entry.releasePolicyContentHash !==
+        this.#requireContextBroker().descriptor.releasePolicyContentHash ||
+      item.runId !== this.#requireRunId() ||
+      item.serializedValue !== canonicalize(item.value) ||
+      Buffer.byteLength(item.serializedValue, "utf8") !== item.byteLength ||
+      canonicalBytes(item.value).byteLength !== item.byteLength ||
+      canonicalSha256Hex(item.value) !== item.contentHash
+    ) {
+      throw invariant(
+        "A broker context item does not match its immutable integrity manifest.",
+      );
+    }
+    const capabilityOutput =
+      isJsonRecord(item.value) && item.value["kind"] === "capability_output";
+    const block = parseContentBlock({
+      schemaVersion: CONTRACT_SCHEMA_VERSION,
+      blockId: item.itemId,
+      modality: "json",
+      mediaType: item.mediaType,
+      byteLength: item.byteLength,
+      contentHash: item.contentHash,
+      classification: item.classification,
+      provenance: {
+        source: item.resource,
+        producer: capabilityOutput
+          ? capabilityActor(item.resource.sourceId)
+          : contextActor(item.resource.sourceId),
+        capturedAt,
+      },
+      retentionClass: "run",
+      transformation:
+        entry.redactions.length === 0
+          ? null
+          : {
+              schemaVersion: CONTRACT_SCHEMA_VERSION,
+              transformationId: "context-broker.redaction",
+              transformationVersion: 1,
+              inputContentHashes: [],
+            },
+      value: item.value,
+      jsonSchema: null,
+    });
+    if (block.modality !== "json") {
+      throw invariant("A broker JSON item changed modality at the driver boundary.");
+    }
+    return block;
+  }
+
+  #recordBrokerItemRelease(
+    item: ReleasedContextItem,
+    manifest: ContextManifestEntry,
+  ): boolean {
+    const existing = this.#releasedItemsById.get(item.itemId);
+    if (existing !== undefined) {
+      if (
+        manifest.deduplicated !== true ||
+        canonicalize(existing) !== canonicalize(item)
+      ) {
+        throw conflict(
+          "A broker item identifier was rebound without an exact deduplication receipt.",
+        );
+      }
+      if (!this.#releasedItemCapturedAt.has(item.itemId)) {
+        throw invariant("A deduplicated broker item lost its stable release timestamp.");
+      }
+      return false;
+    }
+    if (manifest.deduplicated === true) {
+      throw invariant(
+        "A broker deduplication receipt references an item the host never released.",
+      );
+    }
+    this.#releasedItemsById.set(item.itemId, item);
+    this.#releasedItemCapturedAt.set(item.itemId, this.#now());
+    return true;
+  }
+
   async #fetchContext(command: RuntimeCommand): Promise<void> {
     const requestId = command.payload["requestId"];
     if (typeof requestId !== "string") {
@@ -918,28 +1279,34 @@ export class SynchronousRuntimeHost {
     if (planned === undefined || planned.released) {
       throw invariant("A context command does not match a pending planned read.");
     }
+    const attempt = this.#state.currentAttempt;
+    if (attempt === null || attempt.status !== "active") {
+      throw invariant("A broker source release requires an active agent attempt.");
+    }
 
     const controller = new AbortController();
     this.#activeAbortController = controller;
-    let result: BoundedContextResult;
+    let result: ContextReleaseResult;
     try {
-      result = await planned.source.readBounded(
-        planned.request,
-        planned.budget,
-        controller.signal,
-      );
-      result = parseContextResult(result, planned, this.#limits);
-    } catch (error: unknown) {
-      const safe = safeError(
-        error,
+      result = await this.#requireContextBroker().releasePlannedSource({
+        turnId: attempt.attemptId,
+        sourceId: planned.sourceDescriptor.sourceId,
+        sourceVersion: planned.sourceDescriptor.sourceVersion,
+        request: planned.rawRequest,
+        maximumBytes: planned.budget.maximumBytes,
+        reason: "runtime.context.planned",
+        signal: controller.signal,
+      });
+    } catch {
+      const safe = externalError(
         "infrastructure_failed",
-        "The context source failed to produce a bounded result.",
+        "The context broker failed to release a planned source.",
       );
       await this.#append(
         this.#makeEvent(
           "ContextDenied",
           { requestId, error: safe },
-          contextActor(planned.source.descriptor.sourceId),
+          contextActor(planned.sourceDescriptor.sourceId),
           command.causedByEventId,
         ),
       );
@@ -949,41 +1316,47 @@ export class SynchronousRuntimeHost {
       this.#activeAbortController = null;
     }
 
-    let content: ContentBlock[];
-    try {
-      content = result.items.map((item) =>
-        this.#jsonContentBlock(
-          item.value,
-          item.resource,
-          contextActor(planned.source.descriptor.sourceId),
-          item.resource.classification,
-        ),
-      );
-    } catch (error: unknown) {
-      const safe = safeError(
-        error,
-        "infrastructure_failed",
-        "The context result could not be represented safely.",
-      );
+    await this.#append(
+      this.#makeEvent(
+        "ContextManifestRecorded",
+        {
+          manifestKind: "release",
+          referenceId: requestId,
+          manifest: snapshotBoundaryJsonObject(result.manifest),
+        },
+        contextActor(planned.sourceDescriptor.sourceId),
+        command.causedByEventId,
+      ),
+    );
+    if (result.status === "denied") {
       await this.#append(
         this.#makeEvent(
           "ContextDenied",
-          { requestId, error: safe },
-          contextActor(planned.source.descriptor.sourceId),
+          { requestId, error: result.error },
+          contextActor(planned.sourceDescriptor.sourceId),
           command.causedByEventId,
         ),
       );
       planned.released = true;
       return;
     }
+    const firstRelease = this.#recordBrokerItemRelease(result.item, result.manifest);
+    const content = this.#brokerContentBlock(result.item, result.manifest);
     await this.#append(
       this.#makeEvent(
         "ContextReleased",
-        { requestId, resource: planned.request.resource, content },
-        contextActor(planned.source.descriptor.sourceId),
+        { requestId, resource: result.item.resource, content: [content] },
+        contextActor(planned.sourceDescriptor.sourceId),
         command.causedByEventId,
       ),
     );
+    if (firstRelease) {
+      this.#releasedSourceItemIds.push(result.item.itemId);
+    } else if (!this.#releasedSourceItemIds.includes(result.item.itemId)) {
+      throw invariant(
+        "A deduplicated source item was not owned by an earlier source release.",
+      );
+    }
     planned.released = true;
   }
 
@@ -1023,9 +1396,9 @@ export class SynchronousRuntimeHost {
         },
         advertisement,
       );
-    } catch (error: unknown) {
+    } catch {
       await this.#failRun(
-        safeError(error, "action_failed", "Capability action normalization failed."),
+        externalError("action_failed", "Capability action normalization failed."),
       );
       return;
     }
@@ -1050,9 +1423,9 @@ export class SynchronousRuntimeHost {
         evaluated,
         this.#options.installedPolicy,
       );
-    } catch (error: unknown) {
+    } catch {
       await this.#failRun(
-        safeError(error, "policy_denied", "Pinned policy evaluation failed closed."),
+        externalError("policy_denied", "Pinned policy evaluation failed closed."),
       );
       return;
     }
@@ -1152,17 +1525,16 @@ export class SynchronousRuntimeHost {
     );
     const controller = new AbortController();
     this.#activeAbortController = controller;
-    let executionResult: {
-      readonly audit: JsonObject;
-      readonly human: JsonObject;
-      readonly agent: JsonObject;
-    };
+    let executionResult: CapabilityExecutionResult;
     try {
       executionResult = await this.#options.capabilityGateway.execute(evaluated, {
         signal: controller.signal,
       });
-    } catch (error: unknown) {
-      const safe = safeError(error, "action_failed", "The capability action failed.");
+    } catch {
+      const safe = externalError(
+        "action_failed",
+        "The capability action failed.",
+      );
       await this.#append(
         this.#makeEvent("ActionFailed", { actionId, error: safe }, RUNTIME_ACTOR),
       );
@@ -1171,9 +1543,77 @@ export class SynchronousRuntimeHost {
     } finally {
       this.#activeAbortController = null;
     }
-    let observation: Observation;
+
+    const releaseTargetAttemptId = this.#preallocateNextAgentAttemptId();
+    let releasedItem: ReleasedContextItem | null = null;
+    let releasedManifest: ContextManifestEntry | null = null;
+    let agentDisposition:
+      | { readonly status: "succeeded"; readonly error: null }
+      | {
+          readonly status: "failed" | "denied";
+          readonly error: AgentObservation["error"];
+        };
     try {
-      observation = this.#successObservation(prepared.action, executionResult);
+      const release = await this.#requireContextBroker().releaseCapabilityAgentView({
+        turnId: releaseTargetAttemptId,
+        sourceVersion: executionResult.agentContextRelease.sourceVersion,
+        resource: executionResult.agentContextRelease.resource,
+        policyProjection: executionResult.agentContextRelease.policyProjection,
+        output: executionResult.agent,
+        classification: executionResult.agentContextRelease.classification,
+        reason: executionResult.agentContextRelease.reason,
+      });
+      await this.#append(
+        this.#makeEvent(
+          "ContextManifestRecorded",
+          {
+            manifestKind: "release",
+            referenceId: actionId,
+            manifest: snapshotBoundaryJsonObject(release.manifest),
+          },
+          capabilityActor(prepared.action.capabilityPackId),
+        ),
+      );
+      if (release.status === "released") {
+        this.#recordBrokerItemRelease(release.item, release.manifest);
+        releasedItem = release.item;
+        releasedManifest = release.manifest;
+        agentDisposition = Object.freeze({ status: "succeeded", error: null });
+      } else {
+        agentDisposition = Object.freeze({
+          status: "denied",
+          error: agentErrorProjection(release.error),
+        });
+      }
+    } catch {
+      const safe = externalError(
+        "infrastructure_failed",
+        "The context broker failed to release the capability agent view.",
+      );
+      agentDisposition = Object.freeze({
+        status: "failed",
+        error: agentErrorProjection(safe),
+      });
+    }
+
+    let observationAndRecord: {
+      readonly observation: Observation;
+      readonly record: AgentObservationRecord;
+    };
+    try {
+      const agentContent =
+        releasedItem === null || releasedManifest === null
+          ? Object.freeze([])
+          : Object.freeze([
+              this.#brokerContentBlock(releasedItem, releasedManifest),
+            ]);
+      observationAndRecord = this.#successObservation(
+        prepared.action,
+        executionResult,
+        agentContent,
+        releasedItem === null ? [] : [releasedItem.itemId],
+        agentDisposition,
+      );
     } catch (error: unknown) {
       const safe = safeError(
         error,
@@ -1191,21 +1631,35 @@ export class SynchronousRuntimeHost {
       this.#makeEvent("ActionSucceeded", { actionId, completedAt }, RUNTIME_ACTOR),
     );
     await this.#append(
-      this.#makeEvent("ObservationReleased", { observation }, RUNTIME_ACTOR),
+      this.#makeEvent(
+        "ObservationReleased",
+        { observation: observationAndRecord.observation },
+        RUNTIME_ACTOR,
+      ),
     );
+    this.#agentObservationRecords.push(observationAndRecord.record);
   }
 
   #successObservation(
     action: NormalizedAction,
-    result: {
-      readonly audit: JsonObject;
-      readonly human: JsonObject;
-      readonly agent: JsonObject;
-    },
-  ): Observation {
-    return parseObservation({
+    result: CapabilityExecutionResult,
+    agentContent: readonly ContentBlock[],
+    itemIds: readonly string[],
+    disposition:
+      | { readonly status: "succeeded"; readonly error: null }
+      | {
+          readonly status: "failed" | "denied";
+          readonly error: AgentObservation["error"];
+        },
+  ): {
+    readonly observation: Observation;
+    readonly record: AgentObservationRecord;
+  } {
+    const observationId = this.#nextObservationId();
+    const occurredAt = this.#now();
+    const observation = parseObservation({
       schemaVersion: CONTRACT_SCHEMA_VERSION,
-      observationId: this.#nextObservationId(),
+      observationId,
       actionId: action.actionId,
       status: "succeeded",
       audit: result.audit,
@@ -1217,17 +1671,19 @@ export class SynchronousRuntimeHost {
           "internal",
         ),
       ],
-      agent: [
-        this.#jsonContentBlock(
-          result.agent,
-          null,
-          capabilityActor(action.capabilityPackId),
-          "internal",
-        ),
-      ],
+      agent: agentContent,
       error: null,
-      occurredAt: this.#now(),
+      occurredAt,
     });
+    const record: AgentObservationRecord = Object.freeze({
+      observationId,
+      actionId: action.actionId,
+      status: disposition.status,
+      error: disposition.error,
+      occurredAt,
+      itemIds: Object.freeze([...itemIds]),
+    });
+    return Object.freeze({ observation, record });
   }
 
   async #releaseFailureObservation(
@@ -1236,6 +1692,7 @@ export class SynchronousRuntimeHost {
     error: DomainError,
   ): Promise<void> {
     let observation: Observation;
+    let record: AgentObservationRecord;
     try {
       const safeView: JsonObject = {
         errorId: error.errorId,
@@ -1243,9 +1700,11 @@ export class SynchronousRuntimeHost {
         message: error.message,
         retry: error.retry,
       };
+      const observationId = this.#nextObservationId();
+      const occurredAt = this.#now();
       observation = parseObservation({
         schemaVersion: CONTRACT_SCHEMA_VERSION,
-        observationId: this.#nextObservationId(),
+        observationId,
         actionId: action.actionId,
         status,
         audit: { errorId: error.errorId, code: error.code },
@@ -1257,16 +1716,17 @@ export class SynchronousRuntimeHost {
             "internal",
           ),
         ],
-        agent: [
-          this.#jsonContentBlock(
-            safeView,
-            null,
-            capabilityActor(action.capabilityPackId),
-            "internal",
-          ),
-        ],
+        agent: [],
         error,
-        occurredAt: this.#now(),
+        occurredAt,
+      });
+      record = Object.freeze({
+        observationId,
+        actionId: action.actionId,
+        status,
+        error: agentErrorProjection(error),
+        occurredAt,
+        itemIds: Object.freeze([]),
       });
     } catch (representationError: unknown) {
       await this.#failRun(
@@ -1281,6 +1741,7 @@ export class SynchronousRuntimeHost {
     await this.#append(
       this.#makeEvent("ObservationReleased", { observation }, RUNTIME_ACTOR),
     );
+    this.#agentObservationRecords.push(record);
   }
 
   async #validateOutcome(command: RuntimeCommand): Promise<void> {
@@ -1432,14 +1893,12 @@ export class SynchronousRuntimeHost {
         });
         break;
       case "ObservationReleased":
-        this.#releasedObservations.push(envelope.payload.observation);
         this.#evidence.set(
           evidenceKey("observation", envelope.payload.observation.observationId),
           { contentHash: canonicalSha256Hex(envelope.payload.observation) },
         );
         break;
       case "ContextReleased":
-        this.#releasedContext.push(...envelope.payload.content);
         for (const block of envelope.payload.content) {
           const source = block.provenance.source;
           if (source !== null) {
@@ -1498,6 +1957,13 @@ export class SynchronousRuntimeHost {
     return this.#runId;
   }
 
+  #requireContextBroker(): ContextBrokerIntegration {
+    if (this.#contextBroker === null) {
+      throw invariant("The runtime has no active run-owned context broker.");
+    }
+    return this.#contextBroker;
+  }
+
   #requireProfile(): TaskProfile {
     if (this.#profile === null) throw invariant("The runtime has no pinned task profile.");
     return this.#profile;
@@ -1536,99 +2002,6 @@ function parseContextPlanItem(value: unknown): RuntimeContextPlanItem {
     bindingId: value["bindingId"],
     input: value["input"],
     budget: Object.freeze({ maximumItems, maximumBytes }),
-  });
-}
-
-function parseNormalizedContextRequest(
-  value: unknown,
-  source: BoundContextSource,
-): NormalizedContextRequest {
-  const wrapper = snapshotBoundaryJsonObject({ value });
-  const candidate = wrapper["value"];
-  if (
-    !isJsonRecord(candidate) ||
-    !hasExactKeys(candidate, ["schemaVersion", "sourceId", "sourceVersion", "resource"]) ||
-    candidate["schemaVersion"] !== CONTRACT_SCHEMA_VERSION ||
-    candidate["sourceId"] !== source.descriptor.sourceId ||
-    candidate["sourceVersion"] !== source.descriptor.sourceVersion
-  ) {
-    throw invalidInput("A context source returned an invalid normalized request.");
-  }
-  return Object.freeze({
-    schemaVersion: CONTRACT_SCHEMA_VERSION,
-    sourceId: source.descriptor.sourceId,
-    sourceVersion: source.descriptor.sourceVersion,
-    resource: parseResourceRef(candidate["resource"]),
-  });
-}
-
-function parseContextResult(
-  value: unknown,
-  planned: PlannedContextRead,
-  limits: HostLimits,
-): BoundedContextResult {
-  const wrapper = snapshotBoundaryJsonObject({ value });
-  const candidate = wrapper["value"];
-  if (
-    !isJsonRecord(candidate) ||
-    !hasExactKeys(candidate, ["items", "totalBytes", "truncated"]) ||
-    !Array.isArray(candidate["items"]) ||
-    typeof candidate["truncated"] !== "boolean"
-  ) {
-    throw invalidInput("A context source returned a malformed bounded result.");
-  }
-  const items = candidate["items"];
-  if (candidate["truncated"]) {
-    throw budgetExceeded(
-      "The Phase-A dispatcher does not release an unrecorded truncated context result.",
-    );
-  }
-  if (
-    items.length > planned.budget.maximumItems ||
-    items.length > limits.maximumContextItemsPerRequest
-  ) {
-    throw budgetExceeded("A context source exceeded the item budget.");
-  }
-  let totalBytes = 0;
-  const parsedItems = items.map((item) => {
-    if (
-      !isJsonRecord(item) ||
-      !hasExactKeys(item, ["resource", "value", "byteLength", "contentHash"]) ||
-      !isJsonRecord(item["value"])
-    ) {
-      throw invalidInput("A context source returned a malformed item.");
-    }
-    const resource = parseResourceRef(item["resource"]);
-    if (
-      resource.sourceId !== planned.source.descriptor.sourceId ||
-      resource.scheme !== planned.source.descriptor.scheme
-    ) {
-      throw invalidInput("A context item is not owned by the exact resolved source.");
-    }
-    const byteLength = canonicalBytes(item["value"]).byteLength;
-    const contentHash = canonicalSha256Hex(item["value"]);
-    if (item["byteLength"] !== byteLength || item["contentHash"] !== contentHash) {
-      throw invariant("A context source returned incorrect item integrity metadata.");
-    }
-    totalBytes = safeAdd(totalBytes, byteLength, "context result bytes");
-    return Object.freeze({
-      resource,
-      value: item["value"],
-      byteLength,
-      contentHash,
-    });
-  });
-  if (
-    candidate["totalBytes"] !== totalBytes ||
-    totalBytes > planned.budget.maximumBytes ||
-    totalBytes > limits.maximumContextBytesPerRequest
-  ) {
-    throw budgetExceeded("A context source exceeded or misstated the byte budget.");
-  }
-  return Object.freeze({
-    items: Object.freeze(parsedItems),
-    totalBytes,
-    truncated: candidate["truncated"],
   });
 }
 
@@ -1843,7 +2216,7 @@ function captureOptions(value: unknown): CapturedOptions {
       "eventStore",
       "profileRegistry",
       "installedDriver",
-      "contextSources",
+      "contextBrokerFactory",
       "capabilityPacks",
       "capabilityGateway",
       "contextPlanner",
@@ -1861,9 +2234,8 @@ function captureOptions(value: unknown): CapturedOptions {
     fields["profileRegistry"],
     "profile registry",
   );
-  const contextSources = requireObjectPort(
-    fields["contextSources"],
-    "context-source registry",
+  const contextBrokerFactory = captureContextBrokerIntegrationFactory(
+    fields["contextBrokerFactory"],
   );
   const capabilityPacks = requireObjectPort(
     fields["capabilityPacks"],
@@ -1958,11 +2330,7 @@ function captureOptions(value: unknown): CapturedOptions {
         >(driver, "advance", "installed agent driver"),
       }),
     }),
-    contextSources: Object.freeze({
-      resolve: bindMethod<
-        SynchronousRuntimeHostOptions["contextSources"]["resolve"]
-      >(contextSources, "resolve", "context-source registry"),
-    }),
+    contextBrokerFactory,
     capabilityPacks: Object.freeze({
       listPacks: bindMethod<
         SynchronousRuntimeHostOptions["capabilityPacks"]["listPacks"]
@@ -2067,49 +2435,6 @@ function captureOptions(value: unknown): CapturedOptions {
             SynchronousRuntimeHostOptions["limits"]),
   };
   return Object.freeze(captured);
-}
-
-function bindContextSource(
-  value: ContextSource,
-  expectedSourceId: string,
-  expectedSourceVersion: number,
-): BoundContextSource {
-  const source = requireObjectPort(value, "resolved context source");
-  const descriptor = safeSnapshot(
-    readDataProperty(source, "descriptor", "resolved context source"),
-    "The resolved context-source descriptor is invalid.",
-  );
-  if (
-    !hasExactKeys(descriptor, ["sourceId", "sourceVersion", "scheme", "description"]) ||
-    descriptor["sourceId"] !== expectedSourceId ||
-    descriptor["sourceVersion"] !== expectedSourceVersion ||
-    typeof descriptor["scheme"] !== "string" ||
-    descriptor["scheme"].trim().length === 0 ||
-    typeof descriptor["description"] !== "string" ||
-    descriptor["description"].trim().length === 0
-  ) {
-    throw invalidInput(
-      "The resolved context source does not match its registry-owned exact identity.",
-    );
-  }
-  return Object.freeze({
-    descriptor: Object.freeze({
-      sourceId: descriptor["sourceId"],
-      sourceVersion: descriptor["sourceVersion"],
-      scheme: descriptor["scheme"],
-      description: descriptor["description"],
-    }),
-    normalizeRequest: bindMethod<ContextSource["normalizeRequest"]>(
-      source,
-      "normalizeRequest",
-      "resolved context source",
-    ),
-    readBounded: bindMethod<ContextSource["readBounded"]>(
-      source,
-      "readBounded",
-      "resolved context source",
-    ),
-  });
 }
 
 function inspectExactDataFields(
@@ -2313,6 +2638,16 @@ function compareOperationReference(
   );
 }
 
+function compareSourceIdentity(
+  left: { readonly sourceId: string; readonly sourceVersion: number },
+  right: { readonly sourceId: string; readonly sourceVersion: number },
+): number {
+  return (
+    left.sourceId.localeCompare(right.sourceId) ||
+    left.sourceVersion - right.sourceVersion
+  );
+}
+
 function parseChannel(value: unknown): "analysis" | "answer" {
   if (value !== "analysis" && value !== "answer") {
     throw invalidInput("A driver content channel is invalid.");
@@ -2402,6 +2737,29 @@ function safeError(
     // A hostile thrown value is replaced by a bounded host-created error.
   }
   return createDomainError({ code, message });
+}
+
+function externalError(
+  code:
+    | "invalid_input"
+    | "action_failed"
+    | "driver_failed"
+    | "infrastructure_failed"
+    | "policy_denied",
+  message: string,
+): DomainError {
+  return createDomainError({ code, message });
+}
+
+function agentErrorProjection(
+  error: DomainError,
+): NonNullable<AgentObservation["error"]> {
+  return Object.freeze({
+    errorId: error.errorId,
+    code: error.code,
+    message: error.message,
+    retry: error.retry,
+  });
 }
 
 function invalidInput(message: string): DomainError {

@@ -1,0 +1,1145 @@
+[
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000065",
+    "eventType": "RunCreated",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "id": "guard.runtime-host",
+      "kind": "runtime"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": null,
+    "payload": {
+      "objective": {
+        "objectiveType": "fixture.execute",
+        "objectiveTypeVersion": 1,
+        "payload": {
+          "input": "fixture"
+        },
+        "profileId": "fixture.generic-task",
+        "profileVersion": 1,
+        "schemaVersion": 1,
+        "submittedAt": "2026-08-30T12:00:00.000Z",
+        "submittedBy": {
+          "id": "fixture-user",
+          "kind": "user"
+        }
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 1,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000066",
+    "eventType": "TaskProfilePinned",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "id": "guard.runtime-host",
+      "kind": "runtime"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000065",
+    "payload": {
+      "taskProfile": {
+        "budgetPolicy": {
+          "extensions": {
+            "contextBroker": {
+              "budgets": {
+                "maximumBytesPerRun": 131072,
+                "maximumBytesPerTurn": 65536,
+                "maximumControlCharacterRatio": 0.05,
+                "maximumItemsPerRun": 32,
+                "maximumItemsPerTurn": 16,
+                "maximumRequestBytes": 32768,
+                "maximumResourceBytes": 65536
+              },
+              "configurationContentHash": "40c7c9f87ebfe603a8836558ccd7a46ed60139ff91569ad5a00d7b861e5a5f98",
+              "policySnapshotId": "pol_018f0000-0000-7000-8000-000000000320",
+              "releasePolicyContentHash": "36a198e9c3c1d619bb79a60ca26cbb23febac066477b12924b96db527e11a570",
+              "releasePolicyId": "runtime-host.fixture",
+              "releasePolicyVersion": 1,
+              "schemaVersion": 1,
+              "sourceDescriptors": [
+                {
+                  "description": "One bounded generic fixture item.",
+                  "scheme": "memory",
+                  "sourceId": "fixture.context",
+                  "sourceVersion": 1
+                }
+              ]
+            }
+          },
+          "maxActions": 2,
+          "maxElapsedMs": 10000,
+          "maxInputBytes": 65536,
+          "maxOutputBytes": 4096,
+          "maxTurns": 3
+        },
+        "capabilityPacks": [
+          {
+            "bindingId": "fixture-transform",
+            "componentId": "fixture.transform",
+            "componentVersion": 1,
+            "configuration": {}
+          }
+        ],
+        "contextSources": [
+          {
+            "bindingId": "fixture-input",
+            "componentId": "fixture.context",
+            "componentVersion": 1,
+            "configuration": {}
+          }
+        ],
+        "driverProfile": {
+          "componentId": "fixture.driver-binding",
+          "componentVersion": 1,
+          "configuration": {
+            "program": "fixture"
+          }
+        },
+        "evaluationProfile": null,
+        "evidenceMode": "ephemeral_metadata",
+        "modelBindings": [],
+        "objectiveSchema": {
+          "document": {
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "input"
+            ],
+            "type": "object"
+          },
+          "schemaId": "fixture.objective",
+          "schemaVersion": 1
+        },
+        "outcomeSchema": {
+          "document": {
+            "additionalProperties": false,
+            "properties": {
+              "answer": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "answer"
+            ],
+            "type": "object"
+          },
+          "schemaId": "fixture.outcome",
+          "schemaVersion": 1
+        },
+        "policyProfile": {
+          "componentId": "fixture.phase-a-pure-only",
+          "componentVersion": 1,
+          "configuration": {
+            "attributeCatalogs": [
+              {
+                "catalogId": "guard.base",
+                "contentHash": "3cd39e76a6c94f0f842b4871b6cebc3c010236927dfcc0f8b0dde054bbb9bf48",
+                "schemaVersion": 1
+              },
+              {
+                "catalogId": "guard.context",
+                "contentHash": "0ffb9b470fd6ea78adcd96e0ab3c6e4e9569c459f2f1879e6379e995561ab820",
+                "schemaVersion": 1
+              },
+              {
+                "catalogId": "guard.fixture-capability",
+                "contentHash": "1b4b262c793d49ddcee0097e7d8e0cdd1684ec2b610e4311940236be9096e15a",
+                "schemaVersion": 1
+              },
+              {
+                "catalogId": "guard.memory",
+                "contentHash": "511625c817d34273c2ac5ea9f9df5bb3087091cbedbca2d119a3652f1806ca59",
+                "schemaVersion": 1
+              }
+            ],
+            "defaultEffect": "deny",
+            "languageVersion": "1",
+            "policyContentHash": "22d78e98113b4b5f7468462d462ae4f3a3de53ebb1e9fa09f60ce0a876aad983",
+            "policyVersionId": "pol_018f0000-0000-7000-8000-000000000320",
+            "schemaVersion": 1,
+            "sourceCount": 1
+          }
+        },
+        "profileId": "fixture.generic-task",
+        "profileVersion": 1,
+        "schemaVersion": 1
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 2,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000067",
+    "eventType": "RunStarted",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "id": "guard.runtime-host",
+      "kind": "runtime"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000066",
+    "payload": {
+      "startedAt": "2026-08-30T12:00:00.000Z"
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 3,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000068",
+    "eventType": "AgentDriverStarted",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "runtime",
+      "id": "guard.runtime-host"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000067",
+    "payload": {
+      "driverProfileId": "fixture.driver-binding",
+      "driverProfileVersion": 1,
+      "driverFingerprint": "f24cc7a673bb97afceb9c05dc319c9a50cd62e3454c27e1200f845223a8c0f09"
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 4,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000069",
+    "eventType": "AgentAttemptStarted",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "agent_driver",
+      "id": "fixture.driver-binding"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000068",
+    "payload": {
+      "attemptId": "att_018f0000-0000-7000-8000-0000000000c9",
+      "turn": 1
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 5,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-00000000006a",
+    "eventType": "ContextRequested",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "runtime",
+      "id": "guard.runtime-host"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000069",
+    "payload": {
+      "requestId": "context-request-1",
+      "resource": {
+        "schemaVersion": 1,
+        "scheme": "memory",
+        "sourceId": "fixture.context",
+        "locator": {
+          "bindingId": "fixture-input"
+        },
+        "mediaType": null,
+        "classification": "unreviewed"
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 6,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-00000000006b",
+    "eventType": "ContextManifestRecorded",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "context_source",
+      "id": "fixture.context"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-00000000006a",
+    "payload": {
+      "manifestKind": "release",
+      "referenceId": "context-request-1",
+      "manifest": {
+        "byteLength": 594,
+        "conservativeTokenEstimate": 594,
+        "deduplicated": false,
+        "itemId": "ctx_f0d10041910978aa999f993c85f852d87e470371",
+        "ordinal": 1,
+        "policyCatalogContentHash": "511625c817d34273c2ac5ea9f9df5bb3087091cbedbca2d119a3652f1806ca59",
+        "policyCatalogId": "guard.memory",
+        "policyCatalogVersion": 1,
+        "policySnapshotId": "pol_018f0000-0000-7000-8000-000000000320",
+        "promptInjectionTags": [],
+        "reason": "context.release.allowed",
+        "redactions": [],
+        "releasePolicyContentHash": "36a198e9c3c1d619bb79a60ca26cbb23febac066477b12924b96db527e11a570",
+        "releasePolicyId": "runtime-host.fixture",
+        "releasePolicyVersion": 1,
+        "releasedContentHash": "c947c2a949aec1b1cf9862f76fec5218e6f5498d655e87630489a007468de66e",
+        "resource": {
+          "classification": "fixture",
+          "locator": {
+            "recordId": "RAW_PLANNER_LOCATOR_MUST_NOT_BE_REQUESTED"
+          },
+          "mediaType": "application/json",
+          "schemaVersion": 1,
+          "scheme": "memory",
+          "sourceId": "fixture.context"
+        },
+        "runId": "run_018f0000-0000-7000-8000-000000000001",
+        "safeResourceCategory": "context_resource",
+        "schemaVersion": 1,
+        "selector": null,
+        "sourceId": "fixture.context",
+        "sourceVersion": 1,
+        "status": "released",
+        "tokenEstimator": "utf8-byte-upper-bound-v1",
+        "truncated": false,
+        "turnId": "att_018f0000-0000-7000-8000-0000000000c9"
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 7,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-00000000006c",
+    "eventType": "ContextReleased",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "context_source",
+      "id": "fixture.context"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-00000000006a",
+    "payload": {
+      "requestId": "context-request-1",
+      "resource": {
+        "classification": "fixture",
+        "locator": {
+          "recordId": "RAW_PLANNER_LOCATOR_MUST_NOT_BE_REQUESTED"
+        },
+        "mediaType": "application/json",
+        "schemaVersion": 1,
+        "scheme": "memory",
+        "sourceId": "fixture.context"
+      },
+      "content": [
+        {
+          "schemaVersion": 1,
+          "blockId": "ctx_f0d10041910978aa999f993c85f852d87e470371",
+          "modality": "json",
+          "mediaType": "application/json",
+          "byteLength": 594,
+          "contentHash": "c947c2a949aec1b1cf9862f76fec5218e6f5498d655e87630489a007468de66e",
+          "classification": "fixture",
+          "provenance": {
+            "source": {
+              "classification": "fixture",
+              "locator": {
+                "recordId": "RAW_PLANNER_LOCATOR_MUST_NOT_BE_REQUESTED"
+              },
+              "mediaType": "application/json",
+              "schemaVersion": 1,
+              "scheme": "memory",
+              "sourceId": "fixture.context"
+            },
+            "producer": {
+              "kind": "context_source",
+              "id": "fixture.context"
+            },
+            "capturedAt": "2026-08-30T12:00:00.000Z"
+          },
+          "retentionClass": "run",
+          "transformation": null,
+          "value": {
+            "content": "{\"value\":\"alpha\"}",
+            "kind": "source_context",
+            "provenance": {
+              "classification": "fixture",
+              "policyCatalogContentHash": "511625c817d34273c2ac5ea9f9df5bb3087091cbedbca2d119a3652f1806ca59",
+              "policyCatalogId": "guard.memory",
+              "policyCatalogVersion": 1,
+              "sourceId": "fixture.context",
+              "sourceVersion": 1
+            },
+            "resource": {
+              "classification": "fixture",
+              "locator": {
+                "recordId": "RAW_PLANNER_LOCATOR_MUST_NOT_BE_REQUESTED"
+              },
+              "mediaType": "application/json",
+              "schemaVersion": 1,
+              "scheme": "memory",
+              "sourceId": "fixture.context"
+            },
+            "schemaVersion": 1,
+            "selector": null,
+            "trustLabel": "untrusted_source_content",
+            "untrusted": true
+          },
+          "jsonSchema": null
+        }
+      ]
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 8,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-00000000006d",
+    "eventType": "ContextManifestRecorded",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "runtime",
+      "id": "guard.runtime-host"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-00000000006c",
+    "payload": {
+      "manifestKind": "agent_input",
+      "referenceId": "att_018f0000-0000-7000-8000-0000000000c9",
+      "manifest": {
+        "schemaVersion": 1,
+        "assemblyManifest": {
+          "agentRequestId": "att_018f0000-0000-7000-8000-0000000000c9",
+          "conservativeTokenEstimate": 594,
+          "entries": [
+            {
+              "byteLength": 594,
+              "conservativeTokenEstimate": 594,
+              "deduplicated": false,
+              "itemId": "ctx_f0d10041910978aa999f993c85f852d87e470371",
+              "ordinal": 1,
+              "policyCatalogContentHash": "511625c817d34273c2ac5ea9f9df5bb3087091cbedbca2d119a3652f1806ca59",
+              "policyCatalogId": "guard.memory",
+              "policyCatalogVersion": 1,
+              "policySnapshotId": "pol_018f0000-0000-7000-8000-000000000320",
+              "promptInjectionTags": [],
+              "reason": "context.release.allowed",
+              "redactions": [],
+              "releasePolicyContentHash": "36a198e9c3c1d619bb79a60ca26cbb23febac066477b12924b96db527e11a570",
+              "releasePolicyId": "runtime-host.fixture",
+              "releasePolicyVersion": 1,
+              "releasedContentHash": "c947c2a949aec1b1cf9862f76fec5218e6f5498d655e87630489a007468de66e",
+              "resource": {
+                "classification": "fixture",
+                "locator": {
+                  "recordId": "RAW_PLANNER_LOCATOR_MUST_NOT_BE_REQUESTED"
+                },
+                "mediaType": "application/json",
+                "schemaVersion": 1,
+                "scheme": "memory",
+                "sourceId": "fixture.context"
+              },
+              "runId": "run_018f0000-0000-7000-8000-000000000001",
+              "safeResourceCategory": "context_resource",
+              "schemaVersion": 1,
+              "selector": null,
+              "sourceId": "fixture.context",
+              "sourceVersion": 1,
+              "status": "released",
+              "tokenEstimator": "utf8-byte-upper-bound-v1",
+              "truncated": false,
+              "turnId": "att_018f0000-0000-7000-8000-0000000000c9"
+            }
+          ],
+          "orderedItemIds": [
+            "ctx_f0d10041910978aa999f993c85f852d87e470371"
+          ],
+          "policySnapshotId": "pol_018f0000-0000-7000-8000-000000000320",
+          "releasePolicyContentHash": "36a198e9c3c1d619bb79a60ca26cbb23febac066477b12924b96db527e11a570",
+          "releasePolicyId": "runtime-host.fixture",
+          "releasePolicyVersion": 1,
+          "runId": "run_018f0000-0000-7000-8000-000000000001",
+          "schemaVersion": 1,
+          "tokenEstimator": "utf8-byte-upper-bound-v1",
+          "totalBytes": 594,
+          "turnId": "att_018f0000-0000-7000-8000-0000000000c9"
+        },
+        "agentTurnRequestHash": "3ef2666aa52f634602000b5d97550306cc95aa1ada4a485be887a37f31567a5c"
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 9,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-00000000006e",
+    "eventType": "ActionProposed",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "agent_driver",
+      "id": "fixture.driver-binding"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-00000000006d",
+    "payload": {
+      "proposalId": "dpr_018f0000-0000-7000-8000-0000000002bc",
+      "capabilityPackId": "fixture.transform",
+      "capabilityPackVersion": 1,
+      "operationId": "transform",
+      "operationVersion": 1,
+      "input": {
+        "value": "alpha"
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 10,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-00000000006f",
+    "eventType": "AgentUsageRecorded",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "agent_driver",
+      "id": "fixture.driver-binding"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-00000000006e",
+    "payload": {
+      "attemptId": "att_018f0000-0000-7000-8000-0000000000c9",
+      "usage": {
+        "inputBytes": 5,
+        "outputBytes": 4
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 11,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000070",
+    "eventType": "ActionNormalized",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "runtime",
+      "id": "guard.runtime-host"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-00000000006e",
+    "payload": {
+      "action": {
+        "actionId": "act_018f0000-0000-7000-8000-00000000012d",
+        "capabilityPackId": "fixture.transform",
+        "capabilityPackVersion": 1,
+        "environment": {
+          "networkProfile": "disabled",
+          "profileId": "fixture",
+          "sandboxed": true,
+          "trustLevel": "trusted_fixture"
+        },
+        "normalizedInput": {
+          "value": "alpha"
+        },
+        "operationId": "transform",
+        "operationVersion": 1,
+        "preconditions": [],
+        "request": {
+          "intent": "transform",
+          "operation": "transform"
+        },
+        "resource": {
+          "classification": "internal",
+          "fixtureKind": "transform",
+          "kind": "fixture",
+          "scheme": "memory",
+          "sourceId": "fixture.context"
+        },
+        "schemaVersion": 1,
+        "sideEffectClass": "none",
+        "subject": {
+          "kind": "user",
+          "principal": "fixture-user"
+        }
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 12,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000071",
+    "eventType": "PolicyEvaluated",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "runtime",
+      "id": "guard.runtime-host"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000070",
+    "payload": {
+      "actionId": "act_018f0000-0000-7000-8000-00000000012d",
+      "policyVersionId": "pol_018f0000-0000-7000-8000-000000000320",
+      "decision": "allow",
+      "trace": {
+        "languageVersion": "1",
+        "policyContentHash": "22d78e98113b4b5f7468462d462ae4f3a3de53ebb1e9fa09f60ce0a876aad983",
+        "attributeCatalogs": [
+          {
+            "catalogId": "guard.base",
+            "schemaVersion": 1,
+            "contentHash": "3cd39e76a6c94f0f842b4871b6cebc3c010236927dfcc0f8b0dde054bbb9bf48"
+          },
+          {
+            "catalogId": "guard.context",
+            "schemaVersion": 1,
+            "contentHash": "0ffb9b470fd6ea78adcd96e0ab3c6e4e9569c459f2f1879e6379e995561ab820"
+          },
+          {
+            "catalogId": "guard.fixture-capability",
+            "schemaVersion": 1,
+            "contentHash": "1b4b262c793d49ddcee0097e7d8e0cdd1684ec2b610e4311940236be9096e15a"
+          },
+          {
+            "catalogId": "guard.memory",
+            "schemaVersion": 1,
+            "contentHash": "511625c817d34273c2ac5ea9f9df5bb3087091cbedbca2d119a3652f1806ca59"
+          }
+        ],
+        "combiningAlgorithm": "deny_overrides",
+        "defaultEffect": "deny",
+        "result": "allow",
+        "winningPolicyName": "allow-pure-effects",
+        "evaluations": [
+          {
+            "policyName": "deny-local-effects",
+            "priority": 100,
+            "effect": "deny",
+            "reason": "Fixture local effects are denied.",
+            "result": "false",
+            "condition": {
+              "kind": "comparison",
+              "attribute": "action.side_effect",
+              "operator": "!=",
+              "result": "false",
+              "span": {
+                "sourceId": "runtime-host-fixture.guard",
+                "start": {
+                  "byteOffset": 50,
+                  "line": 2,
+                  "column": 8
+                },
+                "end": {
+                  "byteOffset": 78,
+                  "line": 2,
+                  "column": 36
+                }
+              },
+              "actual": "none",
+              "expected": "none"
+            }
+          },
+          {
+            "policyName": "allow-pure-effects",
+            "priority": 50,
+            "effect": "allow",
+            "reason": "Fixture pure effects are allowed.",
+            "result": "true",
+            "condition": {
+              "kind": "comparison",
+              "attribute": "action.side_effect",
+              "operator": "==",
+              "result": "true",
+              "span": {
+                "sourceId": "runtime-host-fixture.guard",
+                "start": {
+                  "byteOffset": 183,
+                  "line": 8,
+                  "column": 8
+                },
+                "end": {
+                  "byteOffset": 211,
+                  "line": 8,
+                  "column": 36
+                }
+              },
+              "actual": "none",
+              "expected": "none"
+            }
+          }
+        ],
+        "matchedPolicyNames": [
+          "allow-pure-effects"
+        ]
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 13,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000072",
+    "eventType": "ActionStarted",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "runtime",
+      "id": "guard.runtime-host"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000071",
+    "payload": {
+      "actionId": "act_018f0000-0000-7000-8000-00000000012d",
+      "startedAt": "2026-08-30T12:00:00.000Z"
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 14,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000073",
+    "eventType": "ContextManifestRecorded",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "capability_worker",
+      "id": "fixture.transform"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000072",
+    "payload": {
+      "manifestKind": "release",
+      "referenceId": "act_018f0000-0000-7000-8000-00000000012d",
+      "manifest": {
+        "byteLength": 562,
+        "conservativeTokenEstimate": 562,
+        "deduplicated": false,
+        "itemId": "ctx_023442ed92a60e82da72c5f1d607ee366ad8baff",
+        "ordinal": 2,
+        "policyCatalogContentHash": "1b4b262c793d49ddcee0097e7d8e0cdd1684ec2b610e4311940236be9096e15a",
+        "policyCatalogId": "guard.fixture-capability",
+        "policyCatalogVersion": 1,
+        "policySnapshotId": "pol_018f0000-0000-7000-8000-000000000320",
+        "promptInjectionTags": [],
+        "reason": "context.release.allowed",
+        "redactions": [],
+        "releasePolicyContentHash": "36a198e9c3c1d619bb79a60ca26cbb23febac066477b12924b96db527e11a570",
+        "releasePolicyId": "runtime-host.fixture",
+        "releasePolicyVersion": 1,
+        "releasedContentHash": "56bc375117cde36afd759c7ad4e9906cb037c86351c714f1fe0ad910252285d0",
+        "resource": {
+          "classification": "internal",
+          "locator": {
+            "fixtureKind": "transform"
+          },
+          "mediaType": "application/json",
+          "schemaVersion": 1,
+          "scheme": "memory",
+          "sourceId": "fixture.context"
+        },
+        "runId": "run_018f0000-0000-7000-8000-000000000001",
+        "safeResourceCategory": "context_resource",
+        "schemaVersion": 1,
+        "selector": null,
+        "sourceId": "fixture.context",
+        "sourceVersion": 1,
+        "status": "released",
+        "tokenEstimator": "utf8-byte-upper-bound-v1",
+        "truncated": false,
+        "turnId": "att_018f0000-0000-7000-8000-0000000000ca"
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 15,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000074",
+    "eventType": "ActionSucceeded",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "runtime",
+      "id": "guard.runtime-host"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000073",
+    "payload": {
+      "actionId": "act_018f0000-0000-7000-8000-00000000012d",
+      "completedAt": "2026-08-30T12:00:00.000Z"
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 16,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000075",
+    "eventType": "ObservationReleased",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "runtime",
+      "id": "guard.runtime-host"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000074",
+    "payload": {
+      "observation": {
+        "schemaVersion": 1,
+        "observationId": "observation-1",
+        "actionId": "act_018f0000-0000-7000-8000-00000000012d",
+        "status": "succeeded",
+        "audit": {
+          "privateAudit": "AUDIT_VIEW_MUST_NEVER_ENTER_THE_DRIVER",
+          "released": true
+        },
+        "human": [
+          {
+            "schemaVersion": 1,
+            "blockId": "content-block-1",
+            "modality": "json",
+            "mediaType": "application/json",
+            "byteLength": 52,
+            "contentHash": "56d564e2af66afa30bebd9a404221fd9fbe9364e37b225ee79349ffa02e07e00",
+            "classification": "internal",
+            "provenance": {
+              "source": null,
+              "producer": {
+                "kind": "capability_worker",
+                "id": "fixture.transform"
+              },
+              "capturedAt": "2026-08-30T12:00:00.000Z"
+            },
+            "retentionClass": "run",
+            "transformation": null,
+            "value": {
+              "summary": "HUMAN_VIEW_MUST_NEVER_ENTER_THE_DRIVER"
+            },
+            "jsonSchema": null
+          }
+        ],
+        "agent": [
+          {
+            "schemaVersion": 1,
+            "blockId": "ctx_023442ed92a60e82da72c5f1d607ee366ad8baff",
+            "modality": "json",
+            "mediaType": "application/json",
+            "byteLength": 562,
+            "contentHash": "56bc375117cde36afd759c7ad4e9906cb037c86351c714f1fe0ad910252285d0",
+            "classification": "internal",
+            "provenance": {
+              "source": {
+                "classification": "internal",
+                "locator": {
+                  "fixtureKind": "transform"
+                },
+                "mediaType": "application/json",
+                "schemaVersion": 1,
+                "scheme": "memory",
+                "sourceId": "fixture.context"
+              },
+              "producer": {
+                "kind": "capability_worker",
+                "id": "fixture.context"
+              },
+              "capturedAt": "2026-08-30T12:00:00.000Z"
+            },
+            "retentionClass": "run",
+            "transformation": null,
+            "value": {
+              "kind": "capability_output",
+              "output": {
+                "value": "ALPHA"
+              },
+              "provenance": {
+                "classification": "internal",
+                "policyCatalogContentHash": "1b4b262c793d49ddcee0097e7d8e0cdd1684ec2b610e4311940236be9096e15a",
+                "policyCatalogId": "guard.fixture-capability",
+                "policyCatalogVersion": 1,
+                "sourceId": "fixture.context",
+                "sourceVersion": 1
+              },
+              "resource": {
+                "classification": "internal",
+                "locator": {
+                  "fixtureKind": "transform"
+                },
+                "mediaType": "application/json",
+                "schemaVersion": 1,
+                "scheme": "memory",
+                "sourceId": "fixture.context"
+              },
+              "schemaVersion": 1,
+              "trustLabel": "untrusted_capability_output",
+              "untrusted": true
+            },
+            "jsonSchema": null
+          }
+        ],
+        "error": null,
+        "occurredAt": "2026-08-30T12:00:00.000Z"
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 17,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000076",
+    "eventType": "AgentAttemptStarted",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "agent_driver",
+      "id": "fixture.driver-binding"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000075",
+    "payload": {
+      "attemptId": "att_018f0000-0000-7000-8000-0000000000ca",
+      "turn": 2
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 18,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000077",
+    "eventType": "ContextManifestRecorded",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "runtime",
+      "id": "guard.runtime-host"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000076",
+    "payload": {
+      "manifestKind": "agent_input",
+      "referenceId": "att_018f0000-0000-7000-8000-0000000000ca",
+      "manifest": {
+        "schemaVersion": 1,
+        "assemblyManifest": {
+          "agentRequestId": "att_018f0000-0000-7000-8000-0000000000ca",
+          "conservativeTokenEstimate": 1157,
+          "entries": [
+            {
+              "byteLength": 594,
+              "conservativeTokenEstimate": 594,
+              "deduplicated": false,
+              "itemId": "ctx_f0d10041910978aa999f993c85f852d87e470371",
+              "ordinal": 1,
+              "policyCatalogContentHash": "511625c817d34273c2ac5ea9f9df5bb3087091cbedbca2d119a3652f1806ca59",
+              "policyCatalogId": "guard.memory",
+              "policyCatalogVersion": 1,
+              "policySnapshotId": "pol_018f0000-0000-7000-8000-000000000320",
+              "promptInjectionTags": [],
+              "reason": "context.release.allowed",
+              "redactions": [],
+              "releasePolicyContentHash": "36a198e9c3c1d619bb79a60ca26cbb23febac066477b12924b96db527e11a570",
+              "releasePolicyId": "runtime-host.fixture",
+              "releasePolicyVersion": 1,
+              "releasedContentHash": "c947c2a949aec1b1cf9862f76fec5218e6f5498d655e87630489a007468de66e",
+              "resource": {
+                "classification": "fixture",
+                "locator": {
+                  "recordId": "RAW_PLANNER_LOCATOR_MUST_NOT_BE_REQUESTED"
+                },
+                "mediaType": "application/json",
+                "schemaVersion": 1,
+                "scheme": "memory",
+                "sourceId": "fixture.context"
+              },
+              "runId": "run_018f0000-0000-7000-8000-000000000001",
+              "safeResourceCategory": "context_resource",
+              "schemaVersion": 1,
+              "selector": null,
+              "sourceId": "fixture.context",
+              "sourceVersion": 1,
+              "status": "released",
+              "tokenEstimator": "utf8-byte-upper-bound-v1",
+              "truncated": false,
+              "turnId": "att_018f0000-0000-7000-8000-0000000000c9"
+            },
+            {
+              "byteLength": 562,
+              "conservativeTokenEstimate": 562,
+              "deduplicated": false,
+              "itemId": "ctx_023442ed92a60e82da72c5f1d607ee366ad8baff",
+              "ordinal": 2,
+              "policyCatalogContentHash": "1b4b262c793d49ddcee0097e7d8e0cdd1684ec2b610e4311940236be9096e15a",
+              "policyCatalogId": "guard.fixture-capability",
+              "policyCatalogVersion": 1,
+              "policySnapshotId": "pol_018f0000-0000-7000-8000-000000000320",
+              "promptInjectionTags": [],
+              "reason": "context.release.allowed",
+              "redactions": [],
+              "releasePolicyContentHash": "36a198e9c3c1d619bb79a60ca26cbb23febac066477b12924b96db527e11a570",
+              "releasePolicyId": "runtime-host.fixture",
+              "releasePolicyVersion": 1,
+              "releasedContentHash": "56bc375117cde36afd759c7ad4e9906cb037c86351c714f1fe0ad910252285d0",
+              "resource": {
+                "classification": "internal",
+                "locator": {
+                  "fixtureKind": "transform"
+                },
+                "mediaType": "application/json",
+                "schemaVersion": 1,
+                "scheme": "memory",
+                "sourceId": "fixture.context"
+              },
+              "runId": "run_018f0000-0000-7000-8000-000000000001",
+              "safeResourceCategory": "context_resource",
+              "schemaVersion": 1,
+              "selector": null,
+              "sourceId": "fixture.context",
+              "sourceVersion": 1,
+              "status": "released",
+              "tokenEstimator": "utf8-byte-upper-bound-v1",
+              "truncated": false,
+              "turnId": "att_018f0000-0000-7000-8000-0000000000ca"
+            }
+          ],
+          "orderedItemIds": [
+            "ctx_f0d10041910978aa999f993c85f852d87e470371",
+            "ctx_023442ed92a60e82da72c5f1d607ee366ad8baff"
+          ],
+          "policySnapshotId": "pol_018f0000-0000-7000-8000-000000000320",
+          "releasePolicyContentHash": "36a198e9c3c1d619bb79a60ca26cbb23febac066477b12924b96db527e11a570",
+          "releasePolicyId": "runtime-host.fixture",
+          "releasePolicyVersion": 1,
+          "runId": "run_018f0000-0000-7000-8000-000000000001",
+          "schemaVersion": 1,
+          "tokenEstimator": "utf8-byte-upper-bound-v1",
+          "totalBytes": 1157,
+          "turnId": "att_018f0000-0000-7000-8000-0000000000ca"
+        },
+        "agentTurnRequestHash": "2610743a9d281e1d756ab68d01d6d74df295d0380a1baccb23791d34325d8de5"
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 19,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000078",
+    "eventType": "OutcomeProposed",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "agent_driver",
+      "id": "fixture.driver-binding"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000077",
+    "payload": {
+      "outcome": {
+        "schemaVersion": 1,
+        "outcomeId": "outcome-2",
+        "profileId": "fixture.generic-task",
+        "profileVersion": 1,
+        "outcomeType": "fixture.result",
+        "outcomeTypeVersion": 1,
+        "payload": {
+          "answer": "complete"
+        },
+        "evidence": [
+          {
+            "kind": "observation",
+            "referenceId": "observation-1",
+            "contentHash": null
+          }
+        ],
+        "proposedAt": "2026-08-30T12:00:00.000Z"
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 20,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-000000000079",
+    "eventType": "OutcomeValidated",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "kind": "runtime",
+      "id": "guard.runtime-host"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000078",
+    "payload": {
+      "outcomeId": "outcome-2",
+      "evidence": [
+        {
+          "contentHash": null,
+          "kind": "observation",
+          "referenceId": "observation-1"
+        }
+      ],
+      "validatedAt": "2026-08-30T12:00:00.000Z"
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 21,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  },
+  {
+    "eventId": "evt_018f0000-0000-7000-8000-00000000007a",
+    "eventType": "RunCompleted",
+    "eventSchemaVersion": 1,
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "actor": {
+      "id": "guard.runtime-host",
+      "kind": "runtime"
+    },
+    "correlationId": "run_018f0000-0000-7000-8000-000000000001",
+    "causationId": "evt_018f0000-0000-7000-8000-000000000079",
+    "payload": {
+      "result": {
+        "finishedAt": "2026-08-30T12:00:00.000Z",
+        "outcome": {
+          "evidence": [
+            {
+              "contentHash": null,
+              "kind": "observation",
+              "referenceId": "observation-1"
+            }
+          ],
+          "outcomeId": "outcome-2",
+          "outcomeType": "fixture.result",
+          "outcomeTypeVersion": 1,
+          "payload": {
+            "answer": "complete"
+          },
+          "profileId": "fixture.generic-task",
+          "profileVersion": 1,
+          "proposedAt": "2026-08-30T12:00:00.000Z",
+          "schemaVersion": 1
+        },
+        "runId": "run_018f0000-0000-7000-8000-000000000001",
+        "schemaVersion": 1,
+        "status": "completed"
+      }
+    },
+    "streamId": "run_018f0000-0000-7000-8000-000000000001",
+    "streamVersion": 22,
+    "recordedAt": "2026-08-30T12:00:00.000Z"
+  }
+]

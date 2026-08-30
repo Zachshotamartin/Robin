@@ -11,7 +11,7 @@ import type {
 } from "@guard/contracts";
 import type { AgentDriver } from "@guard/agent-driver";
 import type { CapabilityGateway, CapabilityPackRegistry } from "@guard/capability-gateway";
-import type { ContextSourceRegistry } from "@guard/context-broker";
+import type { ContextBrokerIntegrationFactory } from "@guard/context-broker";
 import type { EventStore } from "@guard/event-store";
 import type { TaskProfileRegistry } from "@guard/profile-registry";
 import type { RunState } from "@guard/runtime";
@@ -80,7 +80,7 @@ export interface SynchronousRuntimeHostOptions {
   readonly eventStore: EventStore;
   readonly profileRegistry: TaskProfileRegistry;
   readonly installedDriver: InstalledAgentDriver;
-  readonly contextSources: ContextSourceRegistry;
+  readonly contextBrokerFactory: ContextBrokerIntegrationFactory;
   readonly capabilityPacks: CapabilityPackRegistry;
   readonly capabilityGateway: CapabilityGateway;
   readonly contextPlanner: RuntimeContextPlanner;
