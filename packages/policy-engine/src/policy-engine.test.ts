@@ -643,35 +643,6 @@ test("checked-in policy-v1 security table contains and passes at least 25 cases"
   assert.equal(run.passed, corpus.cases.length);
 });
 
-test("every rule in the shipped default policy has a match and near miss", async () => {
-  const source = await readFile(
-    new URL("../../../policies/default.guard", import.meta.url),
-    "utf8",
-  );
-  const result = compilePolicySnapshot(
-    {
-      policyVersionId: POLICY_ID_2,
-      source,
-      sourceId: "policies/default.guard",
-      defaultEffect: "deny",
-    },
-    {},
-    CATALOGS,
-  );
-  assert.equal(result.ok, true, result.ok ? "" : JSON.stringify(result.diagnostics));
-  if (!result.ok) throw new Error("unreachable default policy compile failure");
-  const fixture: unknown = JSON.parse(
-    await readFile(
-      new URL("../testdata/default-policy-cases-v1.json", import.meta.url),
-      "utf8",
-    ),
-  );
-  const corpus = parsePolicyCaseCorpus(fixture);
-  const run = runPolicyCaseCorpus(result.snapshot, corpus, TOKEN);
-  assert.equal(run.failed, 0, JSON.stringify(run.cases.filter((entry) => !entry.passed)));
-  assert.equal(run.passed, 6);
-});
-
 test("seeded generated decisions match an independent three-valued reference", async () => {
   const raw: unknown = JSON.parse(
     await readFile(

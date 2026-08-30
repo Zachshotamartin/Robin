@@ -3,8 +3,11 @@ import { isProxy } from "node:util/types";
 import { createDomainError } from "@guard/contracts";
 
 const MAXIMUM_PATH_BYTES = 4_096;
+const MAXIMUM_SEGMENT_BYTES = 255;
+const WINDOWS_RESERVED_SEGMENT =
+  /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
 
-/** Canonical forward-slash repository-relative path for virtual fixtures. */
+/** Canonical portable forward-slash path for every repository boundary. */
 export function normalizeRepositoryPath(
   value: unknown,
   options: { readonly allowRoot: boolean },
@@ -22,11 +25,8 @@ export function normalizeRepositoryPath(
   }
   if (
     !isWellFormedUnicode(value) ||
-    value.includes("\u0000") ||
-    /[\u0001-\u001f\u007f]/u.test(value) ||
-    value.includes("\\") ||
-    value.includes("%") ||
-    value.includes(":") ||
+    /[\u0000-\u001f\u007f-\u009f]/u.test(value) ||
+    /[<>:"|?*%\\]/u.test(value) ||
     value.startsWith("/") ||
     /^[a-zA-Z]:/u.test(value)
   ) {
@@ -35,12 +35,30 @@ export function normalizeRepositoryPath(
   const segments = value.split("/");
   if (
     segments.some(
-      (segment) => segment.length === 0 || segment === "." || segment === "..",
+      (segment) =>
+        segment.length === 0 ||
+        segment === "." ||
+        segment === ".." ||
+        Buffer.byteLength(segment, "utf8") > MAXIMUM_SEGMENT_BYTES,
     )
   ) {
-    throw invalidPath("Repository path contains an empty, dot, or traversal segment.");
+    throw invalidPath(
+      "Repository path contains an empty, dot, traversal, or oversized segment.",
+    );
   }
-  const canonical = segments.map((segment) => segment.normalize("NFC")).join("/");
+  const canonicalSegments = segments.map((segment) => segment.normalize("NFC"));
+  if (
+    canonicalSegments.some(
+      (segment) =>
+        Buffer.byteLength(segment, "utf8") > MAXIMUM_SEGMENT_BYTES ||
+        segment.endsWith(".") ||
+        segment.endsWith(" ") ||
+        WINDOWS_RESERVED_SEGMENT.test(segment),
+    )
+  ) {
+    throw invalidPath("Repository path uses a non-portable reserved segment.");
+  }
+  const canonical = canonicalSegments.join("/");
   if (Buffer.byteLength(canonical, "utf8") > MAXIMUM_PATH_BYTES) {
     throw invalidPath("Canonical repository path exceeds the configured byte bound.");
   }

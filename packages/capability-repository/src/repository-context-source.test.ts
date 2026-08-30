@@ -31,7 +31,13 @@ import {
   createContextReleasePolicySnapshot,
   createPinnedContextPolicyAdapter,
 } from "@guard/context-broker";
-import type { ContextBudgetLimits } from "@guard/context-broker";
+import type {
+  ContextBudgetLimits,
+  ContextResourceMetadata,
+  NormalizedResourceRequest,
+  OpenedContextResource,
+  SourceReadBudget,
+} from "@guard/context-broker";
 import {
   BASE_POLICY_ATTRIBUTE_CATALOG,
   compilePolicySnapshot,
@@ -59,6 +65,38 @@ const DEFAULT_BUDGETS: ContextBudgetLimits = Object.freeze({
   maximumBytesPerRun: 128 * 1024,
   maximumControlCharacterRatio: 0.05,
 });
+const OBSERVED_SOURCE_OPENS = new WeakMap<ObservedRepositoryContextSource, number>();
+
+class ObservedRepositoryContextSource extends RepositoryContextSource {
+  public constructor(root: string) {
+    super({
+      sourceId: "coding.repository",
+      sourceVersion: 1,
+      description: "Pinned repository context fixture.",
+      repositoryRoot: root,
+      branch: "feature/context-boundary",
+      classification: "internal",
+      maximumFileBytes: 256 * 1024,
+      maximumByteSpan: 64 * 1024,
+      maximumLineSpan: 1_000,
+    });
+    OBSERVED_SOURCE_OPENS.set(this, 0);
+  }
+
+  public override async openBounded(
+    request: NormalizedResourceRequest,
+    expected: ContextResourceMetadata,
+    budget: SourceReadBudget,
+    signal: AbortSignal,
+  ): Promise<OpenedContextResource> {
+    OBSERVED_SOURCE_OPENS.set(this, this.openCalls + 1);
+    return super.openBounded(request, expected, budget, signal);
+  }
+
+  public get openCalls(): number {
+    return OBSERVED_SOURCE_OPENS.get(this) ?? 0;
+  }
+}
 
 function isCode(error: unknown, code: string): boolean {
   return isDomainError(error) && error.code === code;
@@ -146,15 +184,17 @@ function broker(
   });
 }
 
-test("compiles the shipped default-deny context policy and enforces allow and deny", async (t) => {
+test("composes repository context policy before media classification or content open", async (t) => {
   const root = await fixtureRoot(t);
   await mkdir(path.join(root, "config"));
   await writeFile(path.join(root, "safe.ts"), "export const reviewed = true;\n");
   await writeFile(path.join(root, "config", ".env.production"), "SAFE_FIXTURE=yes\n");
-  const policySource = await readFile(
-    new URL("../../../policies/context.guard", import.meta.url),
-    "utf8",
-  );
+  await writeFile(path.join(root, "safe.opaque"), "opaque fixture\n");
+  const [baseContextPolicy, repositoryContextPolicy] = await Promise.all([
+    readFile(new URL("../../../policies/context.guard", import.meta.url), "utf8"),
+    readFile(new URL("../policies/context.guard", import.meta.url), "utf8"),
+  ]);
+  const policySource = `${baseContextPolicy.trimEnd()}\n\n${repositoryContextPolicy.trimEnd()}\n`;
   const catalogs = composePolicyAttributeCatalogs([
     BASE_POLICY_ATTRIBUTE_CATALOG,
     CONTEXT_POLICY_ATTRIBUTE_CATALOG,
@@ -164,7 +204,8 @@ test("compiles the shipped default-deny context policy and enforces allow and de
     {
       policyVersionId: POLICY_ID,
       source: policySource,
-      sourceId: "policies/context.guard",
+      sourceId:
+        "policies/context.guard+packages/capability-repository/policies/context.guard",
       defaultEffect: "deny",
     },
     {},
@@ -189,8 +230,9 @@ test("compiles the shipped default-deny context policy and enforces allow and de
       contentHash: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
     },
   ]);
+  const repositorySource = new ObservedRepositoryContextSource(root);
   const contextBroker = broker(
-    source(root),
+    repositorySource,
     [],
     createPinnedPolicyEvaluator(compiled.snapshot, {
       secretCorrelationToken: "repository-context-policy-test-token-0001",
@@ -207,7 +249,9 @@ test("compiles the shipped default-deny context policy and enforces allow and de
     signal: new AbortController().signal,
   });
   assert.equal(allowed.status, "released");
+  assert.equal(repositorySource.openCalls, 1);
 
+  const opensBeforeSecretDenial = repositorySource.openCalls;
   const denied = await contextBroker.releaseSource({
     turnId: "turn.policy.deny",
     sourceId: "coding.repository",
@@ -224,6 +268,46 @@ test("compiles the shipped default-deny context policy and enforces allow and de
   assert.equal(denied.manifest.resource, null);
   assert.equal(denied.manifest.reason, "context.policy.metadata_denied");
   assert.equal(canonicalize(denied.manifest).includes(".env.production"), false);
+  assert.equal(
+    repositorySource.openCalls,
+    opensBeforeSecretDenial,
+    "metadata policy denial must precede media classification and content open",
+  );
+
+  const unsupported = await contextBroker.releaseSource({
+    turnId: "turn.policy.unsupported-media",
+    sourceId: "coding.repository",
+    sourceVersion: 1,
+    request: { path: "safe.opaque", selector: { kind: "whole" } },
+    maximumBytes: 4 * 1024,
+    reason: "coding.read_file",
+    signal: new AbortController().signal,
+  });
+  assert.equal(unsupported.status, "denied");
+  assert.equal(unsupported.manifest.reason, "unsupported_media");
+  assert.equal(
+    repositorySource.openCalls,
+    opensBeforeSecretDenial,
+    "unsupported media must be rejected before content open",
+  );
+});
+
+test("handpicked binary text fixture is denied after one bounded source read", async (t) => {
+  const root = await fixtureRoot(t);
+  await writeFile(path.join(root, "binary.txt"), Buffer.from([0x61, 0x00, 0x62]));
+  const repositorySource = new ObservedRepositoryContextSource(root);
+  const result = await broker(repositorySource).releaseSource({
+    turnId: "turn.binary",
+    sourceId: "coding.repository",
+    sourceVersion: 1,
+    request: { path: "binary.txt", selector: { kind: "whole" } },
+    maximumBytes: 4 * 1024,
+    reason: "coding.read_file",
+    signal: new AbortController().signal,
+  });
+  assert.equal(result.status, "denied");
+  assert.equal(result.manifest.reason, "binary_nul");
+  assert.equal(repositorySource.openCalls, 1);
 });
 
 test("canonicalizes repository paths and rejects hostile alternate forms", () => {

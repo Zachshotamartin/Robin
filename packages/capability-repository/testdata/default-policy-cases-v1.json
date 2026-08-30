@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "policyContentHash": "b18702277a392a9349d1ccdf643372351950ea7a5370acc9e6717b937985dbea",
+  "policyContentHash": "c24c9b084464a66862dd83a0676b1b0b20677d4a423be65d5f814c658a14d4ba",
   "cases": [
     {
       "schemaVersion": 1,
@@ -18,9 +18,10 @@
           "compatibilityTier": "A"
         },
         "resource": {
-          "scheme": "memory",
-          "sourceId": "fixture.source",
+          "scheme": "repo",
+          "sourceId": "coding.repository",
           "classification": "internal",
+          "branch": "main",
           "path": "service/.env.local"
         },
         "environment": {
@@ -37,7 +38,8 @@
         "preconditions": []
       },
       "expectedEffect": "deny",
-      "expectedWinningPolicyName": "deny-secret-repository-reads"
+      "expectedWinningPolicyName": "deny-secret-repository-reads",
+      "expectedReason": "Secret-bearing repository paths cannot enter agent context"
     },
     {
       "schemaVersion": 1,
@@ -55,9 +57,10 @@
           "compatibilityTier": "A"
         },
         "resource": {
-          "scheme": "memory",
-          "sourceId": "fixture.source",
+          "scheme": "repo",
+          "sourceId": "coding.repository",
           "classification": "internal",
+          "branch": "main",
           "path": "service/config.env"
         },
         "environment": {
@@ -74,7 +77,8 @@
         "preconditions": []
       },
       "expectedEffect": "deny",
-      "expectedWinningPolicyName": null
+      "expectedWinningPolicyName": null,
+      "expectedReason": "No policy matched; the immutable snapshot default effect applies."
     },
     {
       "schemaVersion": 1,
@@ -110,7 +114,8 @@
         "preconditions": []
       },
       "expectedEffect": "require_approval",
-      "expectedWinningPolicyName": "approve-dependency-installation"
+      "expectedWinningPolicyName": "approve-dependency-installation",
+      "expectedReason": "Dependency installation may execute third-party lifecycle code"
     },
     {
       "schemaVersion": 1,
@@ -146,7 +151,8 @@
         "preconditions": []
       },
       "expectedEffect": "deny",
-      "expectedWinningPolicyName": null
+      "expectedWinningPolicyName": null,
+      "expectedReason": "No policy matched; the immutable snapshot default effect applies."
     },
     {
       "schemaVersion": 1,
@@ -182,7 +188,8 @@
         "preconditions": []
       },
       "expectedEffect": "allow",
-      "expectedWinningPolicyName": "allow-sandboxed-tests"
+      "expectedWinningPolicyName": "allow-sandboxed-tests",
+      "expectedReason": "Pinned test recipes may run inside the selected sandbox profile"
     },
     {
       "schemaVersion": 1,
@@ -218,7 +225,8 @@
         "preconditions": []
       },
       "expectedEffect": "deny",
-      "expectedWinningPolicyName": null
+      "expectedWinningPolicyName": null,
+      "expectedReason": "No policy matched; the immutable snapshot default effect applies."
     }
   ]
 }

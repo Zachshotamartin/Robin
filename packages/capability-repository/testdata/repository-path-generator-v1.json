@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "generatorId": "guard.repository-path-adversarial",
+  "generatorVersion": 1,
+  "seeds": [324508639, 610839776, 3735928559],
+  "validCasesPerSeed": 4,
+  "invalidCasesPerSeed": 32,
+  "maximumGeneratedCases": 128,
+  "maximumPathBytes": 4096,
+  "maximumSegmentBytes": 255,
+  "expectedCorpusSha256": "e614e43831a5823b278a4586e878e34c701fe7d5ebb98be03c83d1aa901541ea"
+}

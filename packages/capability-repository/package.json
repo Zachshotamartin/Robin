@@ -12,7 +12,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "policies",
+    "testdata"
   ],
   "scripts": {
     "build": "tsc --build",
