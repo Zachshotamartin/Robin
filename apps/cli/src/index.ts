@@ -31,13 +31,14 @@ export type {
   SessionPermissionMode,
 } from "./argv.js";
 export {
+  CLI_BUILD_METADATA,
   CLI_VERSION,
   EXIT_CODES,
   exitCodeForErrorCode,
   exitCodeForResult,
   runCli,
 } from "./main.js";
-export type { CliDependencies, CliWriter } from "./main.js";
+export type { CliBuildMetadata, CliDependencies, CliWriter } from "./main.js";
 export {
   DEFAULT_SESSION_COMMAND_DEPENDENCIES,
   executeSessionCommand,

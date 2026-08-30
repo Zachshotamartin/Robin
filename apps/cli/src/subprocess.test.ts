@@ -5,8 +5,10 @@ import {
 } from "node:child_process";
 import { once } from "node:events";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
+
+import { GENERATED_BUILD_METADATA } from "./generated-build-metadata.js";
 
 const execFile = promisify(execFileCallback);
 const BIN = fileURLToPath(new URL("./bin.js", import.meta.url));
@@ -34,6 +36,114 @@ const POLICY_ACTION = fileURLToPath(
 const POLICY_ACTIONS = fileURLToPath(
   new URL("../testdata/policy-actions-v1.json", import.meta.url),
 );
+const COLD_PATH_LOADER = fileURLToPath(
+  new URL("../scripts/reject-warm-cli-imports.mjs", import.meta.url),
+);
+const COLD_SIDE_EFFECT_SENTINEL = fileURLToPath(
+  new URL("../scripts/reject-cold-side-effects.mjs", import.meta.url),
+);
+const PROCESS_INTERNALS = process as typeof process & {
+  readonly binding?: (name: string) => unknown;
+  readonly _debugProcess?: (processId: number) => void;
+  readonly _kill?: (processId: number, signal: number) => unknown;
+  readonly _linkedBinding?: (name: string) => unknown;
+};
+
+test("help, version, and parse failures never resolve the warm CLI graph", async () => {
+  const cases = [
+    {
+      argv: ["--version"],
+      stdout: new RegExp(`^${escapeRegExp(GENERATED_BUILD_METADATA.version)}\\n$`, "u"),
+      stderr: /^$/u,
+      code: 0,
+    },
+    { argv: ["--help"], stdout: /^Usage: robin /u, stderr: /^$/u, code: 0 },
+    { argv: ["run", "--help"], stdout: /^Usage: robin run /u, stderr: /^$/u, code: 0 },
+    { argv: ["policy", "--help"], stdout: /^Usage: robin policy /u, stderr: /^$/u, code: 0 },
+    { argv: ["policy", "check", "--help"], stdout: /^Usage: robin policy check /u, stderr: /^$/u, code: 0 },
+    { argv: ["policy", "format", "--help"], stdout: /^Usage: robin policy format /u, stderr: /^$/u, code: 0 },
+    { argv: ["policy", "test", "--help"], stdout: /^Usage: robin policy test /u, stderr: /^$/u, code: 0 },
+    { argv: ["policy", "explain", "--help"], stdout: /^Usage: robin policy explain /u, stderr: /^$/u, code: 0 },
+    { argv: ["policy", "simulate", "--help"], stdout: /^Usage: robin policy simulate /u, stderr: /^$/u, code: 0 },
+    {
+      argv: ["--unknown-cold-path-option"],
+      stdout: /^$/u,
+      stderr: /^robin: Unknown option: --unknown-cold-path-option\./u,
+      code: 2,
+    },
+  ] as const;
+
+  for (const fixture of cases) {
+    const result = await executeCold(fixture.argv);
+    assert.equal(result.code, fixture.code, fixture.argv.join(" "));
+    assert.match(result.stdout, fixture.stdout, fixture.argv.join(" "));
+    assert.match(result.stderr, fixture.stderr, fixture.argv.join(" "));
+  }
+
+  const armedSentinel = await executeCold(["-p", "prove the warm boundary"]);
+  assert.equal(armedSentinel.code, 7);
+  assert.match(armedSentinel.stderr, /robin_cold_path_warm_import/u);
+
+  const forbiddenBuiltinImport = await executeNode([
+    "--no-warnings",
+    "--experimental-loader",
+    pathToFileURL(COLD_PATH_LOADER).href,
+    "--input-type=module",
+    "--eval",
+    "await import('node:fs')",
+  ]);
+  assert.notEqual(forbiddenBuiltinImport.code, 0);
+  assert.match(
+    forbiddenBuiltinImport.stderr,
+    /robin_cold_path_warm_import/u,
+  );
+
+  const sideEffectProbes = [
+    "await fetch('https://example.invalid')",
+    "process.stdin.setRawMode(true)",
+  ];
+  if (typeof process.getBuiltinModule === "function") {
+    sideEffectProbes.push("process.getBuiltinModule('node:fs')");
+    sideEffectProbes.push(
+      "process.getBuiltinModule('node:module').createRequire(import.meta.url)('node:fs')",
+    );
+  }
+  if (typeof PROCESS_INTERNALS.binding === "function") {
+    sideEffectProbes.push("process.binding('fs')");
+  }
+  if (typeof PROCESS_INTERNALS._linkedBinding === "function") {
+    sideEffectProbes.push("process._linkedBinding('fs')");
+  }
+  if (typeof PROCESS_INTERNALS._kill === "function") {
+    sideEffectProbes.push("process._kill(process.pid, 0)");
+  }
+  if (typeof PROCESS_INTERNALS._debugProcess === "function") {
+    sideEffectProbes.push("process._debugProcess(process.pid)");
+  }
+  if (typeof process.dlopen === "function") {
+    sideEffectProbes.push("process.dlopen({}, '/tmp/robin-cold-path-probe.node')");
+  }
+  if (typeof process.execve === "function" && process.platform !== "win32") {
+    sideEffectProbes.push("process.execve('/usr/bin/true', ['true'], {})");
+  }
+  if (typeof process.report?.writeReport === "function") {
+    sideEffectProbes.push(
+      `process.report.writeReport(${JSON.stringify(process.platform === "win32" ? "NUL" : "/dev/null")})`,
+    );
+  }
+  for (const probe of sideEffectProbes) {
+    const result = await executeNode([
+      "--no-warnings",
+      "--import",
+      pathToFileURL(COLD_SIDE_EFFECT_SENTINEL).href,
+      "--input-type=module",
+      "--eval",
+      probe,
+    ]);
+    assert.notEqual(result.code, 0, probe);
+    assert.match(result.stderr, /robin_cold_path_side_effect/u, probe);
+  }
+});
 
 test("source-installed bin runs the synthetic human profile", async () => {
   const result = await execute([
@@ -244,8 +354,32 @@ async function execute(argv: readonly string[]): Promise<{
   readonly stdout: string;
   readonly stderr: string;
 }> {
+  return executeNode([BIN, ...argv]);
+}
+
+async function executeCold(argv: readonly string[]): Promise<{
+  readonly code: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}> {
+  return executeNode([
+    "--no-warnings",
+    "--import",
+    pathToFileURL(COLD_SIDE_EFFECT_SENTINEL).href,
+    "--experimental-loader",
+    pathToFileURL(COLD_PATH_LOADER).href,
+    BIN,
+    ...argv,
+  ]);
+}
+
+async function executeNode(argv: readonly string[]): Promise<{
+  readonly code: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}> {
   try {
-    const result = await execFile(process.execPath, [BIN, ...argv], {
+    const result = await execFile(process.execPath, argv, {
       encoding: "utf8",
       maxBuffer: 4 * 1024 * 1024,
       timeout: 30_000,
@@ -267,4 +401,8 @@ function isExecFileError(value: unknown): value is {
   readonly stderr?: string;
 } {
   return typeof value === "object" && value !== null;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }

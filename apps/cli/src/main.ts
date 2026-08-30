@@ -1,31 +1,18 @@
 import {
-  runCodingVirtualRepositoryScenario,
-  runSyntheticTransformScenario,
-} from "@guard/milestone-a-scenarios";
-
-import {
   CliUsageError,
   parseArgv,
   type CliHelpCommand,
-  type CliProfile,
-  type CliRequest,
   type PolicyCliRequest,
   type SessionCliRequest,
 } from "./argv.js";
-import {
-  parseObjectiveJson,
-  readObjectiveFile,
-  validateFixtureObjective,
-} from "./objectives.js";
-import { renderRun, type RenderableEvent } from "./render.js";
-import {
-  executePolicyCommand,
-  type PolicyCommandResult,
-} from "./policy-commands.js";
-import { executeSessionCommand } from "./session-command.js";
 import { EXIT_CODES, exitCodeForErrorCode } from "./exit-codes.js";
+import { GENERATED_BUILD_METADATA } from "./generated-build-metadata.js";
+import type { PolicyCommandResult } from "./policy-commands.js";
+import type { RenderableEvent } from "./render.js";
 
-export const CLI_VERSION = "0.0.0";
+export const CLI_BUILD_METADATA = GENERATED_BUILD_METADATA;
+export type CliBuildMetadata = typeof CLI_BUILD_METADATA;
+export const CLI_VERSION = CLI_BUILD_METADATA.version;
 export { EXIT_CODES, exitCodeForErrorCode } from "./exit-codes.js";
 
 export interface CliWriter {
@@ -53,19 +40,11 @@ export interface CliDependencies {
   ) => Promise<number>;
 }
 
-const DEFAULT_DEPENDENCIES: CliDependencies = Object.freeze({
-  readObjectiveFile,
-  runSynthetic: runSyntheticTransformScenario,
-  runCoding: runCodingVirtualRepositoryScenario,
-  executePolicy: executePolicyCommand,
-  executeSession: executeSessionCommand,
-});
-
 export async function runCli(
   argv: readonly string[],
   stdout: CliWriter,
   stderr: CliWriter,
-  dependencies: CliDependencies = DEFAULT_DEPENDENCIES,
+  dependencies?: CliDependencies,
 ): Promise<number> {
   try {
     const request = parseArgv(argv);
@@ -83,37 +62,13 @@ export async function runCli(
       );
     }
 
-    if (isPolicyRequest(request)) {
-      const result = await dependencies.executePolicy(request);
-      if (result.stdout.length > 0) stdout.write(result.stdout);
-      if (result.stderr.length > 0) stderr.write(result.stderr);
-      return result.exitCode;
-    }
-
-    if (request.kind === "interactive" || request.kind === "print") {
-      return await (dependencies.executeSession ?? executeSessionCommand)(
-        request,
-        stdout,
-        stderr,
-      );
-    }
-
-    if (request.objective.kind !== "builtin") {
-      const candidate =
-        request.objective.kind === "file"
-          ? await dependencies.readObjectiveFile(request.objective.path)
-          : parseObjectiveJson(request.objective.json);
-      validateFixtureObjective(request.profile, candidate);
-    }
-
-    const scenario = await runSelectedScenario(request.profile, dependencies);
-    const output = renderRun(scenario.execution.history, request.format);
-    const exitCode = exitCodeForResult(scenario.execution.state.result);
-    if (output.length > 0) stdout.write(output);
-    if (exitCode !== EXIT_CODES.success) {
-      stderr.write(terminalDiagnostic(scenario.execution.state.result));
-    }
-    return exitCode;
+    const { executeWarmCliRequest } = await import("./warm-cli.js");
+    return await executeWarmCliRequest(
+      request,
+      stdout,
+      stderr,
+      dependencies,
+    );
   } catch (error) {
     if (isCliUsageError(error)) {
       stderr.write(`robin: ${error.message}\nTry 'robin --help'.\n`);
@@ -128,16 +83,6 @@ export async function runCli(
     );
     return exitCode;
   }
-}
-
-function isPolicyRequest(request: CliRequest): request is PolicyCliRequest {
-  return (
-    request.kind === "policy-check" ||
-    request.kind === "policy-format" ||
-    request.kind === "policy-test" ||
-    request.kind === "policy-explain" ||
-    request.kind === "policy-simulate"
-  );
 }
 
 function isCliUsageError(value: unknown): value is CliUsageError {
@@ -157,16 +102,7 @@ export function exitCodeForResult(result: unknown): number {
   return exitCodeForErrorCode(domainErrorCode(recordValue(result, "error")));
 }
 
-async function runSelectedScenario(
-  profile: CliProfile,
-  dependencies: CliDependencies,
-): Promise<ScenarioExecutionView> {
-  return profile === "synthetic-demo"
-    ? dependencies.runSynthetic()
-    : dependencies.runCoding();
-}
-
-function terminalDiagnostic(result: unknown): string {
+export function terminalDiagnostic(result: unknown): string {
   const status = recordString(result, "status");
   if (status === "cancelled") return "robin: The run was cancelled.\n";
   if (status === "orphaned") return "robin: The run was orphaned.\n";

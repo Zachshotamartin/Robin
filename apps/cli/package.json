@@ -25,13 +25,19 @@
   },
   "files": [
     "dist",
-    "README.md",
-    "testdata"
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.test.d.ts.map",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.js.map",
+    "LICENSE",
+    "README.md"
   ],
   "scripts": {
-    "build": "tsc --build && node scripts/ensure-bin-executable.mjs",
+    "generate:build-metadata": "node scripts/generate-build-metadata.mjs",
+    "check:build-metadata": "node scripts/generate-build-metadata.mjs --check",
+    "build": "npm run generate:build-metadata && tsc --build && node scripts/ensure-bin-executable.mjs",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "typecheck": "tsc --build",
+    "typecheck": "npm run check:build-metadata && tsc --build",
     "test": "npm run build && node --test dist/*.test.js"
   },
   "dependencies": {
