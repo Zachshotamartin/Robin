@@ -1,6 +1,7 @@
 import type {
   ActionId,
   ActionPrecondition,
+  ArtifactId,
   JsonObject,
   NormalizedAction,
   ResourceRef,
@@ -10,6 +11,9 @@ import type {
 import type { PolicyDecision } from "@guard/policy-engine";
 
 declare const evaluatedCapabilityActionBrand: unique symbol;
+declare const capabilityPreparationReceiptBrand: unique symbol;
+declare const capabilityReconciliationReceiptBrand: unique symbol;
+declare const pendingCapabilityExecutionBrand: unique symbol;
 
 export interface CapabilityOperationReference {
   readonly packId: string;
@@ -53,6 +57,10 @@ export interface CapabilityGatewayOptions {
   readonly maximumReleasedViewBytes?: number;
   /** Aggregate bound applied to all three views plus the release descriptor. */
   readonly maximumCombinedReleasedViewBytes?: number;
+  /** Bound applied independently to every lifecycle descriptor or fact envelope. */
+  readonly maximumLifecycleEvidenceBytes?: number;
+  /** Maximum artifact references allowed in one lifecycle envelope. */
+  readonly maximumLifecycleArtifactReferences?: number;
 }
 
 /**
@@ -127,6 +135,130 @@ export interface CapabilityOperation {
     raw: JsonObject,
     action: NormalizedAction,
   ): CapabilityReleasedViews | Promise<CapabilityReleasedViews>;
+  /**
+   * Optional crash-aware effect lifecycle. Operations installed before the
+   * lifecycle contract remain valid and receive a gateway-owned inert
+   * lifecycle when callers opt into the new API.
+   */
+  readonly lifecycle?: CapabilityOperationLifecycle;
+}
+
+/** A bounded durable-artifact fact safe to publish with a lifecycle event. */
+export interface CapabilityLifecycleArtifactReference {
+  readonly schemaVersion: 1;
+  readonly artifactId: ArtifactId;
+  readonly contentHash: string;
+  readonly mediaType: string;
+}
+
+/**
+ * Safe event material returned by trusted lifecycle handlers. The gateway
+ * detaches, freezes, counts, and byte-bounds this envelope before exposing it.
+ */
+export interface CapabilityLifecycleEvidence {
+  readonly schemaVersion: 1;
+  readonly eventFacts: JsonObject;
+  readonly artifactReferences: readonly CapabilityLifecycleArtifactReference[];
+}
+
+export interface CapabilityPreparationDescriptor
+  extends CapabilityLifecycleEvidence {
+  readonly preparationKind: string;
+  readonly operationVersion: number;
+}
+
+export interface CapabilityLifecyclePolicyContext {
+  readonly signal: AbortSignal;
+  readonly decision: PolicyDecision;
+  readonly actionHash: string;
+  readonly decisionHash: string;
+}
+
+export interface CapabilityPreparedLifecycleContext
+  extends CapabilityLifecyclePolicyContext {
+  readonly preparationDescriptorHash: string;
+}
+
+export interface CapabilityOperationPreparation {
+  readonly descriptor: CapabilityPreparationDescriptor;
+  /**
+   * Trusted operation-private state. It never leaves the gateway and the same
+   * object identity is supplied to each later lifecycle method.
+   */
+  readonly privateReceipt: object;
+}
+
+export type CapabilityReconciliationStatus =
+  | "absent"
+  | "succeeded"
+  | "failed"
+  | "uncertain";
+
+export interface CapabilityOperationReconciliation
+  extends CapabilityLifecycleEvidence {
+  readonly status: CapabilityReconciliationStatus;
+  /** Present only for `succeeded`; all other dispositions use null. */
+  readonly raw: JsonObject | null;
+}
+
+export type CapabilityCompensationDisposition =
+  | "restored"
+  | "not_required"
+  | "uncertain";
+
+/**
+ * A compensation callback must say whether it proved restoration, proved that
+ * restoration was unnecessary, or could not prove either. Unknown restoration
+ * is a host-visible orphan condition, never an ordinary action failure.
+ */
+export interface CapabilityCompensationResult
+  extends CapabilityLifecycleEvidence {
+  readonly disposition: CapabilityCompensationDisposition;
+}
+
+export interface CapabilityPreparedExecutionOutput
+  extends CapabilityLifecycleEvidence {
+  readonly raw: JsonObject;
+}
+
+/**
+ * Optional installed-operation lifecycle. All callbacks are captured as
+ * descriptor-safe trusted functions at registry construction. The gateway
+ * supplies the same immutable action, detached decision, private receipt, and
+ * AbortSignal to every phase.
+ */
+export interface CapabilityOperationLifecycle {
+  prepare(
+    action: NormalizedAction,
+    context: CapabilityLifecyclePolicyContext,
+  ): CapabilityOperationPreparation | Promise<CapabilityOperationPreparation>;
+  reconcile(
+    action: NormalizedAction,
+    privateReceipt: object,
+    context: CapabilityPreparedLifecycleContext,
+  ): CapabilityOperationReconciliation | Promise<CapabilityOperationReconciliation>;
+  executePrepared(
+    action: NormalizedAction,
+    privateReceipt: object,
+    context: CapabilityPreparedLifecycleContext,
+  ): CapabilityPreparedExecutionOutput | Promise<CapabilityPreparedExecutionOutput>;
+  acknowledge(
+    action: NormalizedAction,
+    privateReceipt: object,
+    raw: JsonObject,
+    context: CapabilityPreparedLifecycleContext,
+  ): CapabilityLifecycleEvidence | Promise<CapabilityLifecycleEvidence>;
+  compensate(
+    action: NormalizedAction,
+    privateReceipt: object,
+    raw: JsonObject | null,
+    context: CapabilityPreparedLifecycleContext,
+  ): CapabilityCompensationResult | Promise<CapabilityCompensationResult>;
+  discardPreparation(
+    action: NormalizedAction,
+    privateReceipt: object,
+    context: CapabilityPreparedLifecycleContext,
+  ): CapabilityLifecycleEvidence | Promise<CapabilityLifecycleEvidence>;
 }
 
 export interface CapabilityPack {
@@ -165,6 +297,44 @@ export interface EvaluatedCapabilityAction {
   readonly prepared: PreparedCapabilityAction;
   readonly decision: PolicyDecision;
   readonly [evaluatedCapabilityActionBrand]: true;
+}
+
+/**
+ * Public, immutable half of a one-use post-policy preparation. Runtime
+ * ownership is enforced by the issuing gateway; the operation-private receipt
+ * is deliberately absent.
+ */
+export interface CapabilityPreparationReceipt {
+  readonly action: NormalizedAction;
+  readonly actionHash: string;
+  readonly decision: PolicyDecision;
+  readonly decisionHash: string;
+  readonly operation: CapabilityOperationReference;
+  readonly descriptor: CapabilityPreparationDescriptor;
+  readonly descriptorHash: string;
+  readonly [capabilityPreparationReceiptBrand]: true;
+}
+
+export interface CapabilityReconciliationReceipt
+  extends CapabilityLifecycleEvidence {
+  readonly preparation: CapabilityPreparationReceipt;
+  readonly status: CapabilityReconciliationStatus;
+  readonly reconciliationHash: string;
+  readonly [capabilityReconciliationReceiptBrand]: true;
+}
+
+/**
+ * Safe host-publication seam. The trusted raw result remains gateway-private
+ * until acknowledgement; a caller may instead compensate this exact pending
+ * effect once.
+ */
+export interface PendingCapabilityExecution
+  extends CapabilityLifecycleEvidence {
+  readonly preparation: CapabilityPreparationReceipt;
+  readonly reconciliation: CapabilityReconciliationReceipt;
+  readonly rawResultHash: string;
+  readonly resultHash: string;
+  readonly [pendingCapabilityExecutionBrand]: true;
 }
 
 export interface CapabilityExecutionResult {

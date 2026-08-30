@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   ActionIdKind,
+  ArtifactIdKind,
   DEFAULT_JSON_BOUNDARY_LIMITS,
   PolicyVersionIdKind,
   canonicalBytes,
@@ -28,8 +29,10 @@ import {
   CapabilityPackRegistry,
   DEFAULT_MAXIMUM_OPERATION_SCHEMA_BYTES,
   type CapabilityOperation,
+  type CapabilityOperationLifecycle,
   type CapabilityOperationReference,
   type CapabilityPack,
+  type CapabilityPreparationDescriptor,
   type CapabilityReleasedViews,
   type CapabilitySemanticNormalization,
 } from "./index.js";
@@ -1841,4 +1844,687 @@ test("malformed policy decisions fail closed before handler and release", async 
   }
   assert.equal(decisionGetterCalls, 0);
   assert.equal(decisionProxyTrapCalls, 0);
+});
+
+interface LifecycleSpies {
+  prepareCalls: number;
+  reconcileCalls: number;
+  executePreparedCalls: number;
+  acknowledgeCalls: number;
+  compensateCalls: number;
+  discardCalls: number;
+  signals: AbortSignal[];
+  privateReceipt: object | null;
+  observedDecision: PolicyDecision | null;
+  observedAction: NormalizedAction | null;
+  effectApplied: boolean;
+  compensationRaw: JsonObject | null | undefined;
+}
+
+function lifecycleSpies(): LifecycleSpies {
+  return {
+    prepareCalls: 0,
+    reconcileCalls: 0,
+    executePreparedCalls: 0,
+    acknowledgeCalls: 0,
+    compensateCalls: 0,
+    discardCalls: 0,
+    signals: [],
+    privateReceipt: null,
+    observedDecision: null,
+    observedAction: null,
+    effectApplied: false,
+    compensationRaw: undefined,
+  };
+}
+
+const LIFECYCLE_ARTIFACT_ID = ArtifactIdKind.parse(
+  "art_018f05a0-7b01-7000-8000-000000000076",
+);
+
+function lifecycleEvidence(phase: string) {
+  return {
+    schemaVersion: 1 as const,
+    eventFacts: { phase },
+    artifactReferences: [
+      {
+        schemaVersion: 1 as const,
+        artifactId: LIFECYCLE_ARTIFACT_ID,
+        contentHash: "c".repeat(64),
+        mediaType: "application/vnd.guard.fixture+json",
+      },
+    ],
+  };
+}
+
+function lifecycleOperation(
+  operationSpies: OperationSpies,
+  lifecycleCalls: LifecycleSpies,
+  options: {
+    readonly reconciliationStatus?:
+      | "absent"
+      | "succeeded"
+      | "failed"
+      | "uncertain";
+    readonly preparationDescriptor?: CapabilityPreparationDescriptor;
+    readonly executeFailure?: "throw_after_effect" | "invalid_raw_after_effect";
+    readonly releaseFailure?: boolean;
+    readonly compensationDisposition?: "restored" | "not_required" | "uncertain";
+    readonly acknowledgeFailure?: boolean;
+  } = {},
+): CapabilityOperation {
+  const base = counterOperation(operationSpies);
+  const privateReceipt = Object.freeze({ handle: "private-fixture-handle" });
+  const lifecycle: CapabilityOperationLifecycle = {
+    prepare(action, context) {
+      lifecycleCalls.prepareCalls += 1;
+      lifecycleCalls.signals.push(context.signal);
+      lifecycleCalls.privateReceipt = privateReceipt;
+      lifecycleCalls.observedDecision = context.decision;
+      lifecycleCalls.observedAction = action;
+      return {
+        descriptor: options.preparationDescriptor ?? {
+          preparationKind: "fixture.counter.increment",
+          operationVersion: 1,
+          ...lifecycleEvidence("prepared"),
+        },
+        privateReceipt,
+      };
+    },
+    reconcile(action, receipt, context) {
+      lifecycleCalls.reconcileCalls += 1;
+      lifecycleCalls.signals.push(context.signal);
+      assert.equal(action, lifecycleCalls.observedAction);
+      assert.equal(receipt, privateReceipt);
+      assert.equal(context.decision, lifecycleCalls.observedDecision);
+      const status = options.reconciliationStatus ?? "absent";
+      return {
+        ...lifecycleEvidence("reconciled"),
+        status,
+        raw: status === "succeeded" ? { next: 5 } : null,
+      };
+    },
+    executePrepared(action, receipt, context) {
+      lifecycleCalls.executePreparedCalls += 1;
+      lifecycleCalls.signals.push(context.signal);
+      assert.equal(action, lifecycleCalls.observedAction);
+      assert.equal(receipt, privateReceipt);
+      lifecycleCalls.effectApplied = true;
+      if (options.executeFailure === "throw_after_effect") {
+        throw new Error("simulated post-effect execution failure");
+      }
+      return {
+        ...lifecycleEvidence("executed"),
+        raw: options.executeFailure === "invalid_raw_after_effect"
+          ? { invalid: true }
+          : { next: 5 },
+      };
+    },
+    acknowledge(action, receipt, raw, context) {
+      lifecycleCalls.acknowledgeCalls += 1;
+      lifecycleCalls.signals.push(context.signal);
+      assert.equal(action, lifecycleCalls.observedAction);
+      assert.equal(receipt, privateReceipt);
+      assert.deepEqual(raw, { next: 5 });
+      if (options.acknowledgeFailure === true) {
+        throw new Error("simulated acknowledgement failure");
+      }
+      return lifecycleEvidence("acknowledged");
+    },
+    compensate(action, receipt, raw, context) {
+      lifecycleCalls.compensateCalls += 1;
+      lifecycleCalls.signals.push(context.signal);
+      assert.equal(action, lifecycleCalls.observedAction);
+      assert.equal(receipt, privateReceipt);
+      lifecycleCalls.compensationRaw = raw;
+      const disposition = options.compensationDisposition ?? "restored";
+      if (disposition === "restored") lifecycleCalls.effectApplied = false;
+      return { ...lifecycleEvidence("compensated"), disposition };
+    },
+    discardPreparation(action, receipt, context) {
+      lifecycleCalls.discardCalls += 1;
+      lifecycleCalls.signals.push(context.signal);
+      assert.equal(action, lifecycleCalls.observedAction);
+      assert.equal(receipt, privateReceipt);
+      return lifecycleEvidence("discarded");
+    },
+  };
+  return {
+    ...base,
+    ...(options.releaseFailure === true
+      ? {
+        release(): never {
+          operationSpies.releaseCalls += 1;
+          throw new Error("simulated post-effect release failure");
+        },
+      }
+      : {}),
+    lifecycle,
+  };
+}
+
+async function lifecycleInvocation(
+  effect: PolicyEffect = "allow",
+  options: Parameters<typeof lifecycleOperation>[2] = {},
+) {
+  const operationCalls = spies();
+  const lifecycleCalls = lifecycleSpies();
+  const registry = new CapabilityPackRegistry([
+    pack(lifecycleOperation(operationCalls, lifecycleCalls, options)),
+  ]);
+  const gateway = new CapabilityGateway(
+    registry,
+    policyEvaluator({ effect }),
+  );
+  const prepared = await gateway.normalize(
+    proposal(),
+    normalizationContext(),
+    registry.createAdvertisement([REFERENCE]),
+  );
+  const evaluated = gateway.evaluate(prepared);
+  return { gateway, lifecycleCalls, operationCalls, evaluated };
+}
+
+test("post-policy lifecycle binds exact action, decision, descriptor, and private receipt", async () => {
+  const { gateway, lifecycleCalls, operationCalls, evaluated } =
+    await lifecycleInvocation();
+  const signal = new AbortController().signal;
+  const preparation = await gateway.prepare(evaluated, { signal });
+
+  assert.equal(preparation.action, evaluated.prepared.action);
+  assert.equal(preparation.actionHash, evaluated.prepared.actionHash);
+  assert.equal(preparation.decision, evaluated.decision);
+  assert.match(preparation.decisionHash, /^[a-f0-9]{64}$/u);
+  assert.match(preparation.descriptorHash, /^[a-f0-9]{64}$/u);
+  assert.equal(preparation.operation.operationVersion, 1);
+  assert.equal(Object.isFrozen(preparation), true);
+  assert.equal(Object.isFrozen(preparation.descriptor.eventFacts), true);
+  assert.equal("privateReceipt" in preparation, false);
+
+  const reconciled = await gateway.reconcile(preparation, { signal });
+  assert.equal(reconciled.status, "absent");
+  assert.equal(reconciled.preparation, preparation);
+  const pending = await gateway.executePrepared(reconciled, { signal });
+  assert.equal(pending.preparation, preparation);
+  assert.equal(pending.reconciliation, reconciled);
+  assert.equal(pending.eventFacts["phase"], "executed");
+  assert.equal("raw" in pending, false);
+  assert.equal("result" in pending, false);
+
+  const result = await gateway.acknowledge(pending, { signal });
+  assert.equal(result.raw["next"], 5);
+  assert.equal(result.agent["next"], 5);
+  assert.equal(lifecycleCalls.prepareCalls, 1);
+  assert.equal(lifecycleCalls.reconcileCalls, 1);
+  assert.equal(lifecycleCalls.executePreparedCalls, 1);
+  assert.equal(lifecycleCalls.acknowledgeCalls, 1);
+  assert.equal(operationCalls.executeCalls, 0);
+  assert.equal(operationCalls.releaseCalls, 1);
+  assert.deepEqual(lifecycleCalls.signals, [signal, signal, signal, signal]);
+
+  await assert.rejects(
+    gateway.acknowledge(pending, { signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  await assert.rejects(
+    gateway.executePrepared(reconciled, { signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  await assert.rejects(
+    gateway.reconcile(preparation, { signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+});
+
+test("deny invokes no lifecycle hook while approval can prepare but cannot execute", async () => {
+  const denied = await lifecycleInvocation("deny");
+  const signal = new AbortController().signal;
+  await assert.rejects(
+    denied.gateway.prepare(denied.evaluated, { signal }),
+    (error: unknown) => isDomainCode(error, "policy_denied"),
+  );
+  assert.deepEqual(denied.lifecycleCalls, {
+    ...lifecycleSpies(),
+    signals: [],
+  });
+
+  const approval = await lifecycleInvocation("require_approval");
+  const preparation = await approval.gateway.prepare(approval.evaluated, {
+    signal,
+  });
+  const reconciled = await approval.gateway.reconcile(preparation, { signal });
+  await assert.rejects(
+    approval.gateway.executePrepared(reconciled, { signal }),
+    (error: unknown) => isDomainCode(error, "approval_required"),
+  );
+  assert.equal(approval.lifecycleCalls.prepareCalls, 1);
+  assert.equal(approval.lifecycleCalls.reconcileCalls, 1);
+  assert.equal(approval.lifecycleCalls.executePreparedCalls, 0);
+  const discarded = await approval.gateway.discardPreparation(preparation, {
+    signal,
+  });
+  assert.equal(discarded.eventFacts["phase"], "discarded");
+  assert.equal(approval.lifecycleCalls.discardCalls, 1);
+  await assert.rejects(
+    approval.gateway.discardPreparation(preparation, { signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+});
+
+test("reconciliation is mandatory, uncertain is terminal, and recovered effects are not repeated", async () => {
+  const absent = await lifecycleInvocation();
+  const signal = new AbortController().signal;
+  const preparation = await absent.gateway.prepare(absent.evaluated, { signal });
+  await assert.rejects(
+    absent.gateway.executePrepared(preparation as never, { signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  assert.equal(absent.lifecycleCalls.executePreparedCalls, 0);
+
+  const uncertain = await lifecycleInvocation("allow", {
+    reconciliationStatus: "uncertain",
+  });
+  const uncertainPreparation = await uncertain.gateway.prepare(
+    uncertain.evaluated,
+    { signal },
+  );
+  const uncertainReceipt = await uncertain.gateway.reconcile(
+    uncertainPreparation,
+    { signal },
+  );
+  await assert.rejects(
+    uncertain.gateway.executePrepared(uncertainReceipt, { signal }),
+    (error: unknown) => isDomainCode(error, "attempt_result_uncertain"),
+  );
+  assert.equal(uncertain.lifecycleCalls.executePreparedCalls, 0);
+  await assert.rejects(
+    uncertain.gateway.executePrepared(uncertainReceipt, { signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+
+  const recovered = await lifecycleInvocation("allow", {
+    reconciliationStatus: "succeeded",
+  });
+  const recoveredPreparation = await recovered.gateway.prepare(
+    recovered.evaluated,
+    { signal },
+  );
+  const recoveredReceipt = await recovered.gateway.reconcile(
+    recoveredPreparation,
+    { signal },
+  );
+  const pending = await recovered.gateway.executePrepared(recoveredReceipt, {
+    signal,
+  });
+  assert.equal(recovered.lifecycleCalls.executePreparedCalls, 0);
+  const compensation = await recovered.gateway.compensate(pending, { signal });
+  assert.equal(compensation.eventFacts["phase"], "compensated");
+  assert.equal(compensation.disposition, "restored");
+  assert.equal(recovered.lifecycleCalls.compensateCalls, 1);
+  await assert.rejects(
+    recovered.gateway.acknowledge(pending, { signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+});
+
+test("post-dispatch execution failures compensate exactly once before returning failure", async () => {
+  const signal = new AbortController().signal;
+  const thrown = await lifecycleInvocation("allow", {
+    executeFailure: "throw_after_effect",
+    compensationDisposition: "restored",
+  });
+  const thrownPreparation = await thrown.gateway.prepare(thrown.evaluated, {
+    signal,
+  });
+  const thrownReconciliation = await thrown.gateway.reconcile(
+    thrownPreparation,
+    { signal },
+  );
+  await assert.rejects(
+    thrown.gateway.executePrepared(thrownReconciliation, { signal }),
+    (error: unknown) => {
+      assert.equal(isDomainCode(error, "action_failed"), true);
+      assert.equal(
+        isDomainError(error) && error.details?.["compensationDisposition"],
+        "restored",
+      );
+      return true;
+    },
+  );
+  assert.equal(thrown.lifecycleCalls.executePreparedCalls, 1);
+  assert.equal(thrown.lifecycleCalls.compensateCalls, 1);
+  assert.equal(thrown.lifecycleCalls.compensationRaw, null);
+  assert.equal(thrown.lifecycleCalls.effectApplied, false);
+  assert.equal(thrown.operationCalls.releaseCalls, 0);
+  await assert.rejects(
+    thrown.gateway.executePrepared(thrownReconciliation, { signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+});
+
+test("invalid raw output and release failure compensate post-dispatch effects without release", async () => {
+  const signal = new AbortController().signal;
+  const invalidRaw = await lifecycleInvocation("allow", {
+    executeFailure: "invalid_raw_after_effect",
+  });
+  const invalidPreparation = await invalidRaw.gateway.prepare(
+    invalidRaw.evaluated,
+    { signal },
+  );
+  const invalidReconciliation = await invalidRaw.gateway.reconcile(
+    invalidPreparation,
+    { signal },
+  );
+  await assert.rejects(
+    invalidRaw.gateway.executePrepared(invalidReconciliation, { signal }),
+    (error: unknown) => isDomainCode(error, "action_failed"),
+  );
+  assert.deepEqual(invalidRaw.lifecycleCalls.compensationRaw, { invalid: true });
+  assert.equal(invalidRaw.lifecycleCalls.compensateCalls, 1);
+  assert.equal(invalidRaw.lifecycleCalls.effectApplied, false);
+  assert.equal(invalidRaw.operationCalls.releaseCalls, 0);
+
+  const releaseFailure = await lifecycleInvocation("allow", {
+    releaseFailure: true,
+  });
+  const releasePreparation = await releaseFailure.gateway.prepare(
+    releaseFailure.evaluated,
+    { signal },
+  );
+  const releaseReconciliation = await releaseFailure.gateway.reconcile(
+    releasePreparation,
+    { signal },
+  );
+  await assert.rejects(
+    releaseFailure.gateway.executePrepared(releaseReconciliation, { signal }),
+    (error: unknown) => isDomainCode(error, "action_failed"),
+  );
+  assert.deepEqual(releaseFailure.lifecycleCalls.compensationRaw, { next: 5 });
+  assert.equal(releaseFailure.lifecycleCalls.compensateCalls, 1);
+  assert.equal(releaseFailure.lifecycleCalls.effectApplied, false);
+  assert.equal(releaseFailure.operationCalls.releaseCalls, 1);
+});
+
+test("uncertain automatic compensation becomes an orphan-visible uncertain error", async () => {
+  const signal = new AbortController().signal;
+  const uncertain = await lifecycleInvocation("allow", {
+    executeFailure: "throw_after_effect",
+    compensationDisposition: "uncertain",
+  });
+  const preparation = await uncertain.gateway.prepare(uncertain.evaluated, {
+    signal,
+  });
+  const reconciliation = await uncertain.gateway.reconcile(preparation, {
+    signal,
+  });
+  await assert.rejects(
+    uncertain.gateway.executePrepared(reconciliation, { signal }),
+    (error: unknown) => {
+      assert.equal(isDomainCode(error, "attempt_result_uncertain"), true);
+      assert.equal(isDomainError(error) && error.retry, "uncertain");
+      assert.equal(
+        isDomainError(error) && error.details?.["compensationDisposition"],
+        "uncertain",
+      );
+      return true;
+    },
+  );
+  assert.equal(uncertain.lifecycleCalls.compensateCalls, 1);
+  assert.equal(uncertain.lifecycleCalls.effectApplied, true);
+  await assert.rejects(
+    uncertain.gateway.executePrepared(reconciliation, { signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  await assert.rejects(
+    uncertain.gateway.discardPreparation(preparation, { signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+});
+
+test("acknowledgement failure after host publication orphans instead of compensating", async () => {
+  const signal = new AbortController().signal;
+  const invocation = await lifecycleInvocation("allow", {
+    acknowledgeFailure: true,
+  });
+  const preparation = await invocation.gateway.prepare(invocation.evaluated, {
+    signal,
+  });
+  const reconciliation = await invocation.gateway.reconcile(preparation, {
+    signal,
+  });
+  const pending = await invocation.gateway.executePrepared(reconciliation, {
+    signal,
+  });
+  await assert.rejects(
+    invocation.gateway.acknowledge(pending, { signal }),
+    (error: unknown) => isDomainCode(error, "attempt_result_uncertain"),
+  );
+  assert.equal(invocation.lifecycleCalls.acknowledgeCalls, 1);
+  assert.equal(invocation.lifecycleCalls.compensateCalls, 0);
+  assert.equal(invocation.lifecycleCalls.effectApplied, true);
+  await assert.rejects(
+    invocation.gateway.compensate(pending, { signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  await assert.rejects(
+    invocation.gateway.acknowledge(pending, { signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+});
+
+test("malformed compensation evidence is treated as uncertain and cannot be reused", async () => {
+  const operationCalls = spies();
+  const lifecycleCalls = lifecycleSpies();
+  const installed = lifecycleOperation(operationCalls, lifecycleCalls, {
+    executeFailure: "throw_after_effect",
+  });
+  const originalLifecycle = installed.lifecycle!;
+  const malformed: CapabilityOperation = {
+    ...installed,
+    lifecycle: {
+      ...originalLifecycle,
+      async compensate(action, receipt, raw, context) {
+        const valid = await originalLifecycle.compensate(
+          action,
+          receipt,
+          raw,
+          context,
+        );
+        return { ...valid, disposition: "invented" } as never;
+      },
+    },
+  };
+  const registry = new CapabilityPackRegistry([pack(malformed)]);
+  const gateway = new CapabilityGateway(registry, policyEvaluator());
+  const normalized = await gateway.normalize(
+    proposal(),
+    normalizationContext(),
+    registry.createAdvertisement([REFERENCE]),
+  );
+  const signal = new AbortController().signal;
+  const preparation = await gateway.prepare(gateway.evaluate(normalized), {
+    signal,
+  });
+  const reconciliation = await gateway.reconcile(preparation, { signal });
+  await assert.rejects(
+    gateway.executePrepared(reconciliation, { signal }),
+    (error: unknown) => isDomainCode(error, "attempt_result_uncertain"),
+  );
+  assert.equal(lifecycleCalls.compensateCalls, 1);
+  await assert.rejects(
+    gateway.executePrepared(reconciliation, { signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+});
+
+test("lifecycle receipts reject forgery, foreign gateways, rebinding, mutation, and signal replacement", async () => {
+  const first = await lifecycleInvocation();
+  const second = await lifecycleInvocation();
+  const controller = new AbortController();
+  const preparation = await first.gateway.prepare(first.evaluated, {
+    signal: controller.signal,
+  });
+  const forged = {
+    ...preparation,
+    actionHash: "0".repeat(64),
+  };
+  await assert.rejects(
+    first.gateway.reconcile(forged as never, { signal: controller.signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  await assert.rejects(
+    second.gateway.reconcile(preparation, { signal: controller.signal }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  await assert.rejects(
+    first.gateway.reconcile(preparation, {
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+  assert.throws(() => {
+    (preparation.descriptor.eventFacts as { phase: string }).phase = "mutated";
+  }, TypeError);
+  const reconciled = await first.gateway.reconcile(preparation, {
+    signal: controller.signal,
+  });
+  assert.equal(reconciled.status, "absent");
+});
+
+test("lifecycle evidence is detached and bounded before advancing", async () => {
+  const mutableFacts = { phase: "prepared" };
+  const mutableReference = {
+    schemaVersion: 1 as const,
+    artifactId: LIFECYCLE_ARTIFACT_ID,
+    contentHash: "c".repeat(64),
+    mediaType: "application/vnd.guard.fixture+json",
+  };
+  const mutableDescriptor: CapabilityPreparationDescriptor = {
+    schemaVersion: 1,
+    preparationKind: "fixture.counter.increment",
+    operationVersion: 1,
+    eventFacts: mutableFacts,
+    artifactReferences: [mutableReference],
+  };
+  const detached = await lifecycleInvocation("allow", {
+    preparationDescriptor: mutableDescriptor,
+  });
+  const detachedPreparation = await detached.gateway.prepare(
+    detached.evaluated,
+    { signal: new AbortController().signal },
+  );
+  mutableFacts.phase = "changed-after-return";
+  mutableReference.contentHash = "d".repeat(64);
+  assert.equal(detachedPreparation.descriptor.eventFacts["phase"], "prepared");
+  assert.equal(
+    detachedPreparation.descriptor.artifactReferences[0]!.contentHash,
+    "c".repeat(64),
+  );
+  assert.equal(
+    Object.isFrozen(detachedPreparation.descriptor.artifactReferences),
+    true,
+  );
+
+  const oversizedFacts = { phase: "prepared", padding: "x".repeat(1_024) };
+  const descriptor: CapabilityPreparationDescriptor = {
+    schemaVersion: 1,
+    preparationKind: "fixture.counter.increment",
+    operationVersion: 1,
+    eventFacts: oversizedFacts,
+    artifactReferences: [],
+  };
+  const operationCalls = spies();
+  const lifecycleCalls = lifecycleSpies();
+  const registry = new CapabilityPackRegistry([
+    pack(lifecycleOperation(operationCalls, lifecycleCalls, {
+      preparationDescriptor: descriptor,
+    })),
+  ]);
+  const gateway = new CapabilityGateway(registry, policyEvaluator(), {
+    maximumLifecycleEvidenceBytes: 256,
+  });
+  const normalized = await gateway.normalize(
+    proposal(),
+    normalizationContext(),
+    registry.createAdvertisement([REFERENCE]),
+  );
+  await assert.rejects(
+    gateway.prepare(gateway.evaluate(normalized), {
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) => isDomainCode(error, "budget_exceeded"),
+  );
+  assert.equal(lifecycleCalls.prepareCalls, 1);
+  assert.equal(lifecycleCalls.reconcileCalls, 0);
+  oversizedFacts.phase = "changed-after-return";
+});
+
+test("registry captures lifecycle methods without invoking hostile accessors", async () => {
+  const operationCalls = spies();
+  const lifecycleCalls = lifecycleSpies();
+  const installed = lifecycleOperation(operationCalls, lifecycleCalls);
+  let accessorCalls = 0;
+  const hostileLifecycle = { ...installed.lifecycle } as Record<string, unknown>;
+  Object.defineProperty(hostileLifecycle, "prepare", {
+    enumerable: true,
+    get() {
+      accessorCalls += 1;
+      throw new Error("lifecycle accessor canary");
+    },
+  });
+  assert.throws(
+    () => new CapabilityPackRegistry([
+      pack({ ...installed, lifecycle: hostileLifecycle as never }),
+    ]),
+    (error: unknown) =>
+      isSanitizedDomainCode(error, "invalid_input", "canary"),
+  );
+  assert.equal(accessorCalls, 0);
+
+  const registry = new CapabilityPackRegistry([pack(installed)]);
+  const gateway = new CapabilityGateway(registry, policyEvaluator());
+  const normalized = await gateway.normalize(
+    proposal(),
+    normalizationContext(),
+    registry.createAdvertisement([REFERENCE]),
+  );
+  await assert.rejects(
+    gateway.execute(gateway.evaluate(normalized), {
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  assert.equal(operationCalls.executeCalls, 0);
+  assert.equal(lifecycleCalls.prepareCalls, 0);
+});
+
+test("legacy operations support an inert lifecycle without changing direct execution", async () => {
+  const operationCalls = spies();
+  const registry = new CapabilityPackRegistry([
+    pack(counterOperation(operationCalls)),
+  ]);
+  const gateway = new CapabilityGateway(registry, policyEvaluator());
+  const advertisement = registry.createAdvertisement([REFERENCE]);
+  const signal = new AbortController().signal;
+  const first = await gateway.normalize(
+    proposal(),
+    normalizationContext(),
+    advertisement,
+  );
+  const direct = await gateway.execute(gateway.evaluate(first), { signal });
+  assert.equal(direct.raw["next"], 5);
+
+  const second = await gateway.normalize(
+    proposal(),
+    normalizationContext(),
+    advertisement,
+  );
+  const preparation = await gateway.prepare(gateway.evaluate(second), { signal });
+  assert.equal(preparation.descriptor.preparationKind, "gateway.inert");
+  const reconciled = await gateway.reconcile(preparation, { signal });
+  const pending = await gateway.executePrepared(reconciled, { signal });
+  const lifecycleResult = await gateway.acknowledge(pending, { signal });
+  assert.equal(lifecycleResult.raw["next"], 5);
+  assert.equal(operationCalls.executeCalls, 2);
+  assert.equal(operationCalls.releaseCalls, 2);
 });

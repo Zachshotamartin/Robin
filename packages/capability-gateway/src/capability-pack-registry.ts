@@ -14,6 +14,7 @@ import {
 import type {
   CapabilityAdvertisement,
   CapabilityOperation,
+  CapabilityOperationLifecycle,
   CapabilityOperationReference,
   CapabilityPack,
   RegisteredPackDescriptor,
@@ -27,6 +28,7 @@ export interface CompiledOperation {
   readonly normalize: CapabilityOperation["normalize"];
   readonly execute: CapabilityOperation["execute"];
   readonly release: CapabilityOperation["release"];
+  readonly lifecycle: CapabilityOperationLifecycle | null;
   readonly validateInput: CompiledJsonObjectSchema;
   readonly validateOutput: CompiledJsonObjectSchema;
 }
@@ -137,6 +139,7 @@ export class CapabilityPackRegistry {
           normalize: operation.normalize,
           execute: operation.execute,
           release: operation.release,
+          lifecycle: operation.lifecycle ?? null,
           validateInput,
           validateOutput,
         });
@@ -335,9 +338,16 @@ function inspectPack(value: unknown): InspectedPack {
 }
 
 function inspectOperation(value: unknown): CapabilityOperation {
-  const operation = inspectTrustedRecord(
+  const baseFields = [
+    "definition",
+    "agentContextRelease",
+    "normalize",
+    "execute",
+    "release",
+  ] as const;
+  const operation = inspectTrustedRecordWithShapes(
     value,
-    ["definition", "agentContextRelease", "normalize", "execute", "release"],
+    [baseFields, [...baseFields, "lifecycle"]],
     "capability operation",
   );
   const normalize = operation["normalize"];
@@ -355,6 +365,9 @@ function inspectOperation(value: unknown): CapabilityOperation {
   }
   const original = value as CapabilityOperation;
   const definition = normalizeOperationDefinition(operation["definition"]);
+  const lifecycle = Object.hasOwn(operation, "lifecycle")
+    ? inspectOperationLifecycle(operation["lifecycle"])
+    : undefined;
   return Object.freeze({
     definition,
     agentContextRelease: normalizeAgentContextReleaseDefinition(
@@ -372,7 +385,36 @@ function inspectOperation(value: unknown): CapabilityOperation {
       release,
       original,
     ) as CapabilityOperation["release"],
+    ...(lifecycle === undefined ? {} : { lifecycle }),
   });
+}
+
+function inspectOperationLifecycle(value: unknown): CapabilityOperationLifecycle {
+  const methodNames = [
+    "prepare",
+    "reconcile",
+    "executePrepared",
+    "acknowledge",
+    "compensate",
+    "discardPreparation",
+  ] as const;
+  const lifecycle = inspectTrustedRecord(
+    value,
+    methodNames,
+    "capability operation lifecycle",
+  );
+  const original = value as CapabilityOperationLifecycle;
+  const captured: Partial<Record<(typeof methodNames)[number], unknown>> = {};
+  for (const methodName of methodNames) {
+    const method = lifecycle[methodName];
+    if (typeof method !== "function" || isProxy(method)) {
+      throw invalidInput(
+        "A capability operation has an incomplete lifecycle contract.",
+      );
+    }
+    captured[methodName] = Function.prototype.bind.call(method, original);
+  }
+  return Object.freeze(captured) as unknown as CapabilityOperationLifecycle;
 }
 
 function normalizeAgentContextReleaseDefinition(
@@ -639,6 +681,59 @@ function inspectTrustedRecord(
   } catch {
     throw invalidInput(
       `The ${label} must be trusted installed code with exact data properties.`,
+    );
+  }
+}
+
+function inspectTrustedRecordWithShapes(
+  value: unknown,
+  expectedShapes: readonly (readonly string[])[],
+  label: string,
+): Readonly<Record<string, unknown>> {
+  try {
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      isProxy(value) ||
+      Array.isArray(value)
+    ) {
+      throw new TypeError("not an installable record");
+    }
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError("installation record has a custom prototype");
+    }
+    const keys = Reflect.ownKeys(value);
+    const expected = expectedShapes.find(
+      (shape) =>
+        keys.length === shape.length &&
+        keys.every((key) => typeof key === "string") &&
+        shape.every((key) => keys.includes(key)),
+    );
+    if (expected === undefined) {
+      throw new TypeError("installation record has inexact keys");
+    }
+    const captured: Record<string, unknown> = {};
+    for (const key of expected) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (
+        descriptor === undefined ||
+        !("value" in descriptor) ||
+        descriptor.enumerable !== true
+      ) {
+        throw new TypeError("installation field is not an enumerable data property");
+      }
+      Object.defineProperty(captured, key, {
+        value: descriptor.value,
+        enumerable: true,
+        configurable: false,
+        writable: false,
+      });
+    }
+    return Object.freeze(captured);
+  } catch {
+    throw invalidInput(
+      `The installed ${label} must contain exact enumerable data properties.`,
     );
   }
 }
