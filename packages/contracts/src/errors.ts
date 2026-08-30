@@ -1,6 +1,10 @@
-import { randomUUID } from "node:crypto";
-
 import type { Brand } from "./brand.js";
+import {
+  cloneAndFreezeJsonObject,
+  isJsonObject,
+  type JsonObject,
+} from "./json-value.js";
+import { generateUuidV7, isLowercaseUuidV7 } from "./uuid-v7.js";
 
 export type ErrorId = Brand<string, "ErrorId">;
 
@@ -56,7 +60,7 @@ export interface DomainError {
   /** Safe human-readable message; must never contain secret material. */
   readonly message: string;
   readonly retry: RetryClass;
-  readonly details?: Readonly<Record<string, unknown>>;
+  readonly details?: JsonObject;
   readonly causeErrorId?: ErrorId;
 }
 
@@ -75,18 +79,16 @@ const RETRY_CLASSES: ReadonlySet<string> = new Set([
   "uncertain",
 ]);
 
-function deepFreeze<T>(value: T): T {
-  if (typeof value !== "object" || value === null || Object.isFrozen(value)) {
-    return value;
-  }
-  for (const child of Object.values(value)) {
-    deepFreeze(child);
-  }
-  return Object.freeze(value);
+export function generateErrorId(): ErrorId {
+  return `err_${generateUuidV7()}` as ErrorId;
 }
 
-export function generateErrorId(): ErrorId {
-  return `err_${randomUUID()}` as ErrorId;
+export function isErrorId(value: unknown): value is ErrorId {
+  return (
+    typeof value === "string" &&
+    value.startsWith("err_") &&
+    isLowercaseUuidV7(value.slice(4))
+  );
 }
 
 /**
@@ -104,13 +106,21 @@ export function createDomainError(input: DomainErrorInput): DomainError {
   if (input.retry !== undefined && !RETRY_CLASSES.has(input.retry)) {
     throw new TypeError(`Unknown retry class: ${String(input.retry)}`);
   }
+  if (input.causeErrorId !== undefined && !isErrorId(input.causeErrorId)) {
+    throw new TypeError("A cause error id must use the err_<lowercase-uuidv7> format.");
+  }
+
+  const details =
+    input.details === undefined
+      ? undefined
+      : cloneAndFreezeJsonObject(input.details, "Domain error details");
 
   const error: DomainError = {
     errorId: generateErrorId(),
     code: input.code,
     message: input.message,
     retry: input.retry ?? DEFAULT_RETRY_CLASS[input.code],
-    ...(input.details !== undefined ? { details: deepFreeze(input.details) } : {}),
+    ...(details !== undefined ? { details } : {}),
     ...(input.causeErrorId !== undefined
       ? { causeErrorId: input.causeErrorId }
       : {}),
@@ -120,18 +130,79 @@ export function createDomainError(input: DomainErrorInput): DomainError {
 }
 
 export function isDomainError(value: unknown): value is DomainError {
-  if (typeof value !== "object" || value === null) {
+  try {
+    if (!isPlainRecord(value)) {
+      return false;
+    }
+    const ownKeys = Reflect.ownKeys(value);
+    if (ownKeys.some((key) => typeof key !== "string")) {
+      return false;
+    }
+    const allowed = new Set([
+      "errorId",
+      "code",
+      "message",
+      "retry",
+      "details",
+      "causeErrorId",
+    ]);
+    if (
+      ownKeys.some((key) => typeof key !== "string" || !allowed.has(key)) ||
+      !hasDataProperty(value, "errorId") ||
+      !hasDataProperty(value, "code") ||
+      !hasDataProperty(value, "message") ||
+      !hasDataProperty(value, "retry")
+    ) {
+      return false;
+    }
+
+    const candidate = value as Readonly<Record<string, unknown>>;
+    if (
+      !isErrorId(candidate["errorId"]) ||
+      typeof candidate["code"] !== "string" ||
+      !ERROR_CODE_SET.has(candidate["code"]) ||
+      typeof candidate["message"] !== "string" ||
+      candidate["message"].trim().length === 0 ||
+      typeof candidate["retry"] !== "string" ||
+      !RETRY_CLASSES.has(candidate["retry"])
+    ) {
+      return false;
+    }
+    if (
+      Object.hasOwn(candidate, "details") &&
+      (!hasDataProperty(candidate, "details") || !isJsonObject(candidate["details"]))
+    ) {
+      return false;
+    }
+    if (
+      Object.hasOwn(candidate, "causeErrorId") &&
+      (!hasDataProperty(candidate, "causeErrorId") ||
+        !isErrorId(candidate["causeErrorId"]))
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
     return false;
   }
-  const candidate = value as Partial<DomainError>;
+}
+
+function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function hasDataProperty(
+  value: Readonly<Record<string, unknown>>,
+  key: string
+): boolean {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
   return (
-    typeof candidate.errorId === "string" &&
-    candidate.errorId.startsWith("err_") &&
-    typeof candidate.code === "string" &&
-    ERROR_CODE_SET.has(candidate.code) &&
-    typeof candidate.message === "string" &&
-    candidate.message.length > 0 &&
-    typeof candidate.retry === "string" &&
-    RETRY_CLASSES.has(candidate.retry)
+    descriptor !== undefined &&
+    "value" in descriptor &&
+    descriptor.enumerable === true
   );
 }

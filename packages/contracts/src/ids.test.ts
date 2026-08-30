@@ -15,6 +15,9 @@ import {
 } from "./ids.js";
 import { isDomainError } from "./errors.js";
 
+const PREFIXED_UUID_V7 =
+  /^[a-z][a-z0-9]*_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 const ALL_KINDS = [
   RunIdKind,
   EventIdKind,
@@ -34,6 +37,7 @@ test("every kind generates values that parse and round-trip", () => {
     assert.equal(kind.is(value), true, `${kind.prefix} accepts its own value`);
     assert.equal(kind.parse(value), value);
     assert.equal(value.startsWith(`${kind.prefix}_`), true);
+    assert.match(value, PREFIXED_UUID_V7);
   }
 });
 
@@ -50,12 +54,20 @@ test("generated values are unique", () => {
   assert.equal(seen.size, 1000);
 });
 
+test("generated UUIDv7 identifiers are lexicographically sortable", () => {
+  const generated = Array.from({ length: 1000 }, () => RunIdKind.generate());
+  assert.deepEqual(generated, [...generated].sort());
+});
+
 test("parse rejects malformed input with an invalid_input domain error", () => {
   const malformed = [
     "",
     "run",
     "run_",
     "run_not-a-uuid",
+    "run_00000000-0000-4000-8000-000000000000",
+    "run_0195f4f8-5b31-6000-8000-000000000000",
+    "run_0195f4f8-5b31-7000-7000-000000000000",
     "run_C0FFEE00-0000-4000-8000-000000000000",
     " run_00000000-0000-4000-8000-000000000000",
     "run_00000000-0000-4000-8000-000000000000 ",

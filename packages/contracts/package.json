@@ -19,5 +19,8 @@
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "typecheck": "tsc --build --force",
     "test": "npm run build && node --test dist/*.test.js"
+  },
+  "dependencies": {
+    "uuid": "14.0.2"
   }
 }

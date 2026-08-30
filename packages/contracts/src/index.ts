@@ -4,6 +4,7 @@ export {
   ERROR_CODES,
   createDomainError,
   generateErrorId,
+  isErrorId,
   isDomainError,
 } from "./errors.js";
 export type {
@@ -39,8 +40,90 @@ export type {
   RunId,
 } from "./ids.js";
 export {
+  cloneAndFreezeJsonObject,
+  isJsonObject,
+  isJsonValue,
+} from "./json-value.js";
+export type {
+  JsonArray,
+  JsonObject,
+  JsonPrimitive,
+  JsonValue,
+} from "./json-value.js";
+export {
   canonicalBytes,
   canonicalSha256Hex,
   canonicalize,
   sha256Hex,
 } from "./canonical-json.js";
+export {
+  CONTRACT_SCHEMA_VERSION,
+  assertContractSchemaVersion,
+  isContractSchemaVersion,
+  isPositiveVersion,
+} from "./schema-version.js";
+export type {
+  ContractSchemaVersion,
+  VersionedContract,
+} from "./schema-version.js";
+export { ACTOR_KINDS } from "./actor.js";
+export type { ActorIdentity, ActorKind } from "./actor.js";
+export type {
+  BudgetPolicy,
+  ComponentBinding,
+  EvidenceMode,
+  ModelAuthority,
+  ModelProfileBinding,
+  NamedComponentBinding,
+  ObjectiveEnvelope,
+  TaskProfile,
+  VersionedSchema,
+} from "./task-profile.js";
+export type { ResourceRef } from "./resource.js";
+export type {
+  AudioContentBlock,
+  ContentBlock,
+  ContentBlockBase,
+  ContentModality,
+  ContentProducer,
+  ContentProvenance,
+  DocumentContentBlock,
+  EmbeddingReferenceBlock,
+  ImageContentBlock,
+  JsonContentBlock,
+  TextContentBlock,
+  TransformationRecord,
+} from "./content.js";
+export type {
+  ActionPrecondition,
+  NormalizedAction,
+  SideEffectClass,
+} from "./action.js";
+export type {
+  CancelledRunResult,
+  CompletedRunResult,
+  EvidenceKind,
+  FailedRunResult,
+  Observation,
+  ObservationStatus,
+  OutcomeEnvelope,
+  OutcomeEvidenceRef,
+  RunResult,
+} from "./result.js";
+export {
+  GENERIC_EVENT_TYPES,
+  assertEventEnvelope,
+  assertNewEvent,
+  isEventEnvelope,
+  isGenericEventType,
+  isNewEvent,
+} from "./events.js";
+export type {
+  EventActor,
+  EventEnvelope,
+  GenericEvent,
+  GenericEventEnvelope,
+  GenericEventPayloadMap,
+  GenericEventType,
+  NewEvent,
+} from "./events.js";

@@ -1,7 +1,6 @@
-import { randomUUID } from "node:crypto";
-
 import type { Brand } from "./brand.js";
 import { createDomainError } from "./errors.js";
+import { generateUuidV7, isLowercaseUuidV7 } from "./uuid-v7.js";
 
 export type RunId = Brand<string, "RunId">;
 export type EventId = Brand<string, "EventId">;
@@ -22,9 +21,6 @@ export interface IdKind<TId extends string> {
   is(value: unknown): value is TId;
 }
 
-const LOWERCASE_UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
 function defineIdKind<TId extends string>(prefix: string): IdKind<TId> {
   const expectedStart = `${prefix}_`;
 
@@ -32,20 +28,20 @@ function defineIdKind<TId extends string>(prefix: string): IdKind<TId> {
     return (
       typeof value === "string" &&
       value.startsWith(expectedStart) &&
-      LOWERCASE_UUID_PATTERN.test(value.slice(expectedStart.length))
+      isLowercaseUuidV7(value.slice(expectedStart.length))
     );
   }
 
   return Object.freeze({
     prefix,
     generate(): TId {
-      return `${expectedStart}${randomUUID()}` as TId;
+      return `${expectedStart}${generateUuidV7()}` as TId;
     },
     parse(value: string): TId {
       if (!is(value)) {
         throw createDomainError({
           code: "invalid_input",
-          message: `Expected a ${prefix} identifier of the form ${expectedStart}<lowercase-uuid>.`,
+          message: `Expected a ${prefix} identifier of the form ${expectedStart}<lowercase-uuidv7>.`,
         });
       }
       return value;
