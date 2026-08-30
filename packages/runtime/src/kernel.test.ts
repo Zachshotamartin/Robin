@@ -25,6 +25,7 @@ import type {
   JsonObject,
   NormalizedAction,
   Observation,
+  OrphanedRunResult,
 } from "@guard/contracts";
 
 import {
@@ -165,6 +166,24 @@ function contentBlock(blockId: string, text: string): ContentBlock {
     text,
     encoding: "utf-8",
     normalization: "none",
+  };
+}
+
+function observationFor(
+  actionId: NormalizedAction["actionId"],
+  status: Observation["status"],
+  error: Observation["error"]
+): Observation {
+  return {
+    schemaVersion: 1,
+    observationId: `observation:${status}`,
+    actionId,
+    status,
+    audit: { hash: `sha256:${status}` },
+    human: [],
+    agent: [],
+    error,
+    occurredAt: "2026-08-30T11:00:11.000Z",
   };
 }
 
@@ -762,7 +781,7 @@ test("recovery requires explicit disposition and supports orphaning without retr
   assert.equal(state.status, "recovering");
   assert.equal(state.recovery?.disposition, "orphaned");
 
-  const orphaned: FailedRunResult = {
+  const orphaned: OrphanedRunResult = {
     ...domainFailure(),
     status: "orphaned",
   };
@@ -951,4 +970,461 @@ test("completion requires the exact validated outcome and a quiescent state", ()
   };
   state = apply(state, "RunCompleted", { result });
   assert.equal(state.status, "completed");
+});
+
+test("attempt ids cannot be reused after the prior attempt projection clears", () => {
+  let state = createWaitingForAgentState();
+  const attemptId = state.currentAttempt?.attemptId;
+  assert.ok(attemptId);
+  assert.deepEqual(state.usedAgentAttemptIds, [attemptId]);
+  assert.equal(Object.isFrozen(state.usedAgentAttemptIds), true);
+  const overBudgetState: RunState = {
+    ...state,
+    usedAgentAttemptIds: [
+      attemptId,
+      AgentAttemptIdKind.generate(),
+      AgentAttemptIdKind.generate(),
+      AgentAttemptIdKind.generate(),
+    ],
+    budget: { ...state.budget, turnsStarted: 4 },
+  };
+  assert.throws(
+    () => planEffects(overBudgetState, nextEvent(overBudgetState, "RecoveryStarted", {
+      recoveryId: "recovery:over-budget-ledger",
+      startedAt: "2026-08-30T11:00:20.000Z",
+    })),
+    assertDomainError
+  );
+  state = apply(state, "AgentAttemptFailed", {
+    attemptId,
+    error: createDomainError({
+      code: "driver_failed",
+      message: "The first attempt failed.",
+    }),
+  });
+  state = apply(state, "RetryScheduled", {
+    attemptType: "agent_driver",
+    ordinal: 1,
+    scheduledAt: "2026-08-30T11:00:20.000Z",
+  });
+  assert.throws(
+    () => apply(state, "AgentAttemptStarted", { attemptId, turn: 2 }),
+    assertDomainError
+  );
+});
+
+test("proposal and action ids cannot be rebound by a later action", () => {
+  let state = createWaitingForAgentState();
+  const firstProposalId = DriverProposalIdKind.generate();
+  const firstAction = makeAction();
+  state = apply(state, "ActionProposed", {
+    proposalId: firstProposalId,
+    capabilityPackId: "synthetic.transform",
+    capabilityPackVersion: 1,
+    operationId: "synthetic.transform",
+    operationVersion: 1,
+    input: { input: "first" },
+  });
+  state = apply(state, "ActionNormalized", { action: firstAction });
+  state = evolve(state, policyEvent(state, firstAction, "allow"));
+  state = apply(state, "ActionStarted", {
+    actionId: firstAction.actionId,
+    startedAt: "2026-08-30T11:00:10.000Z",
+  });
+  state = apply(state, "ActionSucceeded", {
+    actionId: firstAction.actionId,
+    completedAt: "2026-08-30T11:00:11.000Z",
+  });
+  state = apply(state, "ObservationReleased", {
+    observation: observationFor(firstAction.actionId, "succeeded", null),
+  });
+  state = apply(state, "AgentAttemptStarted", {
+    attemptId: AgentAttemptIdKind.generate(),
+    turn: 2,
+  });
+
+  assert.throws(
+    () => apply(state, "ActionProposed", {
+      proposalId: firstProposalId,
+      capabilityPackId: "synthetic.transform",
+      capabilityPackVersion: 1,
+      operationId: "synthetic.transform",
+      operationVersion: 1,
+      input: { input: "second" },
+    }),
+    assertDomainError
+  );
+
+  state = apply(state, "ActionProposed", {
+    proposalId: DriverProposalIdKind.generate(),
+    capabilityPackId: "synthetic.transform",
+    capabilityPackVersion: 1,
+    operationId: "synthetic.transform",
+    operationVersion: 1,
+    input: { input: "second" },
+  });
+  assert.throws(
+    () => apply(state, "ActionNormalized", {
+      action: { ...firstAction, normalizedInput: { input: "second" } },
+    }),
+    assertDomainError
+  );
+});
+
+test("approval ids cannot be rebound by a later action", () => {
+  const first = createEvaluatingActionState();
+  let state = evolve(first.state, policyEvent(first.state, first.action, "require_approval"));
+  const approvalId = ApprovalIdKind.generate();
+  state = apply(state, "ApprovalRequested", {
+    approvalId,
+    actionId: first.action.actionId,
+    preconditionHash: "sha256:first",
+  });
+  state = apply(state, "ApprovalDenied", {
+    approvalId,
+    deniedBy: { kind: "user", id: "user:approver" },
+  });
+  const denial = createDomainError({
+    code: "policy_denied",
+    message: "The first approval was denied.",
+  });
+  state = apply(state, "ActionDenied", {
+    actionId: first.action.actionId,
+    error: denial,
+  });
+  state = apply(state, "ObservationReleased", {
+    observation: observationFor(first.action.actionId, "denied", denial),
+  });
+  state = apply(state, "AgentAttemptStarted", {
+    attemptId: AgentAttemptIdKind.generate(),
+    turn: 2,
+  });
+  state = apply(state, "ActionProposed", {
+    proposalId: DriverProposalIdKind.generate(),
+    capabilityPackId: "synthetic.transform",
+    capabilityPackVersion: 1,
+    operationId: "synthetic.transform",
+    operationVersion: 1,
+    input: { input: "second" },
+  });
+  const secondAction = makeAction();
+  state = apply(state, "ActionNormalized", { action: secondAction });
+  state = evolve(state, policyEvent(state, secondAction, "require_approval"));
+  assert.throws(
+    () => apply(state, "ApprovalRequested", {
+      approvalId,
+      actionId: secondAction.actionId,
+      preconditionHash: "sha256:second",
+    }),
+    assertDomainError
+  );
+});
+
+test("released observations must match successful and direct-failure dispositions", () => {
+  const success = createEvaluatingActionState();
+  let successState = evolve(
+    success.state,
+    policyEvent(success.state, success.action, "allow")
+  );
+  successState = apply(successState, "ActionStarted", {
+    actionId: success.action.actionId,
+    startedAt: "2026-08-30T11:00:09.000Z",
+  });
+  successState = apply(successState, "ActionSucceeded", {
+    actionId: success.action.actionId,
+    completedAt: "2026-08-30T11:00:10.000Z",
+  });
+  const unexpectedError = createDomainError({
+    code: "action_failed",
+    message: "An error cannot accompany success.",
+  });
+  assert.throws(
+    () => apply(successState, "ObservationReleased", {
+      observation: observationFor(success.action.actionId, "failed", unexpectedError),
+    }),
+    assertDomainError
+  );
+  assert.throws(
+    () => apply(successState, "ObservationReleased", {
+      observation: observationFor(success.action.actionId, "succeeded", unexpectedError),
+    }),
+    assertDomainError
+  );
+
+  const failure = createEvaluatingActionState();
+  let failureState = evolve(
+    failure.state,
+    policyEvent(failure.state, failure.action, "allow")
+  );
+  failureState = apply(failureState, "ActionStarted", {
+    actionId: failure.action.actionId,
+    startedAt: "2026-08-30T11:00:09.000Z",
+  });
+  const directError = createDomainError({
+    code: "action_failed",
+    message: "The action failed directly.",
+  });
+  failureState = apply(failureState, "ActionFailed", {
+    actionId: failure.action.actionId,
+    error: directError,
+  });
+  const differentError = createDomainError({
+    code: "action_failed",
+    message: "This is a different failure.",
+  });
+  assert.throws(
+    () => apply(failureState, "ObservationReleased", {
+      observation: observationFor(failure.action.actionId, "failed", differentError),
+    }),
+    assertDomainError
+  );
+  failureState = apply(failureState, "ObservationReleased", {
+    observation: observationFor(failure.action.actionId, "failed", directError),
+  });
+  assert.equal(failureState.status, "planning");
+});
+
+test("denial and reconciliation observations must match their recorded disposition", () => {
+  const denied = createEvaluatingActionState();
+  let deniedState = evolve(
+    denied.state,
+    policyEvent(denied.state, denied.action, "deny")
+  );
+  const denial = createDomainError({
+    code: "policy_denied",
+    message: "Policy denied the action.",
+  });
+  deniedState = apply(deniedState, "ActionDenied", {
+    actionId: denied.action.actionId,
+    error: denial,
+  });
+  assert.throws(
+    () => apply(deniedState, "ObservationReleased", {
+      observation: observationFor(
+        denied.action.actionId,
+        "denied",
+        createDomainError({ code: "policy_denied", message: "Different denial." })
+      ),
+    }),
+    assertDomainError
+  );
+  deniedState = apply(deniedState, "ObservationReleased", {
+    observation: observationFor(denied.action.actionId, "denied", denial),
+  });
+  assert.equal(deniedState.status, "planning");
+
+  const reconciled = createEvaluatingActionState();
+  let recovered = evolve(
+    reconciled.state,
+    policyEvent(reconciled.state, reconciled.action, "allow")
+  );
+  recovered = apply(recovered, "ActionStarted", {
+    actionId: reconciled.action.actionId,
+    startedAt: "2026-08-30T11:00:09.000Z",
+  });
+  recovered = apply(recovered, "RecoveryStarted", {
+    recoveryId: "recovery:disposition",
+    startedAt: "2026-08-30T11:00:10.000Z",
+  });
+  recovered = apply(recovered, "ActionReconciled", {
+    actionId: reconciled.action.actionId,
+    disposition: "succeeded",
+    evidence: { receipt: "sha256:recovered" },
+  });
+  assert.throws(
+    () => apply(recovered, "ObservationReleased", {
+      observation: observationFor(
+        reconciled.action.actionId,
+        "uncertain",
+        createDomainError({
+          code: "attempt_result_uncertain",
+          message: "Wrong reconciliation disposition.",
+        })
+      ),
+    }),
+    assertDomainError
+  );
+  recovered = apply(recovered, "ObservationReleased", {
+    observation: observationFor(reconciled.action.actionId, "succeeded", null),
+  });
+  assert.equal(recovered.status, "recovering");
+
+  for (const [disposition, error] of [
+    ["failed", null],
+    [
+      "uncertain",
+      createDomainError({
+        code: "attempt_result_uncertain",
+        message: "Reconciliation could not establish the result.",
+      }),
+    ],
+  ] as const) {
+    const setup = createEvaluatingActionState();
+    let state = evolve(setup.state, policyEvent(setup.state, setup.action, "allow"));
+    state = apply(state, "ActionStarted", {
+      actionId: setup.action.actionId,
+      startedAt: "2026-08-30T11:00:09.000Z",
+    });
+    state = apply(state, "RecoveryStarted", {
+      recoveryId: `recovery:${disposition}`,
+      startedAt: "2026-08-30T11:00:10.000Z",
+    });
+    state = apply(state, "ActionReconciled", {
+      actionId: setup.action.actionId,
+      disposition,
+      evidence: { receipt: `sha256:${disposition}` },
+    });
+    const wrongStatus = disposition === "failed" ? "uncertain" : "failed";
+    assert.throws(
+      () => apply(state, "ObservationReleased", {
+        observation: observationFor(setup.action.actionId, wrongStatus, error),
+      }),
+      assertDomainError
+    );
+    state = apply(state, "ObservationReleased", {
+      observation: observationFor(setup.action.actionId, disposition, error),
+    });
+    assert.equal(state.status, "recovering");
+  }
+});
+
+test("cancel settlement plans nonconsequential finalization for agent, context, and action", () => {
+  let agent = createWaitingForAgentState();
+  const agentAttemptId = agent.currentAttempt?.attemptId;
+  assert.ok(agentAttemptId);
+  agent = apply(agent, "CancellationRequested", { reason: "stop agent" });
+  const agentSettled = nextEvent(agent, "AgentAttemptFailed", {
+    attemptId: agentAttemptId,
+    error: createDomainError({ code: "cancelled", message: "Agent cancelled." }),
+  });
+  assert.deepEqual(
+    planEffects(agent, agentSettled).map(({ commandType, consequential, payload }) => ({
+      commandType,
+      consequential,
+      payload,
+    })),
+    [{
+      commandType: "FinalizeRun",
+      consequential: false,
+      payload: { terminalStatus: "cancelled" },
+    }]
+  );
+  agent = evolve(agent, agentSettled);
+  assert.equal(agent.outstandingCommand, null);
+
+  let context = createWaitingForAgentState();
+  context = apply(context, "ContextRequested", {
+    requestId: "context:cancel",
+    resource: {
+      schemaVersion: 1,
+      scheme: "fixture",
+      sourceId: "source:synthetic",
+      locator: { item: "alpha" },
+      mediaType: "application/json",
+      classification: "internal",
+    },
+  });
+  context = apply(context, "CancellationRequested", { reason: "stop context" });
+  const contextSettled = nextEvent(context, "ContextDenied", {
+    requestId: "context:cancel",
+    error: createDomainError({ code: "cancelled", message: "Context cancelled." }),
+  });
+  assert.equal(planEffects(context, contextSettled)[0]?.commandType, "FinalizeRun");
+  assert.equal(planEffects(context, contextSettled)[0]?.consequential, false);
+
+  const actionSetup = createEvaluatingActionState();
+  let action = evolve(
+    actionSetup.state,
+    policyEvent(actionSetup.state, actionSetup.action, "allow")
+  );
+  action = apply(action, "ActionStarted", {
+    actionId: actionSetup.action.actionId,
+    startedAt: "2026-08-30T11:00:09.000Z",
+  });
+  action = apply(action, "CancellationRequested", { reason: "stop action" });
+  const actionError = createDomainError({
+    code: "cancelled",
+    message: "Action cancelled.",
+  });
+  action = apply(action, "ActionFailed", {
+    actionId: actionSetup.action.actionId,
+    error: actionError,
+  });
+  const observationReleased = nextEvent(action, "ObservationReleased", {
+    observation: observationFor(actionSetup.action.actionId, "failed", actionError),
+  });
+  assert.equal(planEffects(action, observationReleased)[0]?.commandType, "FinalizeRun");
+  assert.equal(planEffects(action, observationReleased)[0]?.consequential, false);
+});
+
+test("recovered recovery refuses every unresolved command, context, action, or attempt", () => {
+  const recovered = (state: RunState, recoveryId: string): void => {
+    assert.throws(
+      () => apply(state, "RecoveryCompleted", {
+        recoveryId,
+        disposition: "recovered",
+      }),
+      assertDomainError
+    );
+  };
+
+  let commandOnly = createStartedState();
+  commandOnly = apply(commandOnly, "RecoveryStarted", {
+    recoveryId: "recovery:command",
+    startedAt: "2026-08-30T11:00:07.000Z",
+  });
+  assert.equal(commandOnly.currentAttempt, null);
+  assert.equal(commandOnly.currentContextRequest, null);
+  assert.equal(commandOnly.currentAction, null);
+  assert.ok(commandOnly.outstandingCommand);
+  recovered(commandOnly, "recovery:command");
+
+  let activeAttempt = createWaitingForAgentState();
+  activeAttempt = apply(activeAttempt, "RecoveryStarted", {
+    recoveryId: "recovery:active-attempt",
+    startedAt: "2026-08-30T11:00:08.000Z",
+  });
+  recovered(activeAttempt, "recovery:active-attempt");
+
+  let uncertainAttempt = createWaitingForAgentState();
+  uncertainAttempt = apply(uncertainAttempt, "AgentAttemptUncertain", {
+    attemptId:
+      uncertainAttempt.currentAttempt?.attemptId ?? assert.fail("missing attempt"),
+    error: createDomainError({
+      code: "attempt_result_uncertain",
+      message: "Attempt is uncertain.",
+    }),
+  });
+  uncertainAttempt = apply(uncertainAttempt, "RecoveryStarted", {
+    recoveryId: "recovery:uncertain-attempt",
+    startedAt: "2026-08-30T11:00:09.000Z",
+  });
+  recovered(uncertainAttempt, "recovery:uncertain-attempt");
+
+  let context = createWaitingForAgentState();
+  context = apply(context, "ContextRequested", {
+    requestId: "context:recovery",
+    resource: {
+      schemaVersion: 1,
+      scheme: "fixture",
+      sourceId: "source:synthetic",
+      locator: { item: "alpha" },
+      mediaType: "application/json",
+      classification: "internal",
+    },
+  });
+  context = apply(context, "RecoveryStarted", {
+    recoveryId: "recovery:context",
+    startedAt: "2026-08-30T11:00:10.000Z",
+  });
+  recovered(context, "recovery:context");
+
+  const actionSetup = createEvaluatingActionState();
+  let action = actionSetup.state;
+  assert.equal(action.outstandingCommand, null);
+  action = apply(action, "RecoveryStarted", {
+    recoveryId: "recovery:action",
+    startedAt: "2026-08-30T11:00:10.000Z",
+  });
+  recovered(action, "recovery:action");
 });

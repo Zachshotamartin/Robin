@@ -5,12 +5,14 @@ import type {
   CommandId,
   ContractSchemaVersion,
   DriverProposalId,
+  ErrorId,
   EventId,
   GenericEvent,
   GenericEventType,
   JsonObject,
   NormalizedAction,
   ObjectiveEnvelope,
+  ObservationStatus,
   OutcomeEnvelope,
   PolicyVersionId,
   RunId,
@@ -100,6 +102,16 @@ export interface PolicyEvaluationProjection {
   readonly trace: JsonObject;
 }
 
+export type ObservationErrorExpectation =
+  | { readonly kind: "none" }
+  | { readonly kind: "same_error_id"; readonly errorId: ErrorId }
+  | { readonly kind: "unbound" };
+
+export interface ExpectedObservationProjection {
+  readonly status: ObservationStatus;
+  readonly error: ObservationErrorExpectation;
+}
+
 export interface CurrentActionProjection {
   readonly proposalId: DriverProposalId;
   readonly capabilityPackId: string;
@@ -110,6 +122,7 @@ export interface CurrentActionProjection {
   readonly input: JsonObject;
   readonly normalizedAction: NormalizedAction | null;
   readonly policyEvaluation: PolicyEvaluationProjection | null;
+  readonly expectedObservation: ExpectedObservationProjection | null;
   readonly phase: ActionPhase;
 }
 
@@ -182,6 +195,11 @@ export interface RunState {
   readonly startedAt: string | null;
   readonly pausedFrom: "created" | "planning" | "attempt_result_uncertain" | null;
   readonly driver: DriverProjection | null;
+  /** Replay-derived, budget-bounded ledgers prevent identifiers being rebound. */
+  readonly usedAgentAttemptIds: readonly AgentAttemptId[];
+  readonly usedDriverProposalIds: readonly DriverProposalId[];
+  readonly usedActionIds: readonly ActionId[];
+  readonly usedApprovalIds: readonly ApprovalId[];
   readonly currentAttempt: AgentAttemptProjection | null;
   readonly currentContextRequest: ContextRequestProjection | null;
   readonly currentAction: CurrentActionProjection | null;

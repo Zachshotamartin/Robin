@@ -22,6 +22,8 @@ export type {
   ContextRequestProjection,
   CurrentActionProjection,
   DriverProjection,
+  ExpectedObservationProjection,
+  ObservationErrorExpectation,
   PendingApprovalProjection,
   PolicyEvaluationProjection,
   RecoveryProjection,

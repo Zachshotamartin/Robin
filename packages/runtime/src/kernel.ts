@@ -14,6 +14,7 @@ import {
   canonicalize,
   createDomainError,
   isDomainError,
+  isErrorId,
   isGenericEventType,
 } from "@guard/contracts";
 import type {
@@ -34,6 +35,7 @@ import {
 } from "./types.js";
 import type {
   CurrentActionProjection,
+  ExpectedObservationProjection,
   RunBudgetCounters,
   RunIntent,
   RunIntentType,
@@ -128,6 +130,10 @@ export function createInitialRunState(): RunState {
     startedAt: null,
     pausedFrom: null,
     driver: null,
+    usedAgentAttemptIds: [],
+    usedDriverProposalIds: [],
+    usedActionIds: [],
+    usedApprovalIds: [],
     currentAttempt: null,
     currentContextRequest: null,
     currentAction: null,
@@ -407,9 +413,16 @@ function reduceEvent(state: RunState, event: GenericEventEnvelope): RunState {
           details: { budget: "maxTurns", consumed: event.payload.turn, limit: maxTurns },
         });
       }
+      const usedAgentAttemptIds = appendUniqueBoundedId(
+        state.usedAgentAttemptIds,
+        event.payload.attemptId,
+        maxTurns,
+        "agent attempt"
+      );
       return {
         ...state,
         status: "waiting_for_agent",
+        usedAgentAttemptIds,
         currentAttempt: {
           attemptId: event.payload.attemptId,
           turn: event.payload.turn,
@@ -537,12 +550,19 @@ function reduceEvent(state: RunState, event: GenericEventEnvelope): RunState {
         event.payload.capabilityPackId,
         event.payload.capabilityPackVersion
       );
+      const usedDriverProposalIds = appendUniqueBoundedId(
+        state.usedDriverProposalIds,
+        event.payload.proposalId,
+        maxActions,
+        "driver proposal"
+      );
       const currentAttempt = state.currentAttempt === null
         ? null
         : { ...state.currentAttempt, status: "completed" as const };
       return {
         ...state,
         status: "evaluating_action",
+        usedDriverProposalIds,
         currentAttempt,
         currentAction: {
           proposalId: event.payload.proposalId,
@@ -553,6 +573,7 @@ function reduceEvent(state: RunState, event: GenericEventEnvelope): RunState {
           input: event.payload.input,
           normalizedAction: null,
           policyEvaluation: null,
+          expectedObservation: null,
           phase: "proposed",
         },
         budget: incrementBudget(state.budget, { actionsProposed: 1 }),
@@ -577,8 +598,15 @@ function reduceEvent(state: RunState, event: GenericEventEnvelope): RunState {
         action.capabilityPackId,
         action.capabilityPackVersion
       );
+      const usedActionIds = appendUniqueBoundedId(
+        state.usedActionIds,
+        action.actionId,
+        state.taskProfile?.budgetPolicy.maxActions,
+        "action"
+      );
       return {
         ...state,
+        usedActionIds,
         currentAction: {
           ...current,
           normalizedAction: action,
@@ -629,7 +657,17 @@ function reduceEvent(state: RunState, event: GenericEventEnvelope): RunState {
       return {
         ...state,
         status: passiveStatus(state, "recording_observation"),
-        currentAction: { ...current, phase: "denied" },
+        currentAction: {
+          ...current,
+          expectedObservation: {
+            status: "denied",
+            error: {
+              kind: "same_error_id",
+              errorId: event.payload.error.errorId,
+            },
+          },
+          phase: "denied",
+        },
         budget: incrementBudget(state.budget, { policyDenials: 1 }),
       };
     }
@@ -654,7 +692,14 @@ function reduceEvent(state: RunState, event: GenericEventEnvelope): RunState {
       return {
         ...state,
         status: passiveStatus(state, "recording_observation"),
-        currentAction: { ...current, phase: "result_recorded" },
+        currentAction: {
+          ...current,
+          expectedObservation: {
+            status: "succeeded",
+            error: { kind: "none" },
+          },
+          phase: "result_recorded",
+        },
       };
     }
     case "ActionFailed": {
@@ -663,7 +708,17 @@ function reduceEvent(state: RunState, event: GenericEventEnvelope): RunState {
       return {
         ...state,
         status: passiveStatus(state, "recording_observation"),
-        currentAction: { ...current, phase: "result_recorded" },
+        currentAction: {
+          ...current,
+          expectedObservation: {
+            status: "failed",
+            error: {
+              kind: "same_error_id",
+              errorId: event.payload.error.errorId,
+            },
+          },
+          phase: "result_recorded",
+        },
       };
     }
     case "ActionReconciled": {
@@ -694,7 +749,13 @@ function reduceEvent(state: RunState, event: GenericEventEnvelope): RunState {
                 ? "cancellation_requested"
                 : "attempt_result_uncertain"
             : passiveStatus(state, "recording_observation"),
-        currentAction: { ...current, phase: "result_recorded" },
+        currentAction: {
+          ...current,
+          expectedObservation: reconciliationObservationExpectation(
+            event.payload.disposition
+          ),
+          phase: "result_recorded",
+        },
       };
     }
     case "ObservationReleased": {
@@ -703,6 +764,11 @@ function reduceEvent(state: RunState, event: GenericEventEnvelope): RunState {
       ensure(
         current.phase === "result_recorded" || current.phase === "denied",
         "ObservationReleased requires a recorded or denied action result."
+      );
+      assertObservationMatchesExpectation(
+        current.expectedObservation,
+        event.payload.observation.status,
+        event.payload.observation.error
       );
       return {
         ...state,
@@ -718,9 +784,16 @@ function reduceEvent(state: RunState, event: GenericEventEnvelope): RunState {
       ensure(ApprovalIdKind.is(event.payload.approvalId), "Invalid approval id.");
       ensureNonEmpty(event.payload.preconditionHash, "preconditionHash");
       ensure(state.pendingApproval === null, "Only one approval may be pending.");
+      const usedApprovalIds = appendUniqueBoundedId(
+        state.usedApprovalIds,
+        event.payload.approvalId,
+        state.taskProfile?.budgetPolicy.maxActions,
+        "approval"
+      );
       return {
         ...state,
         status: "waiting_for_approval",
+        usedApprovalIds,
         pendingApproval: {
           approvalId: event.payload.approvalId,
           actionId: event.payload.actionId,
@@ -931,7 +1004,10 @@ function planEffectsUnchecked(
       return one("FetchContextResource", true, { requestId: event.payload.requestId });
     case "ContextReleased":
     case "ContextDenied":
-      return state.status === "cancellation_requested" || state.status === "recovering"
+      if (state.status === "cancellation_requested") {
+        return one("FinalizeRun", false, { terminalStatus: "cancelled" });
+      }
+      return state.status === "recovering"
         ? none
         : one("AdvanceAgentDriver", true, { nextTurn: state.budget.turnsStarted });
     case "ActionProposed":
@@ -959,12 +1035,18 @@ function planEffectsUnchecked(
         actionId: event.payload.actionId,
       });
     case "ObservationReleased":
-      return state.status === "cancellation_requested" || state.status === "recovering" ||
-        state.budgetExceeded !== null
+      if (state.status === "cancellation_requested") {
+        return one("FinalizeRun", false, { terminalStatus: "cancelled" });
+      }
+      return state.status === "recovering" || state.budgetExceeded !== null
         ? none
         : one("AdvanceAgentDriver", true, {
             nextTurn: state.budget.turnsStarted + 1,
           });
+    case "AgentAttemptFailed":
+      return state.status === "cancellation_requested"
+        ? one("FinalizeRun", false, { terminalStatus: "cancelled" })
+        : none;
     case "RetryScheduled":
       return one("AdvanceAgentDriver", true, {
         retryOrdinal: event.payload.ordinal,
@@ -1019,7 +1101,6 @@ function planEffectsUnchecked(
     case "AgentContentCompleted":
     case "AgentUsageRecorded":
     case "AgentAttemptUncertain":
-    case "AgentAttemptFailed":
     case "ContextRedacted":
     case "ActionNormalized":
     case "ActionDenied":
@@ -1115,6 +1196,12 @@ function assertEventBoundary(state: RunState, event: GenericEventEnvelope): void
       previousRecordedAt: state.lastRecordedAt,
       recordedAt: event.recordedAt,
     });
+  }
+  if (
+    event.eventType === "RecoveryCompleted" &&
+    event.payload.disposition === "recovered"
+  ) {
+    assertRecoveryCanCompleteRecovered(state);
   }
   if (state.budgetExceeded !== null && WORK_STARTING_EVENTS.has(event.eventType)) {
     throw createDomainError({
@@ -1285,6 +1372,73 @@ function assertStateInvariants(state: RunState): void {
       `Budget counter ${name} must be a non-negative safe integer.`
     );
   }
+  const maxTurns = state.taskProfile?.budgetPolicy.maxTurns ?? 0;
+  const maxActions = state.taskProfile?.budgetPolicy.maxActions ?? 0;
+  assertBoundedUniqueIdLedger(
+    state.usedAgentAttemptIds,
+    (value) => AgentAttemptIdKind.is(value),
+    maxTurns,
+    "agent attempt"
+  );
+  assertBoundedUniqueIdLedger(
+    state.usedDriverProposalIds,
+    (value) => DriverProposalIdKind.is(value),
+    maxActions,
+    "driver proposal"
+  );
+  assertBoundedUniqueIdLedger(
+    state.usedActionIds,
+    (value) => ActionIdKind.is(value),
+    maxActions,
+    "action"
+  );
+  assertBoundedUniqueIdLedger(
+    state.usedApprovalIds,
+    (value) => ApprovalIdKind.is(value),
+    maxActions,
+    "approval"
+  );
+  ensure(
+    state.usedAgentAttemptIds.length === state.budget.turnsStarted,
+    "Attempt identifier history must match the turn counter."
+  );
+  ensure(
+    state.usedDriverProposalIds.length === state.budget.actionsProposed,
+    "Proposal identifier history must match the proposed-action counter."
+  );
+  ensure(
+    state.usedActionIds.length <= state.usedDriverProposalIds.length,
+    "Action identifier history cannot exceed proposal history."
+  );
+  ensure(
+    state.usedApprovalIds.length <= state.usedActionIds.length,
+    "Approval identifier history cannot exceed action history."
+  );
+  if (state.currentAttempt !== null) {
+    ensure(
+      state.usedAgentAttemptIds.includes(state.currentAttempt.attemptId),
+      "The current attempt must be present in attempt identifier history."
+    );
+  }
+  if (state.currentAction !== null) {
+    ensure(
+      state.usedDriverProposalIds.includes(state.currentAction.proposalId),
+      "The current action proposal must be present in proposal identifier history."
+    );
+    if (state.currentAction.normalizedAction !== null) {
+      ensure(
+        state.usedActionIds.includes(state.currentAction.normalizedAction.actionId),
+        "The current normalized action must be present in action identifier history."
+      );
+    }
+    assertExpectedObservationProjection(state.currentAction);
+  }
+  if (state.pendingApproval !== null) {
+    ensure(
+      state.usedApprovalIds.includes(state.pendingApproval.approvalId),
+      "The pending approval must be present in approval identifier history."
+    );
+  }
   if (state.validatedOutcome !== null) {
     ensure(state.proposedOutcome !== null, "Validated outcome requires a proposal.");
   }
@@ -1339,6 +1493,117 @@ function validateTaskProfileBudgets(value: {
     if (name === "extensions") continue;
     ensureNonNegativeSafeInteger(limit, `budgetPolicy.${name}`);
   }
+}
+
+function appendUniqueBoundedId<TId extends string>(
+  used: readonly TId[],
+  id: TId,
+  limit: number | undefined,
+  label: string
+): readonly TId[] {
+  ensure(limit !== undefined, `A ${label} requires a pinned budget.`);
+  ensure(!used.includes(id), `A ${label} id cannot be reused within a run.`);
+  ensure(
+    used.length < limit,
+    `The ${label} identifier history cannot exceed its run budget.`
+  );
+  return [...used, id];
+}
+
+function assertBoundedUniqueIdLedger(
+  value: unknown,
+  isExpectedId: (candidate: unknown) => boolean,
+  limit: number,
+  label: string
+): asserts value is readonly string[] {
+  ensure(Array.isArray(value), `The ${label} identifier history must be an array.`);
+  ensure(
+    value.every(isExpectedId),
+    `The ${label} identifier history contains an invalid id.`
+  );
+  ensure(
+    new Set(value).size === value.length,
+    `The ${label} identifier history contains a reused id.`
+  );
+  ensure(
+    value.length <= limit,
+    `The ${label} identifier history exceeds its run budget.`
+  );
+}
+
+function assertExpectedObservationProjection(
+  current: CurrentActionProjection
+): void {
+  const expected = current.expectedObservation;
+  if (current.phase === "result_recorded") {
+    ensure(expected !== null, "A recorded action result requires an observation disposition.");
+  } else if (current.phase !== "denied") {
+    ensure(expected === null, "An unsettled action cannot expect an observation.");
+  }
+  if (expected === null) return;
+  ensure(
+    expected.status === "succeeded" || expected.status === "failed" ||
+      expected.status === "uncertain" || expected.status === "denied",
+    "The expected observation status is invalid."
+  );
+  switch (expected.error.kind) {
+    case "none":
+    case "unbound":
+      return;
+    case "same_error_id":
+      ensure(isErrorId(expected.error.errorId), "Expected observation error id is invalid.");
+      return;
+    default:
+      return assertNever(expected.error);
+  }
+}
+
+function reconciliationObservationExpectation(
+  disposition: "succeeded" | "failed" | "uncertain"
+): ExpectedObservationProjection {
+  return disposition === "succeeded"
+    ? { status: "succeeded", error: { kind: "none" } }
+    : { status: disposition, error: { kind: "unbound" } };
+}
+
+function assertObservationMatchesExpectation(
+  expected: ExpectedObservationProjection | null,
+  actualStatus: ExpectedObservationProjection["status"],
+  actualError: DomainError | null
+): void {
+  ensure(expected !== null, "ObservationReleased requires a recorded disposition.");
+  ensure(actualStatus === expected.status, "Observation status differs from the action result.");
+  switch (expected.error.kind) {
+    case "none":
+      ensure(actualError === null, "A successful observation cannot contain an error.");
+      return;
+    case "same_error_id":
+      ensure(
+        actualError !== null && isDomainError(actualError) &&
+          actualError.errorId === expected.error.errorId,
+        "Observation error id differs from the action result."
+      );
+      return;
+    case "unbound":
+      return;
+    default:
+      return assertNever(expected.error);
+  }
+}
+
+function assertRecoveryCanCompleteRecovered(state: RunState): void {
+  ensure(state.outstandingCommand === null,
+    "Recovery cannot complete as recovered while a command is outstanding.");
+  ensure(state.currentContextRequest === null,
+    "Recovery cannot complete as recovered while a context request is active.");
+  ensure(state.currentAction === null,
+    "Recovery cannot complete as recovered while an action is active.");
+  ensure(
+    state.currentAttempt === null ||
+      (state.currentAttempt.status !== "active" &&
+        state.currentAttempt.status !== "uncertain"),
+    "Recovery cannot complete as recovered while an agent attempt is unresolved."
+  );
 }
 
 function assertCurrentAttempt(state: RunState, attemptId: unknown): void {
