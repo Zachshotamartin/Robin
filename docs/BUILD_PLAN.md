@@ -300,7 +300,7 @@ An action contains:
 
 ```text
 policy "protect-secrets" priority 100 {
-  when action.pack == "repository"
+  when action.pack == "coding.virtual-repository"
     and action.operation == "read_file"
     and repo.path matches "**/.env*"
   deny
@@ -644,7 +644,7 @@ guard deny <approval-id> --reason "..."
 guard diff <run-id>
 guard replay <run-id>
 guard cancel <run-id>
-guard policy check policies/default.guard
+guard policy check policies/strict.guard
 guard policy test
 guard policy explain <action-id>
 guard policy simulate --from <version> --to <file>

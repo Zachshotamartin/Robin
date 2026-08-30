@@ -2,13 +2,17 @@
 
 ## Implemented Reference
 
-- [Event Model v1](event-model.md): Milestone A envelope fields, identifiers,
+- [Event Model v1](event-model.md): envelope fields, identifiers,
   ordering, causation, event inventory, reducer lifecycle, legal intents,
-  command flow, replay behavior, schema evolution plan, and in-memory limits
+  command flow, replay behavior, schema evolution plan, and current in-memory
+  limits
+- [Policy Language v1](policy-language.md): Guard grammar, canonical formatting,
+  attribute catalogs, three-valued semantics, precedence, safe traces, case
+  corpora, simulation, CLI use, and Milestone B limitations
 
 The repository root [README](../README.md) is the current implementation and
-quick-start snapshot. Milestone A is implemented; behavior assigned to
-Milestones B through H remains planned until its evidence gate passes.
+quick-start snapshot. Milestone B is implemented; Milestones C through H remain
+planned until their evidence gates pass.
 
 ## Source of Truth
 

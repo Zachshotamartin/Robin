@@ -1,8 +1,8 @@
 # Contributing
 
 Guarded Agent is built milestone by milestone. Preserve the distinction between
-implemented evidence and planned guarantees: Milestone A is the current
-implementation; Milestones B through H remain planned.
+implemented evidence and planned guarantees: Milestone B is the current
+implementation; Milestones C through H remain planned.
 
 ## Before Making a Change
 
@@ -42,6 +42,18 @@ For contract-facing work, also run the root contract suite:
 ```bash
 npm run test:contracts
 ```
+
+Policy, context, gateway, repository-boundary, or scenario changes must also
+run the Gate B aggregate:
+
+```bash
+npm run test:gate:b
+```
+
+It runs repository guards, the bounded contract set, deterministic Gate B
+evals, then the boundary and policy mutation suites. Mutation is intentionally
+last. Do not treat a killed mutant as a license to weaken its direct named
+assertion.
 
 Do not weaken a root check, omit a new workspace from it, or regenerate a
 golden fixture merely to make a failure disappear. Explain and review every
@@ -125,9 +137,37 @@ A new capability pack or operation must define:
 11. unit, integration, adversarial, mutation, and replay tests;
 12. documented residual risk and milestone availability.
 
-Milestone A operations must remain pure and fixture-backed. They may return a
-patch proposal or other candidate artifact, but they may not read/write the OS
-filesystem, invoke Git, spawn a process, use the network, or consume a secret.
+Through Milestone B, runnable operations remain pure and fixture-backed. The
+contained repository source may perform an authorized bounded host read, but
+virtual capability operations may not mutate the OS filesystem, invoke Git,
+spawn a process, use the network, or consume a secret. A patch proposal or diff
+inspection is candidate data only and is never applied.
+
+## Policy and Context Rules
+
+- Every shipped policy file owns a content-hash-bound table corpus and the ten
+  categories in Operations Plan section 8.7. Use a real overlap case where the
+  file can produce one; any structural inapplicability assertion must lock the
+  exact rule/effect/priority/predicate shape so it fails after a relevant edit.
+- Simulate every policy change over its recorded normalized-action corpus and
+  report exact newly allowed, newly denied, and newly approval-gated totals.
+  Review each newly allowed consequential action explicitly.
+- Policy and execution consume the same immutable normalized action. Semantic
+  normalization may validate structure, canonical locators, and bounds, but it
+  must not open a source, test existence, derive a preimage, or read provider
+  bytes before policy allows the handler.
+- Every source read and every agent-visible capability output crosses the
+  context broker. Filenames, paths, snippets, patches, hashes derived from
+  secret bytes, audit summaries, and human views are not bypass channels.
+- Multi-path repository inputs use exact `repo.input_paths`; emitted identifiers
+  use exact output-only `repo.paths`. They are unique, UTF-8 ordered, bounded,
+  and set-equal to the identifiers actually selected or released.
+- Policy denial must leave the handler spy at zero. Output-release denial may
+  follow a bounded handler, but must suppress the pack agent, audit, and human
+  views. Persist only runtime-owned denied/failed status.
+- Production `.guard` files are stored in the canonical formatter output. Do
+  not update a corpus hash by hand without compiling the exact source ID,
+  catalog set, and default effect and rerunning its full review matrix.
 
 ## Driver, Provider, and Credential Rules
 
@@ -135,7 +175,7 @@ The generic `AgentDriver` receives only mediated context, advertised operations,
 and agent-safe observations. Provider-specific request fields, SDK objects,
 credential bytes, and transport errors stay in adapter packages.
 
-Milestone A contains deterministic scripted/synthetic adapters only. A new real
+Milestone B contains deterministic scripted/synthetic adapters only. A new real
 provider or external-agent integration belongs to its planned milestone and
 must include capability negotiation, conformance fixtures, failure certainty,
 budget accounting, secret leak canaries, and an honest compatibility tier.
