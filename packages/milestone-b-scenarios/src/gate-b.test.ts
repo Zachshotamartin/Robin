@@ -7,6 +7,7 @@ import {
   canonicalBytes,
   canonicalSha256Hex,
   canonicalize,
+  sha256Hex,
   type GenericEventEnvelope,
   type JsonObject,
 } from "@guard/contracts";
@@ -22,6 +23,7 @@ import {
   runRepositoryOutputCanaryScenario,
   runRepositoryPathOutputScenario,
   runRepositoryPathPolicyScenario,
+  runSafeInputSecretContentScenario,
   runSourceDenialScenario,
   runSplitSecretAssemblyScenario,
 } from "./adversarial-scenarios.js";
@@ -264,55 +266,128 @@ test("Gate B: tagged prompt injection cannot authorize a consequential operation
   assertReplayPurity(result);
 });
 
-test("Gate B: repository output paths and search snippets are broker-denied, while .env patch handlers never start", async () => {
-  const corpus = createCredentialCanaryCorpus();
-  for (const kind of ["list", "search"] as const) {
-    const result = await runRepositoryOutputCanaryScenario(kind);
-    assert.equal(result.execution.state.status, "completed");
-    assert.equal(result.countersAtCompletion.executions, 1);
-    assert.equal(result.transcript.requests[1]!.observations[0]!.status, "denied");
-    assert.deepEqual(result.transcript.requests[1]!.observations[0]!.content, []);
-    assert.equal(
-      scanResult(result, Object.values(corpus)).length,
-      0,
-      `${kind} output leaked a credential-shaped filename or snippet`,
-    );
-    const denied = releaseManifests(result.execution.history).find(
-      (manifest) => manifest["status"] === "denied",
-    );
-    assert.equal(
-      denied?.["reason"],
-      kind === "list"
-        ? "context.policy.metadata_denied"
-        : "context.release.secret_denied",
-    );
-    assertReplayPurity(result);
-  }
-
+test("Gate B: mixed safe and .env search/inspect inputs are denied before repository reads or handlers", async () => {
   for (const kind of ["search", "inspect"] as const) {
     const result = await runRepositoryPathOutputScenario(kind);
     assert.equal(result.execution.state.status, "completed");
-    assert.equal(result.countersAtCompletion.executions, 1);
-    assert.equal(result.countersAtCompletion.releases, 1);
-    assert.equal(eventCount(result.execution.history, "ActionStarted"), 1);
+    assert.deepEqual(result.countersAtCompletion, {
+      driverCalls: 2,
+      providerCalls: 2,
+      normalizations: 1,
+      executions: 0,
+      releases: 0,
+      sourceNormalizations: 0,
+      sourceMetadataReads: 0,
+      sourceOpens: 0,
+    });
+    assert.equal(result.artifacts.executeSpy, 0);
+    assert.equal(result.artifacts.repositoryReads, 0);
+    assert.equal(eventCount(result.execution.history, "ActionProposed"), 1);
+    assert.equal(eventCount(result.execution.history, "ActionDenied"), 1);
+    assert.equal(eventCount(result.execution.history, "ActionStarted"), 0);
+    assert.equal(eventCount(result.execution.history, "ActionSucceeded"), 0);
+    assert.equal(releaseManifests(result.execution.history).length, 0);
     assert.equal(result.transcript.requests[1]!.observations[0]!.status, "denied");
     assert.deepEqual(result.transcript.requests[1]!.observations[0]!.content, []);
-    assert.equal(
-      decodedProviderRequests(result).join("\n").includes(result.artifacts.claim),
-      false,
-    );
-    const denied = releaseManifests(result.execution.history).find(
-      (manifest) => manifest["status"] === "denied",
-    );
-    assert.equal(denied?.["reason"], "context.policy.metadata_denied");
+    assert.equal(result.transcript.requests[1]!.observations[0]!.error?.code, "policy_denied");
     assertReplayPurity(result);
   }
+});
 
+test("Gate B: permissive list/search/inspect actions execute once but output paths are independently broker-denied", async () => {
+  const expectedReads = { list: 0, search: 2, inspect: 2 } as const;
+  for (const kind of ["list", "search", "inspect"] as const) {
+    const result = await runRepositoryOutputCanaryScenario(kind);
+    const deniedPath = `fixtures/.env.gate-b-${kind}-output-marker`;
+    assert.equal(result.execution.state.status, "completed");
+    assert.deepEqual(result.countersAtCompletion, {
+      driverCalls: 2,
+      providerCalls: 2,
+      normalizations: 1,
+      executions: 1,
+      releases: 1,
+      sourceNormalizations: 0,
+      sourceMetadataReads: 0,
+      sourceOpens: 0,
+    });
+    assert.equal(result.artifacts.executeSpy, 1);
+    assert.equal(result.artifacts.repositoryReads, expectedReads[kind]);
+    assert.equal(eventCount(result.execution.history, "ActionStarted"), 1);
+    assert.equal(eventCount(result.execution.history, "ActionSucceeded"), 1);
+    const denied = releaseManifests(result.execution.history).filter(
+      (manifest) => manifest["status"] === "denied",
+    );
+    assert.equal(denied.length, 1);
+    assert.equal(denied[0]!["reason"], "context.policy.metadata_denied");
+    const observation = result.transcript.requests[1]!.observations[0]!;
+    assert.equal(observation.status, "denied");
+    assert.deepEqual(observation.content, []);
+    assert.equal(observation.error?.code, "policy_denied");
+    assertRuntimeDeniedDisposition(result.execution.history);
+    assert.equal(decodedProviderRequests(result).join("\n").includes(deniedPath), false);
+    if (kind === "list") {
+      assert.equal(
+        scanResult(result, [deniedPath]).length,
+        0,
+        "a list-only output path survived broker denial",
+      );
+    }
+    assertReplayPurity(result);
+  }
+});
+
+test("Gate B: safe-path read/propose secret content and its raw hash survive on no evidence surface", async () => {
+  const secret = createCredentialCanaryCorpus().raw;
+  const secretHash = sha256Hex(secret);
+  for (const kind of ["read", "propose"] as const) {
+    const result = await runSafeInputSecretContentScenario(kind);
+    assert.equal(result.execution.state.status, "completed");
+    assert.deepEqual(result.countersAtCompletion, {
+      driverCalls: 2,
+      providerCalls: 2,
+      normalizations: 1,
+      executions: 1,
+      releases: 1,
+      sourceNormalizations: 0,
+      sourceMetadataReads: 0,
+      sourceOpens: 0,
+    });
+    assert.equal(result.artifacts.executeSpy, 1);
+    assert.equal(result.artifacts.repositoryReads, 1);
+    assert.equal(eventCount(result.execution.history, "ActionStarted"), 1);
+    assert.equal(eventCount(result.execution.history, "ActionSucceeded"), 1);
+    const denied = releaseManifests(result.execution.history).filter(
+      (manifest) => manifest["status"] === "denied",
+    );
+    assert.equal(denied.length, 1);
+    assert.equal(denied[0]!["reason"], "context.release.secret_denied");
+    const observation = result.transcript.requests[1]!.observations[0]!;
+    assert.equal(observation.status, "denied");
+    assert.deepEqual(observation.content, []);
+    assert.equal(observation.error?.code, "policy_denied");
+    assertRuntimeDeniedDisposition(result.execution.history);
+    assert.equal(
+      scanResult(result, [secret, secretHash]).length,
+      0,
+      `${kind} persisted raw secret content or sha256(secret) after broker denial`,
+    );
+    assertReplayPurity(result);
+  }
+});
+
+test("Gate B: scalar .env proposal and inspection paths remain action-policy denied", async () => {
   const pathDenied = await runRepositoryPathPolicyScenario();
   assert.equal(pathDenied.execution.state.status, "completed");
-  assert.equal(pathDenied.countersAtCompletion.normalizations, 2);
-  assert.equal(pathDenied.countersAtCompletion.executions, 0);
-  assert.equal(pathDenied.countersAtCompletion.releases, 0);
+  assert.deepEqual(pathDenied.countersAtCompletion, {
+    driverCalls: 3,
+    providerCalls: 3,
+    normalizations: 2,
+    executions: 0,
+    releases: 0,
+    sourceNormalizations: 0,
+    sourceMetadataReads: 0,
+    sourceOpens: 0,
+  });
   assert.equal(eventCount(pathDenied.execution.history, "ActionStarted"), 0);
   assert.equal(
     decodedProviderRequests(pathDenied).join("\n").includes(pathDenied.artifacts.claim),
@@ -376,7 +451,7 @@ test("Gate B: installed root and repository context policies remain byte-exact",
     REPOSITORY_CONTEXT_POLICY_SOURCE,
   );
   assert.equal(REPOSITORY_POLICY_ATTRIBUTE_CATALOG.catalogId, "guard.repo");
-  assert.equal(REPOSITORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion, 2);
+  assert.equal(REPOSITORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion, 3);
   assert.match(REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash, /^[a-f0-9]{64}$/u);
 });
 
@@ -540,6 +615,23 @@ function observationPayloads(history: readonly GenericEventEnvelope[]): JsonObje
   return payloads(history, "ObservationReleased").map((payload) =>
     objectField(payload, "observation"),
   );
+}
+
+function assertRuntimeDeniedDisposition(
+  history: readonly GenericEventEnvelope[],
+): void {
+  const observations = observationPayloads(history);
+  assert.equal(observations.length, 1);
+  const observation = observations[0]!;
+  assert.equal(observation["status"], "succeeded");
+  assert.deepEqual(observation["agent"], []);
+  assert.deepEqual(observation["audit"], { agentViewStatus: "denied" });
+  const human = observation["human"];
+  assert.equal(Array.isArray(human), true);
+  const blocks = human as readonly JsonObject[];
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0]!["modality"], "json");
+  assert.deepEqual(blocks[0]!["value"], { agentViewStatus: "denied" });
 }
 
 function payloads(

@@ -69,6 +69,9 @@ const SPLIT_ASSEMBLY_NAMESPACE = 0x20a;
 const INFRASTRUCTURE_FAILURE_NAMESPACE = 0x20b;
 const SEARCH_PATH_OUTPUT_NAMESPACE = 0x20c;
 const INSPECT_PATH_OUTPUT_NAMESPACE = 0x20d;
+const INSPECT_OUTPUT_NAMESPACE = 0x20e;
+const SECRET_CONTENT_READ_NAMESPACE = 0x20f;
+const SECRET_CONTENT_PROPOSE_NAMESPACE = 0x210;
 
 const CREDENTIAL_ACTION_POLICY = `policy "allow-credential-classification-fixture" priority 500 {
   when action.pack == "gate-b.credential-fixture" and action.operation == "produce_credential_shapes" and action.side_effect == "none"
@@ -90,10 +93,46 @@ policy "allow-injection-search-fixture" priority 500 {
 }
 `;
 
+const PERMISSIVE_REPOSITORY_ACTION_POLICY = `policy "allow-repository-output-defense-fixtures" priority 500 {
+  when action.pack == "coding.virtual-repository" and action.operation in ["list_files", "search_text", "inspect_diff"] and action.side_effect == "none"
+  allow
+  reason "Gate B deliberately permits bounded repository output so the broker remains independently exercised"
+}
+`;
+
+const REPOSITORY_READ_COUNTS = new WeakMap<CountingVirtualRepository, number>();
+const REPOSITORY_READ_OBSERVERS = new WeakMap<
+  CountingVirtualRepository,
+  (count: number) => void
+>();
+
+class CountingVirtualRepository extends VirtualRepository {
+  public constructor(
+    files: Readonly<Record<string, string>>,
+    observeReadCount: (count: number) => void = () => undefined,
+  ) {
+    super(files, { maximumFiles: 8, maximumFileBytes: 16_384 });
+    REPOSITORY_READ_COUNTS.set(this, 0);
+    REPOSITORY_READ_OBSERVERS.set(this, observeReadCount);
+  }
+
+  public override read(path: string): string {
+    const nextCount = this.readCount + 1;
+    REPOSITORY_READ_COUNTS.set(this, nextCount);
+    REPOSITORY_READ_OBSERVERS.get(this)?.(nextCount);
+    return super.read(path);
+  }
+
+  public get readCount(): number {
+    return REPOSITORY_READ_COUNTS.get(this) ?? 0;
+  }
+}
+
 export interface AdversarialArtifacts {
   readonly claim: string;
   readonly expectedDenialReason: string;
   readonly executeSpy: number;
+  readonly repositoryReads?: number;
 }
 
 export interface ConfigurationMismatchProbe {
@@ -526,9 +565,11 @@ export async function runInjectionAuthorityScenario(): Promise<
   });
 }
 
-export type RepositoryOutputCanaryKind = "list" | "search";
+export type RepositoryOutputCanaryKind = "list" | "search" | "inspect";
 
 export type RepositoryPathOutputKind = "search" | "inspect";
+
+export type SecretContentOperationKind = "read" | "propose";
 
 export async function runRepositoryPathOutputScenario(
   kind: RepositoryPathOutputKind,
@@ -581,12 +622,20 @@ export async function runRepositoryPathOutputScenario(
         releasePolicy,
         sources: [],
       });
-      const repository = new VirtualRepository(
+      const artifacts = {
+        claim: `${kind}-mixed-path-action-denied`,
+        expectedDenialReason: "policy_denied",
+        executeSpy: 0,
+        repositoryReads: 0,
+      };
+      const repository = new CountingVirtualRepository(
         {
           [safePath]: kind === "search" ? "ordinary fixture\n" : "before\n",
           [deniedPath]: kind === "search" ? "selected fixture\n" : "before\n",
         },
-        { maximumFiles: 4, maximumFileBytes: 4_096 },
+        (count) => {
+          artifacts.repositoryReads = count;
+        },
       );
       const pack = countCapabilityPack(
         createVirtualRepositoryPack(repository, {
@@ -625,11 +674,7 @@ export async function runRepositoryPathOutputScenario(
         packs: [pack],
         planner: Object.freeze({ plan: () => [] }),
         counters,
-        artifacts: {
-          claim: deniedPath,
-          expectedDenialReason: "context.policy.metadata_denied",
-          executeSpy: 1,
-        },
+        artifacts,
       });
     },
   });
@@ -639,29 +684,120 @@ export async function runRepositoryOutputCanaryScenario(
   kind: RepositoryOutputCanaryKind,
 ): Promise<GateBScenarioResult<AdversarialArtifacts>> {
   const namespace = kind === "list" ? LIST_OUTPUT_NAMESPACE : SEARCH_OUTPUT_NAMESPACE;
+  const resolvedNamespace = kind === "inspect" ? INSPECT_OUTPUT_NAMESPACE : namespace;
   const profileId = `gate-b.repository-output-${kind}`;
-  const reference =
-    kind === "list"
-      ? VIRTUAL_REPOSITORY_REFERENCES.list
-      : VIRTUAL_REPOSITORY_REFERENCES.search;
-  const input: JsonObject =
-    kind === "list"
-      ? { root: "fixtures", maxResults: 16 }
-      : {
-          query: "selected",
-          paths: ["src/safe-search.txt"],
-          maxMatches: 2,
-          maxSnippetBytes: 512,
-          maxOutputBytes: 2_048,
-        };
+  const fixture = repositoryOutputFixture(kind);
   const events: readonly (readonly AgentDriverEvent[])[] = immutable([
-    actionEvents(namespace, 1, reference.packId, reference.operationId, input),
-    outcomeEvents(outcome(namespace, profileId, "gate-b.repository-output.denied")),
+    actionEvents(
+      resolvedNamespace,
+      1,
+      fixture.reference.packId,
+      fixture.reference.operationId,
+      fixture.input,
+    ),
+    outcomeEvents(
+      outcome(resolvedNamespace, profileId, "gate-b.repository-output.denied"),
+    ),
   ]);
   return runInvariantCalibratedScenario({
     scriptId: profileId,
     turnEvents: events,
-    build: (driver) => buildRepositoryOutputComposition(driver, profileId, namespace, kind),
+    build: (driver) =>
+      buildRepositoryOutputComposition(
+        driver,
+        profileId,
+        resolvedNamespace,
+        kind,
+        fixture,
+      ),
+  });
+}
+
+/**
+ * Executes a safe-path repository action whose returned content is secret.
+ * The fixture itself never stores the secret in its returned artifacts; tests
+ * independently rebuild the canary and scan every persisted/renderable surface.
+ */
+export async function runSafeInputSecretContentScenario(
+  kind: SecretContentOperationKind,
+): Promise<GateBScenarioResult<AdversarialArtifacts>> {
+  const namespace =
+    kind === "read" ? SECRET_CONTENT_READ_NAMESPACE : SECRET_CONTENT_PROPOSE_NAMESPACE;
+  const profileId = `gate-b.safe-input-secret-content-${kind}`;
+  const path = `src/reviewed-${kind}.txt`;
+  const secret = createCredentialCanaryCorpus().raw;
+  const reference =
+    kind === "read"
+      ? VIRTUAL_REPOSITORY_REFERENCES.read
+      : VIRTUAL_REPOSITORY_REFERENCES.patch;
+  const input: JsonObject =
+    kind === "read"
+      ? { path, startLine: 1, endLine: 1, maxBytes: 4_096 }
+      : { path, replacement: "ordinary replacement\n" };
+  const events: readonly (readonly AgentDriverEvent[])[] = immutable([
+    actionEvents(namespace, 1, reference.packId, reference.operationId, input),
+    outcomeEvents(outcome(namespace, profileId, "gate-b.secret-content.denied")),
+  ]);
+
+  return runInvariantCalibratedScenario({
+    scriptId: profileId,
+    turnEvents: events,
+    build: (driver) => {
+      const counters = emptyCounters();
+      const artifacts = {
+        claim: `${kind}-safe-input-secret-content-denied`,
+        expectedDenialReason: "context.release.secret_denied",
+        executeSpy: 1,
+        repositoryReads: 0,
+      };
+      const repository = new CountingVirtualRepository(
+        { [path]: secret },
+        (count) => {
+          artifacts.repositoryReads = count;
+        },
+      );
+      const pack = countCapabilityPack(
+        createVirtualRepositoryPack(repository, {
+          maximumListResults: 8,
+          maximumReadBytes: 4_096,
+          maximumPatchBytes: 8_192,
+        }),
+        counters,
+      );
+      const snapshot = compileGateBPolicy({
+        namespace,
+        kind: "coding",
+        actionPolicySource: CODING_ACTION_POLICY,
+      });
+      const evaluator = createEvaluator(snapshot, namespace);
+      const brokerFactory = createUnifiedBrokerFactory({
+        snapshot,
+        evaluator,
+        releasePolicy: createReleasePolicy(`gate-b.secret-content-${kind}`),
+        sources: [],
+      });
+      const profile = baseActionProfile({
+        profileId,
+        snapshot,
+        brokerConfiguration: brokerFactory.configurationDescriptor,
+        packs: [pack],
+        maximumTurns: 2,
+        maximumActions: 1,
+      });
+      return createRuntimeComposition({
+        namespace,
+        driver,
+        profile,
+        objective: safeObjective(profileId, "gate-b.secret-content.test"),
+        snapshot,
+        evaluator,
+        brokerFactory,
+        packs: [pack],
+        planner: Object.freeze({ plan: () => [] }),
+        counters,
+        artifacts,
+      });
+    },
   });
 }
 
@@ -919,17 +1055,21 @@ function buildRepositoryOutputComposition(
   profileId: string,
   namespace: number,
   kind: RepositoryOutputCanaryKind,
+  fixture: RepositoryOutputFixture,
 ) {
   const counters = emptyCounters();
-  const canary = createCredentialCanaryCorpus();
-  const files =
-    kind === "list"
-      ? { [["fixtures/.env", ".", canary.raw].join("")]: "safe fixture\n" }
-      : { "src/safe-search.txt": ["selected value ", canary.raw].join("") };
-  const repository = new VirtualRepository(files, {
-    maximumFiles: 4,
-    maximumFileBytes: 4_096,
-  });
+  const artifacts = {
+    claim: `${kind}-output-path-broker-denied`,
+    expectedDenialReason: "context.policy.metadata_denied",
+    executeSpy: 1,
+    repositoryReads: 0,
+  };
+  const repository = new CountingVirtualRepository(
+    fixture.files,
+    (count) => {
+      artifacts.repositoryReads = count;
+    },
+  );
   const pack = countCapabilityPack(
     createVirtualRepositoryPack(repository, {
       maximumListResults: 16,
@@ -940,13 +1080,18 @@ function buildRepositoryOutputComposition(
       maximumSearchQueryBytes: 128,
       maximumSearchSnippetBytes: 1_024,
       maximumSearchOutputBytes: 4_096,
+      maximumDiffBytes: 16_384,
+      maximumDiffPaths: 8,
+      maximumDiffHunks: 8,
+      maximumDiffLines: 128,
+      maximumDiffOutputBytes: 32_768,
     }),
     counters,
   );
   const snapshot = compileGateBPolicy({
     namespace,
     kind: "coding",
-    actionPolicySource: CODING_ACTION_POLICY,
+    actionPolicySource: PERMISSIVE_REPOSITORY_ACTION_POLICY,
   });
   const evaluator = createEvaluator(snapshot, namespace);
   const releasePolicy = createReleasePolicy(`gate-b.repository-output-${kind}`);
@@ -975,12 +1120,62 @@ function buildRepositoryOutputComposition(
     packs: [pack],
     planner: Object.freeze({ plan: () => [] }),
     counters,
-    artifacts: {
-      claim: `${kind}-output-secret-denied`,
-      expectedDenialReason: "context.release.secret_denied",
-      executeSpy: 1,
-    },
+    artifacts,
   });
+}
+
+interface RepositoryOutputFixture {
+  readonly deniedPath: string;
+  readonly files: Readonly<Record<string, string>>;
+  readonly input: JsonObject;
+  readonly reference: (typeof VIRTUAL_REPOSITORY_REFERENCES)[keyof typeof VIRTUAL_REPOSITORY_REFERENCES];
+}
+
+function repositoryOutputFixture(
+  kind: RepositoryOutputCanaryKind,
+): RepositoryOutputFixture {
+  const deniedPath = `fixtures/.env.gate-b-${kind}-output-marker`;
+  const safePath = "fixtures/safe.txt";
+  if (kind === "list") {
+    return {
+      deniedPath,
+      files: { [deniedPath]: "ordinary fixture\n" },
+      input: { root: "fixtures", maxResults: 16 },
+      reference: VIRTUAL_REPOSITORY_REFERENCES.list,
+    };
+  }
+  if (kind === "search") {
+    return {
+      deniedPath,
+      files: {
+        [safePath]: "ordinary fixture\n",
+        [deniedPath]: "selected fixture\n",
+      },
+      input: {
+        query: "selected",
+        paths: [safePath, deniedPath],
+        maxMatches: 2,
+        maxSnippetBytes: 512,
+        maxOutputBytes: 2_048,
+      },
+      reference: VIRTUAL_REPOSITORY_REFERENCES.search,
+    };
+  }
+  return {
+    deniedPath,
+    files: {
+      [safePath]: "before\n",
+      [deniedPath]: "before\n",
+    },
+    input: {
+      patch: `${wholeFilePatch(deniedPath, "before\n", "after\n")}${wholeFilePatch(
+        safePath,
+        "before\n",
+        "after\n",
+      )}`,
+    },
+    reference: VIRTUAL_REPOSITORY_REFERENCES.inspectDiff,
+  };
 }
 
 function baseActionProfile(input: {

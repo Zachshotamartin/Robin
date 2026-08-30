@@ -37,6 +37,7 @@ export {
   runRepositoryOutputCanaryScenario,
   runRepositoryPathOutputScenario,
   runRepositoryPathPolicyScenario,
+  runSafeInputSecretContentScenario,
   runSourceDenialScenario,
   runSplitSecretAssemblyScenario,
 } from "./adversarial-scenarios.js";
@@ -45,6 +46,7 @@ export type {
   ConfigurationMismatchProbe,
   RepositoryOutputCanaryKind,
   RepositoryPathOutputKind,
+  SecretContentOperationKind,
   SourceDenialKind,
 } from "./adversarial-scenarios.js";
 

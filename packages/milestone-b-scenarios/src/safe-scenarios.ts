@@ -50,7 +50,8 @@ const GENERIC_ACTION_POLICY = `policy "allow-gate-b-transform" priority 500 {
 `;
 
 export const CODING_ACTION_POLICY = `policy "deny-secret-repository-actions" priority 1000 {
-  when action.pack == "coding.virtual-repository" and repo.path matches "**/.env*"
+  when action.pack == "coding.virtual-repository"
+    and (repo.path matches "**/.env*" or repo.input_paths matches "**/.env*")
   deny
   reason "Secret-bearing repository paths cannot be operated on"
 }
