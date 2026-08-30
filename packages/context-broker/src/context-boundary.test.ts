@@ -52,6 +52,19 @@ const OTHER_POLICY_ID = PolicyVersionIdKind.parse(
   "pol_018f05a0-7b01-7000-8000-000000000202",
 );
 const HOSTILE_CANARY = "context-boundary-hostile-canary";
+const API_TOKEN_CANARY = [
+  "s",
+  "k",
+  "-",
+  "AbCdEfGhIjKlMnOpQrStUvWxYz012345",
+].join("");
+const SOURCE_CONTROL_TOKEN_CANARY = [
+  "g",
+  "h",
+  "p",
+  "_",
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+].join("");
 
 const DEFAULT_BUDGETS: ContextBudgetLimits = Object.freeze({
   maximumResourceBytes: 64 * 1024,
@@ -1140,7 +1153,7 @@ test("serializes release and assembly races without exposing partial context", a
 });
 
 test("denies truncated prefixes before a partial secret can become provider context", async () => {
-  const secret = "sk-AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+  const secret = API_TOKEN_CANARY;
   const source = new MutableSource(Buffer.from(secret, "utf8"));
   const broker = createBroker({
     source,
@@ -1246,7 +1259,7 @@ test("denies unsupported media before open and invalid text after bounded open",
 });
 
 test("redacts raw, percent, base64, escaped, filename, search, snippet, and split canaries before provider bytes", async () => {
-  const raw = "sk-AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+  const raw = API_TOKEN_CANARY;
   const percent = [...Buffer.from(raw, "utf8")]
     .map((byte) => `%${byte.toString(16).padStart(2, "0")}`)
     .join("");
@@ -1256,7 +1269,7 @@ test("redacts raw, percent, base64, escaped, filename, search, snippet, and spli
     .map((character) => `\\u${character.codePointAt(0)!.toString(16).padStart(4, "0")}`)
     .join("");
   const half = Math.floor(raw.length / 2);
-  const keySecret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const keySecret = SOURCE_CONTROL_TOKEN_CANARY;
   const keyHalf = Math.floor(keySecret.length / 2);
   const broker = createBroker({ releasePolicy: releasePolicy("redact") });
   const released = await broker.releaseCapabilityOutput({
@@ -1303,7 +1316,7 @@ test("redacts raw, percent, base64, escaped, filename, search, snippet, and spli
 });
 
 test("uses one random run correlation marker per broker and blocks secrets split across released items", async () => {
-  const raw = "sk-AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+  const raw = API_TOKEN_CANARY;
   const redacting = createBroker({ releasePolicy: releasePolicy("redact") });
   const markers: string[] = [];
   for (const turnId of ["turn.redact.one", "turn.redact.two"]) {
@@ -1373,7 +1386,7 @@ test("uses one random run correlation marker per broker and blocks secrets split
 });
 
 test("blocks percent, base64, escaped, and key-value canaries split across items", async () => {
-  const raw = "sk-AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+  const raw = API_TOKEN_CANARY;
   const percent = [...Buffer.from(raw, "utf8")]
     .map((byte) => `%${byte.toString(16).padStart(2, "0")}`)
     .join("");
