@@ -32,6 +32,10 @@ test("npm pack dry-run includes the bin and bounded objective testdata", async (
   assert.equal(paths.has("testdata/coding-objective.json"), true);
   assert.equal(paths.has("testdata/strict.guard"), true);
   assert.equal(paths.has("testdata/policy-cases-v1.json"), true);
+  assert.equal(paths.has("testdata/allow-pure.guard"), true);
+  assert.equal(paths.has("testdata/allow-pure-policy-cases-v1.json"), true);
+  assert.equal(paths.has("testdata/deny-pure.guard"), true);
+  assert.equal(paths.has("testdata/deny-pure-policy-cases-v1.json"), true);
   assert.equal(paths.has("testdata/policy-action.json"), true);
   assert.equal(paths.has("testdata/policy-actions-v1.json"), true);
 });

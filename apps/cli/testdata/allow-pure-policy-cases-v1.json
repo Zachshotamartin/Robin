@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "policyContentHash": "cc26b15a29b9331e789db47a2350ddebf7c5c2fd59d4679cd2919f7aeb353869",
+  "cases": [
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-pure-match",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000b031",
+        "capabilityPackId": "fixture",
+        "capabilityPackVersion": 1,
+        "operationId": "read",
+        "operationVersion": 1,
+        "subject": { "kind": "agent" },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "internal"
+        },
+        "environment": {
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "fixture"
+        },
+        "request": { "intent": "inspect" },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-pure",
+      "expectedReason": "Pure actions are allowed."
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-pure-near-miss-default-deny",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000b032",
+        "capabilityPackId": "fixture",
+        "capabilityPackVersion": 1,
+        "operationId": "read",
+        "operationVersion": 1,
+        "subject": { "kind": "agent" },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "internal"
+        },
+        "environment": {
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "fixture"
+        },
+        "request": { "intent": "inspect" },
+        "normalizedInput": {},
+        "sideEffectClass": "external",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null,
+      "expectedReason": "No policy matched; the immutable snapshot default effect applies."
+    }
+  ]
+}

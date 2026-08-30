@@ -131,7 +131,7 @@ test("source-installed bin checks, formats, and tests policies", async () => {
   assert.equal(tested.code, 0);
   assert.equal(tested.stderr, "");
   const testedPayload = JSON.parse(tested.stdout) as Record<string, unknown>;
-  assert.equal(testedPayload["passed"], 30);
+  assert.equal(testedPayload["passed"], 31);
   assert.equal(testedPayload["failed"], 0);
 });
 

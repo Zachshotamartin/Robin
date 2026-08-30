@@ -1081,6 +1081,37 @@
       },
       "expectedEffect": "deny",
       "expectedWinningPolicyName": "deny-external-side-effects"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-public-missing-optional-attributes",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000001f",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "minimal_read",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {},
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-read-only-sandboxed-actions"
     }
   ]
 }

@@ -172,7 +172,7 @@
     },
     {
       "schemaVersion": 1,
-      "caseId": "deny-overrides-eligible-read",
+      "caseId": "restricted-read-deny",
       "action": {
         "schemaVersion": 1,
         "actionId": "act_018f05a0-7b01-7000-8000-000000000509",

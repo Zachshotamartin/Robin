@@ -38,6 +38,31 @@ const POLICY_ID = "pol_018f05a0-7b01-7000-8000-000000000091";
 const POLICY_ID_2 = "pol_018f05a0-7b01-7000-8000-000000000092";
 const RUN_ID = RunIdKind.parse("run_018f05a0-7b01-7000-8000-000000000093");
 const TOKEN = "test-run-correlation-token-0001";
+const EXPECTED_STRICT_POLICY_CONTENT_HASH =
+  "0166089a357eb392aa21c1229472e7568313a47b471f8887dbcfee09536304b2";
+const MAXIMUM_STRICT_POLICY_CASES = 31;
+const DEFAULT_POLICY_REASON =
+  "No policy matched; the immutable snapshot default effect applies.";
+const GENERIC_COMBINING_TEST =
+  "deny overrides higher-priority approval and allow; tie explanations are stable";
+const FAIL_CLOSED_ROLLOUT_BASELINE = `policy "baseline-no-installed-policy" priority 1 {
+  when action.pack == "guard.baseline-no-installed-policy"
+  deny
+  reason "No reviewed policy was installed in the fail-closed baseline."
+}
+`;
+const OPERATIONS_PLAN_POLICY_CATEGORIES = Object.freeze([
+  "matching example per rule",
+  "near miss per rule",
+  "deny precedence over allow",
+  "approval precedence over allow",
+  "no-match default",
+  "equal-priority deterministic order",
+  "missing optional attributes",
+  "canonically equivalent paths and commands",
+  "policy snapshot immutability",
+  "old action schema compatibility or explicit failure",
+] as const);
 
 const PACK_CATALOG = createPolicyAttributeCatalog({
   catalogId: "fixture.coding",
@@ -490,7 +515,7 @@ policy "exists-path" priority 40 {
   assert.equal(present.winningPolicyName, "exists-path");
 });
 
-test("deny overrides higher-priority approval and allow; tie explanations are stable", () => {
+test(GENERIC_COMBINING_TEST, () => {
   const source = `policy "z-allow" priority 999 {
   when action.side_effect == "external"
   allow
@@ -795,31 +820,384 @@ test("strict versioned case corpus parser binds actions and snapshot hash", () =
   );
 });
 
-test("checked-in policy-v1 security table contains and passes at least 25 cases", async () => {
-  const fixture: unknown = JSON.parse(
-    await readFile(new URL("../testdata/policy-cases-v1.json", import.meta.url), "utf8"),
+test("production strict policy is bound to its exact reviewed corpus", async () => {
+  const { corpus, snapshot } = await loadStrictPolicyReview();
+  assert.equal(snapshot.contentHash, EXPECTED_STRICT_POLICY_CONTENT_HASH);
+  assert.equal(corpus.schemaVersion, 1);
+  assert.equal(corpus.policyContentHash, EXPECTED_STRICT_POLICY_CONTENT_HASH);
+  assert.equal(corpus.cases.length, MAXIMUM_STRICT_POLICY_CASES);
+  assert.equal(
+    corpus.cases.at(-1)?.name,
+    "allow-public-missing-optional-attributes",
   );
-  const corpus = parsePolicyCaseCorpus(fixture);
-  assert.ok(corpus.cases.length >= 25);
-  const strictSource = await readFile(
-    new URL("../../../policies/strict.guard", import.meta.url),
-    "utf8",
+  const run = runPolicyCaseCorpus(snapshot, corpus, TOKEN);
+  assert.equal(run.failed, 0, JSON.stringify(run.cases.filter((entry) => !entry.passed)));
+  assert.equal(run.passed, MAXIMUM_STRICT_POLICY_CASES);
+});
+
+test("production strict policy has a reviewed Operations Plan section 8.7 matrix", async () => {
+  const { corpus, fixture, snapshot, source } = await loadStrictPolicyReview();
+  assert.deepEqual(
+    snapshot.policies.map((policy) => ({
+      name: policy.rule.name.value,
+      priority: policy.rule.priority.value,
+      effect: policy.rule.effect.value,
+    })),
+    [
+      { name: "deny-classified-context", priority: 1000, effect: "deny" },
+      { name: "deny-networked-actions", priority: 900, effect: "deny" },
+      { name: "deny-external-side-effects", priority: 800, effect: "deny" },
+      {
+        name: "approve-local-mutation",
+        priority: 700,
+        effect: "require_approval",
+      },
+      {
+        name: "allow-read-only-sandboxed-actions",
+        priority: 600,
+        effect: "allow",
+      },
+    ],
   );
-  const result = compilePolicySnapshot(
+
+  const comparisonSignatures = snapshot.policies.map((policy) => ({
+    name: policy.rule.name.value,
+    condition:
+      policy.rule.condition.kind === "logical"
+        ? policy.rule.condition.operator
+        : policy.rule.condition.kind,
+    comparisons: policy.comparisons.map((comparison) => ({
+      attribute: comparison.attribute.name,
+      operator: comparison.expression.operator,
+      expected:
+        comparison.expression.right.kind === "list"
+          ? comparison.expression.right.items.map((item) =>
+              item.kind === "list" ? "nested-list" : item.value,
+            )
+          : comparison.expression.right.value,
+    })),
+  }));
+  assert.deepEqual(comparisonSignatures, [
     {
-      policyVersionId: POLICY_ID,
-      source: strictSource,
+      name: "deny-classified-context",
+      condition: "comparison",
+      comparisons: [
+        { attribute: "resource.classification", operator: "!=", expected: "public" },
+      ],
+    },
+    {
+      name: "deny-networked-actions",
+      condition: "comparison",
+      comparisons: [
+        {
+          attribute: "environment.network_profile",
+          operator: "!=",
+          expected: "disabled",
+        },
+      ],
+    },
+    {
+      name: "deny-external-side-effects",
+      condition: "comparison",
+      comparisons: [
+        { attribute: "action.side_effect", operator: "==", expected: "external" },
+      ],
+    },
+    {
+      name: "approve-local-mutation",
+      condition: "comparison",
+      comparisons: [
+        {
+          attribute: "action.side_effect",
+          operator: "in",
+          expected: ["local_reversible", "local_irreversible"],
+        },
+      ],
+    },
+    {
+      name: "allow-read-only-sandboxed-actions",
+      condition: "and",
+      comparisons: [
+        { attribute: "action.side_effect", operator: "==", expected: "none" },
+        { attribute: "environment.sandboxed", operator: "==", expected: true },
+      ],
+    },
+  ]);
+
+  const casesByName = new Map(corpus.cases.map((entry) => [entry.name, entry]));
+  const ruleCases = [
+    ["deny-classified-context", "deny-internal", "allow-public-pure"],
+    ["deny-networked-actions", "deny-outbound-network", "allow-public-pure"],
+    ["deny-external-side-effects", "deny-external", "approve-reversible"],
+    ["approve-local-mutation", "approve-reversible", "allow-public-pure"],
+    [
+      "allow-read-only-sandboxed-actions",
+      "allow-public-pure",
+      "default-deny-unsandboxed-transform",
+    ],
+  ] as const;
+  for (const [ruleName, matchingName, nearMissName] of ruleCases) {
+    const matching = casesByName.get(matchingName);
+    const nearMiss = casesByName.get(nearMissName);
+    assert.ok(matching, `${ruleName} requires matching case ${matchingName}`);
+    assert.ok(nearMiss, `${ruleName} requires near miss ${nearMissName}`);
+    assert.equal(
+      evaluatePolicySnapshot(snapshot, matching.action, {
+        secretCorrelationToken: TOKEN,
+      }).matchedPolicyNames.includes(ruleName),
+      true,
+    );
+    const nearMissDecision = evaluatePolicySnapshot(snapshot, nearMiss.action, {
+      secretCorrelationToken: TOKEN,
+    });
+    const evaluations = nearMissDecision.trace["evaluations"] as readonly Readonly<
+      Record<string, unknown>
+    >[];
+    assert.equal(
+      evaluations.find((entry) => entry["policyName"] === ruleName)?.["result"],
+      "false",
+      `${ruleName} near miss must make that exact rule false`,
+    );
+  }
+
+  const denyOverlap = casesByName.get("deny-internal");
+  assert.ok(denyOverlap);
+  const denyDecision = evaluatePolicySnapshot(snapshot, denyOverlap.action, {
+    secretCorrelationToken: TOKEN,
+  });
+  assert.equal(denyDecision.effect, "deny");
+  assert.deepEqual(denyDecision.matchedPolicyNames, [
+    "deny-classified-context",
+    "allow-read-only-sandboxed-actions",
+  ]);
+
+  // Exact comparison signatures above prove the approval set contains only
+  // local_* while the allow rule requires side_effect == none. If either
+  // predicate changes, this structural exception fails and must become a real
+  // file-owned overlap case. GENERIC_COMBINING_TEST owns engine precedence.
+  assert.equal(
+    corpus.cases.some((entry) => {
+      const matched = evaluatePolicySnapshot(snapshot, entry.action, {
+        secretCorrelationToken: TOKEN,
+      }).matchedPolicyNames;
+      return matched.includes("approve-local-mutation") &&
+        matched.includes("allow-read-only-sandboxed-actions");
+    }),
+    false,
+  );
+
+  const noMatch = casesByName.get("default-deny-unsandboxed-transform");
+  assert.ok(noMatch);
+  const noMatchDecision = evaluatePolicySnapshot(snapshot, noMatch.action, {
+    secretCorrelationToken: TOKEN,
+  });
+  assert.equal(noMatchDecision.effect, "deny");
+  assert.equal(noMatchDecision.winningPolicyName, null);
+  assert.equal(noMatchDecision.reason, DEFAULT_POLICY_REASON);
+
+  const priorities = snapshot.policies.map((policy) => policy.rule.priority.value);
+  assert.deepEqual(priorities, [1000, 900, 800, 700, 600]);
+  assert.equal(new Set(priorities).size, snapshot.policies.length);
+
+  const missingOptional = casesByName.get(
+    "allow-public-missing-optional-attributes",
+  );
+  assert.ok(missingOptional);
+  assert.deepEqual(missingOptional.action.subject, { kind: "agent" });
+  assert.deepEqual(missingOptional.action.request, {});
+  assert.deepEqual(Object.keys(missingOptional.action.environment).sort(), [
+    "networkProfile",
+    "sandboxed",
+    "trustLevel",
+  ]);
+  assert.deepEqual(
+    snapshot.attributeCatalogs.attributes
+      .filter((attribute) => attribute.optional)
+      .map((attribute) => attribute.name),
+    [
+      "environment.profile_id",
+      "request.estimated_cost",
+      "request.intent",
+      "request.provenance",
+      "subject.compatibility_tier",
+      "subject.driver_id",
+    ],
+  );
+  assert.equal(
+    evaluatePolicySnapshot(snapshot, missingOptional.action, {
+      secretCorrelationToken: TOKEN,
+    }).effect,
+    "allow",
+  );
+
+  // The exact policy uses only scalar base attributes; it cannot distinguish
+  // path or command spellings. Canonical-path semantics remain covered by the
+  // policy-engine tests "anchored path globs are case-sensitive and separator-
+  // independent" and "canonical-path list matches are existential, bounded by
+  // presence, and secret-safe". Command equivalence is structurally irrelevant.
+  assert.equal(
+    snapshot.policies
+      .flatMap((policy) => policy.comparisons)
+      .some((comparison) => comparison.attribute.matchKind === "canonical_path"),
+    false,
+  );
+  assert.equal(source.includes("repo."), false);
+  assert.equal(source.includes("process."), false);
+
+  assert.equal(Object.isFrozen(snapshot), true);
+  assert.equal(Object.isFrozen(snapshot.policies), true);
+  for (const policy of snapshot.policies) {
+    assert.equal(Object.isFrozen(policy), true);
+    assert.equal(Object.isFrozen(policy.rule), true);
+    assert.equal(Object.isFrozen(policy.comparisons), true);
+  }
+  assert.equal(
+    Reflect.set(
+      snapshot as unknown as Record<string, unknown>,
+      "defaultEffect",
+      "allow",
+    ),
+    false,
+  );
+  assert.equal(snapshot.defaultEffect, "deny");
+
+  const legacyFixture = structuredClone(fixture) as {
+    cases: Array<{ action: Record<string, unknown> }>;
+  };
+  assert.ok(legacyFixture.cases[0]);
+  legacyFixture.cases[0].action["schemaVersion"] = 0;
+  assert.throws(() =>
+    parsePolicyCaseCorpus(legacyFixture, {
+      maximumBytes: 128 * 1024,
+      maximumCases: MAXIMUM_STRICT_POLICY_CASES,
+    }),
+  );
+
+  const reviewedCoverage = [
+    ["matching example per rule", "covered", "five mapped corpus cases"],
+    ["near miss per rule", "covered", "five mapped false-rule traces"],
+    ["deny precedence over allow", "covered", "deny-internal"],
+    [
+      "approval precedence over allow",
+      "structurally inapplicable",
+      `disjoint side-effect predicates; ${GENERIC_COMBINING_TEST}`,
+    ],
+    ["no-match default", "covered", "default-deny-unsandboxed-transform"],
+    [
+      "equal-priority deterministic order",
+      "structurally inapplicable",
+      `unique [1000,900,800,700,600] priorities; ${GENERIC_COMBINING_TEST}`,
+    ],
+    [
+      "missing optional attributes",
+      "covered",
+      "allow-public-missing-optional-attributes",
+    ],
+    [
+      "canonically equivalent paths and commands",
+      "structurally inapplicable",
+      "no canonical-path/process predicate; named policy-engine path tests",
+    ],
+    ["policy snapshot immutability", "covered", "direct deep-freeze assertions"],
+    [
+      "old action schema compatibility or explicit failure",
+      "covered",
+      "schemaVersion 0 corpus action rejected",
+    ],
+  ] as const;
+  assert.deepEqual(
+    reviewedCoverage.map(([category]) => category),
+    OPERATIONS_PLAN_POLICY_CATEGORIES,
+  );
+});
+
+test("production strict policy rollout has exact change counts from the fail-closed baseline", async () => {
+  const { corpus, snapshot: candidate } = await loadStrictPolicyReview();
+  const compiled = compilePolicySnapshot(
+    {
+      policyVersionId: POLICY_ID_2,
+      source: FAIL_CLOSED_ROLLOUT_BASELINE,
       sourceId: "policies/strict.guard",
       defaultEffect: "deny",
     },
     {},
     BASE_POLICY_ATTRIBUTE_CATALOG_SET,
   );
-  assert.equal(result.ok, true, result.ok ? "" : JSON.stringify(result.diagnostics));
-  if (!result.ok) throw new Error("unreachable strict policy compile failure");
-  const run = runPolicyCaseCorpus(result.snapshot, corpus, TOKEN);
-  assert.equal(run.failed, 0, JSON.stringify(run.cases.filter((entry) => !entry.passed)));
-  assert.equal(run.passed, corpus.cases.length);
+  assert.equal(
+    compiled.ok,
+    true,
+    compiled.ok ? "" : JSON.stringify(compiled.diagnostics),
+  );
+  if (!compiled.ok) throw new Error("unreachable strict baseline compile failure");
+  const baseline = compiled.snapshot;
+  assert.equal(candidate.contentHash, EXPECTED_STRICT_POLICY_CONTENT_HASH);
+  assert.deepEqual(
+    baseline.policies.map((policy) => ({
+      name: policy.rule.name.value,
+      priority: policy.rule.priority.value,
+      effect: policy.rule.effect.value,
+      comparisons: policy.comparisons.map((comparison) => ({
+        attribute: comparison.attribute.name,
+        operator: comparison.expression.operator,
+        expected:
+          comparison.expression.right.kind === "string"
+            ? comparison.expression.right.value
+            : null,
+      })),
+    })),
+    [
+      {
+        name: "baseline-no-installed-policy",
+        priority: 1,
+        effect: "deny",
+        comparisons: [
+          {
+            attribute: "action.pack",
+            operator: "==",
+            expected: "guard.baseline-no-installed-policy",
+          },
+        ],
+      },
+    ],
+  );
+  for (const entry of corpus.cases) {
+    const baselineDecision = evaluatePolicySnapshot(baseline, entry.action, {
+      secretCorrelationToken: "strict-policy-baseline-token-0001",
+    });
+    assert.equal(baselineDecision.effect, "deny");
+    assert.equal(baselineDecision.winningPolicyName, null);
+    assert.deepEqual(baselineDecision.matchedPolicyNames, []);
+  }
+  const simulation = simulatePolicyPage({
+    from: baseline,
+    to: candidate,
+    actions: corpus.cases.map((entry) => entry.action),
+    secretCorrelationToken: "strict-policy-simulation-token-0001",
+    pageSize: 1000,
+  });
+  assert.deepEqual(simulation.counts, {
+    newly_allowed: 8,
+    newly_denied: 0,
+    newly_approval_gated: 4,
+    approval_removed: 0,
+    same_effect_different_explanation: 19,
+    unchanged: 0,
+    evaluation_error: 0,
+  });
+  assert.equal(simulation.entries.length, MAXIMUM_STRICT_POLICY_CASES);
+  assert.equal(simulation.nextCursor, null);
+  const newlyAllowed = simulation.entries.filter(
+    (entry) => entry.category === "newly_allowed",
+  );
+  assert.equal(newlyAllowed.length, 8);
+  for (const entry of newlyAllowed) {
+    assert.equal(
+      corpus.cases.find(
+        (candidate) => candidate.action.actionId === entry.actionId,
+      )?.action.sideEffectClass,
+      "none",
+    );
+  }
 });
 
 test("seeded generated decisions match an independent three-valued reference", async () => {
@@ -895,6 +1273,40 @@ test("seeded generated decisions match an independent three-valued reference", a
   }
   assert.ok(evaluatedCases >= 500);
 });
+
+async function loadStrictPolicyReview() {
+  const source = await readFile(
+    new URL("../../../policies/strict.guard", import.meta.url),
+    "utf8",
+  );
+  const compiled = compilePolicySnapshot(
+    {
+      policyVersionId: POLICY_ID,
+      source,
+      sourceId: "policies/strict.guard",
+      defaultEffect: "deny",
+    },
+    {},
+    BASE_POLICY_ATTRIBUTE_CATALOG_SET,
+  );
+  assert.equal(
+    compiled.ok,
+    true,
+    compiled.ok ? "" : JSON.stringify(compiled.diagnostics),
+  );
+  if (!compiled.ok) throw new Error("unreachable strict policy compile failure");
+  const fixture: unknown = JSON.parse(
+    await readFile(
+      new URL("../testdata/policy-cases-v1.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const corpus = parsePolicyCaseCorpus(fixture, {
+    maximumBytes: 128 * 1024,
+    maximumCases: MAXIMUM_STRICT_POLICY_CASES,
+  });
+  return Object.freeze({ corpus, fixture, snapshot: compiled.snapshot, source });
+}
 
 function compile(
   source: string,
