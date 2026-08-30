@@ -1,0 +1,1213 @@
+{
+  "corpusSchemaVersion": 1,
+  "eventSchemaVersion": 1,
+  "events": [
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000100",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "RunCreated",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "objective": {
+          "schemaVersion": 1,
+          "profileId": "profile:synthetic",
+          "profileVersion": 1,
+          "objectiveType": "synthetic.transform",
+          "objectiveTypeVersion": 1,
+          "payload": {
+            "input": "alpha"
+          },
+          "submittedBy": {
+            "kind": "user",
+            "id": "user:fixture"
+          },
+          "submittedAt": "2026-08-30T12:00:00.000Z"
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000101",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "TaskProfilePinned",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "taskProfile": {
+          "schemaVersion": 1,
+          "profileId": "profile:synthetic",
+          "profileVersion": 1,
+          "objectiveSchema": {
+            "schemaId": "schema:objective",
+            "schemaVersion": 1,
+            "document": {
+              "type": "object"
+            }
+          },
+          "driverProfile": {
+            "componentId": "driver:scripted",
+            "componentVersion": 1,
+            "configuration": {}
+          },
+          "modelBindings": [],
+          "contextSources": [],
+          "capabilityPacks": [],
+          "policyProfile": {
+            "componentId": "policy:default",
+            "componentVersion": 1,
+            "configuration": {}
+          },
+          "outcomeSchema": {
+            "schemaId": "schema:outcome",
+            "schemaVersion": 1,
+            "document": {
+              "type": "object"
+            }
+          },
+          "budgetPolicy": {
+            "maxTurns": 4,
+            "maxActions": 2,
+            "maxElapsedMs": 10000,
+            "maxInputBytes": 10000,
+            "maxOutputBytes": 10000,
+            "extensions": {}
+          },
+          "evidenceMode": "ephemeral_metadata",
+          "evaluationProfile": null
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000102",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "RunStarted",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "startedAt": "2026-08-30T12:00:00.000Z"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000103",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "RunIntentAppended",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "intentType": "follow_up",
+        "intentVersion": 1,
+        "payload": {
+          "instruction": "continue"
+        },
+        "submittedBy": {
+          "kind": "user",
+          "id": "user:fixture"
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000104",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "RunPaused",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "reason": "operator"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000105",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "RunResumed",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "resumedAt": "2026-08-30T12:00:01.000Z"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000106",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "CancellationRequested",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "reason": null
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000107",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "RunCancelled",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "result": {
+          "schemaVersion": 1,
+          "runId": "run_018f05a0-7b01-7000-8000-000000000001",
+          "status": "cancelled",
+          "finishedAt": "2026-08-30T12:00:01.000Z",
+          "reason": "operator"
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000108",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "RunFailed",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "result": {
+          "schemaVersion": 1,
+          "runId": "run_018f05a0-7b01-7000-8000-000000000001",
+          "status": "failed",
+          "finishedAt": "2026-08-30T12:00:01.000Z",
+          "error": {
+            "errorId": "err_018f05a0-7b01-7000-8000-000000000009",
+            "code": "action_failed",
+            "message": "The persisted fixture failed safely.",
+            "retry": "terminal",
+            "details": {
+              "category": "fixture"
+            }
+          }
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000109",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "RunCompleted",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "result": {
+          "schemaVersion": 1,
+          "runId": "run_018f05a0-7b01-7000-8000-000000000001",
+          "status": "completed",
+          "finishedAt": "2026-08-30T12:00:01.000Z",
+          "outcome": {
+            "schemaVersion": 1,
+            "outcomeId": "outcome:alpha",
+            "profileId": "profile:synthetic",
+            "profileVersion": 1,
+            "outcomeType": "synthetic.result",
+            "outcomeTypeVersion": 1,
+            "payload": {
+              "answer": "alpha"
+            },
+            "evidence": [
+              {
+                "kind": "observation",
+                "referenceId": "observation:alpha",
+                "contentHash": "sha256:result"
+              }
+            ],
+            "proposedAt": "2026-08-30T12:00:01.000Z"
+          }
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000010a",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "RunOrphaned",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "result": {
+          "schemaVersion": 1,
+          "runId": "run_018f05a0-7b01-7000-8000-000000000001",
+          "status": "orphaned",
+          "finishedAt": "2026-08-30T12:00:01.000Z",
+          "error": {
+            "errorId": "err_018f05a0-7b01-7000-8000-000000000009",
+            "code": "action_failed",
+            "message": "The persisted fixture failed safely.",
+            "retry": "terminal",
+            "details": {
+              "category": "fixture"
+            }
+          }
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000010b",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "AgentDriverStarted",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "driverProfileId": "driver:scripted",
+        "driverProfileVersion": 1,
+        "driverFingerprint": "sha256:driver"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000010c",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "AgentAttemptStarted",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "attemptId": "att_018f05a0-7b01-7000-8000-000000000003",
+        "turn": 1
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000010d",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "AgentContentCompleted",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "attemptId": "att_018f05a0-7b01-7000-8000-000000000003",
+        "content": [
+          {
+            "schemaVersion": 1,
+            "blockId": "block:alpha",
+            "modality": "text",
+            "mediaType": "text/plain; charset=utf-8",
+            "byteLength": 5,
+            "contentHash": "sha256:alpha",
+            "classification": "internal",
+            "provenance": {
+              "source": {
+                "schemaVersion": 1,
+                "scheme": "fixture",
+                "sourceId": "source:synthetic",
+                "locator": {
+                  "record": "alpha"
+                },
+                "mediaType": "text/plain",
+                "classification": "internal"
+              },
+              "producer": {
+                "kind": "context_source",
+                "id": "source:synthetic"
+              },
+              "capturedAt": "2026-08-30T12:00:00.000Z"
+            },
+            "retentionClass": "run",
+            "transformation": null,
+            "text": "alpha",
+            "encoding": "utf-8",
+            "normalization": "none"
+          }
+        ]
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000010e",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "AgentUsageRecorded",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "attemptId": "att_018f05a0-7b01-7000-8000-000000000003",
+        "usage": {
+          "planningUnits": 1
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000010f",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "AgentAttemptUncertain",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "attemptId": "att_018f05a0-7b01-7000-8000-000000000003",
+        "error": {
+          "errorId": "err_018f05a0-7b01-7000-8000-000000000009",
+          "code": "action_failed",
+          "message": "The persisted fixture failed safely.",
+          "retry": "terminal",
+          "details": {
+            "category": "fixture"
+          }
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000110",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "AgentAttemptFailed",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "attemptId": "att_018f05a0-7b01-7000-8000-000000000003",
+        "error": {
+          "errorId": "err_018f05a0-7b01-7000-8000-000000000009",
+          "code": "action_failed",
+          "message": "The persisted fixture failed safely.",
+          "retry": "terminal",
+          "details": {
+            "category": "fixture"
+          }
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000111",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ContextRequested",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "requestId": "request:context",
+        "resource": {
+          "schemaVersion": 1,
+          "scheme": "fixture",
+          "sourceId": "source:synthetic",
+          "locator": {
+            "record": "alpha"
+          },
+          "mediaType": "text/plain",
+          "classification": "internal"
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000112",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ContextReleased",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "requestId": "request:context",
+        "resource": {
+          "schemaVersion": 1,
+          "scheme": "fixture",
+          "sourceId": "source:synthetic",
+          "locator": {
+            "record": "alpha"
+          },
+          "mediaType": "text/plain",
+          "classification": "internal"
+        },
+        "content": [
+          {
+            "schemaVersion": 1,
+            "blockId": "block:alpha",
+            "modality": "text",
+            "mediaType": "text/plain; charset=utf-8",
+            "byteLength": 5,
+            "contentHash": "sha256:alpha",
+            "classification": "internal",
+            "provenance": {
+              "source": {
+                "schemaVersion": 1,
+                "scheme": "fixture",
+                "sourceId": "source:synthetic",
+                "locator": {
+                  "record": "alpha"
+                },
+                "mediaType": "text/plain",
+                "classification": "internal"
+              },
+              "producer": {
+                "kind": "context_source",
+                "id": "source:synthetic"
+              },
+              "capturedAt": "2026-08-30T12:00:00.000Z"
+            },
+            "retentionClass": "run",
+            "transformation": null,
+            "text": "alpha",
+            "encoding": "utf-8",
+            "normalization": "none"
+          }
+        ]
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000113",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ContextDenied",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "requestId": "request:context",
+        "error": {
+          "errorId": "err_018f05a0-7b01-7000-8000-000000000009",
+          "code": "action_failed",
+          "message": "The persisted fixture failed safely.",
+          "retry": "terminal",
+          "details": {
+            "category": "fixture"
+          }
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000114",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ContextRedacted",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "requestId": "request:context",
+        "transformationIds": [
+          "transform:redact"
+        ]
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000115",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ActionProposed",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "proposalId": "dpr_018f05a0-7b01-7000-8000-000000000004",
+        "capabilityPackId": "capability:synthetic",
+        "capabilityPackVersion": 1,
+        "operationId": "synthetic.transform",
+        "operationVersion": 1,
+        "input": {
+          "input": "alpha"
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000116",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ActionNormalized",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "action": {
+          "schemaVersion": 1,
+          "actionId": "act_018f05a0-7b01-7000-8000-000000000005",
+          "capabilityPackId": "capability:synthetic",
+          "capabilityPackVersion": 1,
+          "operationId": "synthetic.transform",
+          "operationVersion": 1,
+          "subject": {
+            "actor": "driver:scripted"
+          },
+          "resource": {
+            "record": "alpha"
+          },
+          "environment": {
+            "mode": "memory"
+          },
+          "request": {
+            "reason": "fixture"
+          },
+          "normalizedInput": {
+            "input": "alpha"
+          },
+          "sideEffectClass": "none",
+          "preconditions": [
+            {
+              "preconditionType": "fixture.exists",
+              "preconditionVersion": 1,
+              "attributes": {
+                "record": "alpha"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000117",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "PolicyEvaluated",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000005",
+        "policyVersionId": "pol_018f05a0-7b01-7000-8000-000000000007",
+        "decision": "allow",
+        "trace": {
+          "ruleId": "allow-synthetic"
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000118",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ActionDenied",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000005",
+        "error": {
+          "errorId": "err_018f05a0-7b01-7000-8000-000000000009",
+          "code": "action_failed",
+          "message": "The persisted fixture failed safely.",
+          "retry": "terminal",
+          "details": {
+            "category": "fixture"
+          }
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000119",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ActionStarted",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000005",
+        "startedAt": "2026-08-30T12:00:00.000Z"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000011a",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ActionSucceeded",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000005",
+        "completedAt": "2026-08-30T12:00:01.000Z"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000011b",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ActionFailed",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000005",
+        "error": {
+          "errorId": "err_018f05a0-7b01-7000-8000-000000000009",
+          "code": "action_failed",
+          "message": "The persisted fixture failed safely.",
+          "retry": "terminal",
+          "details": {
+            "category": "fixture"
+          }
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000011c",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ActionReconciled",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000005",
+        "disposition": "succeeded",
+        "evidence": {
+          "resultHash": "sha256:result"
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000011d",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ObservationReleased",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "observation": {
+          "schemaVersion": 1,
+          "observationId": "observation:alpha",
+          "actionId": "act_018f05a0-7b01-7000-8000-000000000005",
+          "status": "succeeded",
+          "audit": {
+            "resultHash": "sha256:result"
+          },
+          "human": [
+            {
+              "schemaVersion": 1,
+              "blockId": "block:alpha",
+              "modality": "text",
+              "mediaType": "text/plain; charset=utf-8",
+              "byteLength": 5,
+              "contentHash": "sha256:alpha",
+              "classification": "internal",
+              "provenance": {
+                "source": {
+                  "schemaVersion": 1,
+                  "scheme": "fixture",
+                  "sourceId": "source:synthetic",
+                  "locator": {
+                    "record": "alpha"
+                  },
+                  "mediaType": "text/plain",
+                  "classification": "internal"
+                },
+                "producer": {
+                  "kind": "context_source",
+                  "id": "source:synthetic"
+                },
+                "capturedAt": "2026-08-30T12:00:00.000Z"
+              },
+              "retentionClass": "run",
+              "transformation": null,
+              "text": "alpha",
+              "encoding": "utf-8",
+              "normalization": "none"
+            }
+          ],
+          "agent": [
+            {
+              "schemaVersion": 1,
+              "blockId": "block:alpha",
+              "modality": "text",
+              "mediaType": "text/plain; charset=utf-8",
+              "byteLength": 5,
+              "contentHash": "sha256:alpha",
+              "classification": "internal",
+              "provenance": {
+                "source": {
+                  "schemaVersion": 1,
+                  "scheme": "fixture",
+                  "sourceId": "source:synthetic",
+                  "locator": {
+                    "record": "alpha"
+                  },
+                  "mediaType": "text/plain",
+                  "classification": "internal"
+                },
+                "producer": {
+                  "kind": "context_source",
+                  "id": "source:synthetic"
+                },
+                "capturedAt": "2026-08-30T12:00:00.000Z"
+              },
+              "retentionClass": "run",
+              "transformation": null,
+              "text": "alpha",
+              "encoding": "utf-8",
+              "normalization": "none"
+            }
+          ],
+          "error": null,
+          "occurredAt": "2026-08-30T12:00:01.000Z"
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000011e",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ApprovalRequested",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "approvalId": "apr_018f05a0-7b01-7000-8000-000000000006",
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000005",
+        "preconditionHash": "sha256:preconditions"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000011f",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ApprovalGranted",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "approvalId": "apr_018f05a0-7b01-7000-8000-000000000006",
+        "grantedBy": {
+          "kind": "user",
+          "id": "user:approver"
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000120",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ApprovalDenied",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "approvalId": "apr_018f05a0-7b01-7000-8000-000000000006",
+        "deniedBy": {
+          "kind": "user",
+          "id": "user:approver"
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000121",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ApprovalExpired",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "approvalId": "apr_018f05a0-7b01-7000-8000-000000000006"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000122",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ApprovalInvalidated",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "approvalId": "apr_018f05a0-7b01-7000-8000-000000000006",
+        "reason": "precondition_changed"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000123",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ApprovalConsumed",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "approvalId": "apr_018f05a0-7b01-7000-8000-000000000006",
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000005"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000124",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "OutcomeProposed",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "outcome": {
+          "schemaVersion": 1,
+          "outcomeId": "outcome:alpha",
+          "profileId": "profile:synthetic",
+          "profileVersion": 1,
+          "outcomeType": "synthetic.result",
+          "outcomeTypeVersion": 1,
+          "payload": {
+            "answer": "alpha"
+          },
+          "evidence": [
+            {
+              "kind": "observation",
+              "referenceId": "observation:alpha",
+              "contentHash": "sha256:result"
+            }
+          ],
+          "proposedAt": "2026-08-30T12:00:01.000Z"
+        }
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000125",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "OutcomeValidated",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "outcomeId": "outcome:alpha",
+        "evidence": [
+          {
+            "kind": "observation",
+            "referenceId": "observation:alpha",
+            "contentHash": "sha256:result"
+          }
+        ],
+        "validatedAt": "2026-08-30T12:00:01.000Z"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000126",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ArtifactReferenced",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "artifactId": "art_018f05a0-7b01-7000-8000-000000000008",
+        "contentHash": "sha256:artifact",
+        "mediaType": "application/json"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000127",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "RetryScheduled",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "attemptType": "agent",
+        "ordinal": 1,
+        "scheduledAt": "2026-08-30T12:00:01.000Z"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000128",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "BudgetExceeded",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "budget": "maxActions",
+        "consumed": 2,
+        "limit": 2
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-000000000129",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "RecoveryStarted",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "recoveryId": "recovery:one",
+        "startedAt": "2026-08-30T12:00:00.000Z"
+      }
+    },
+    {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000012a",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "RecoveryCompleted",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "recoveryId": "recovery:one",
+        "disposition": "recovered"
+      }
+    }
+  ]
+}

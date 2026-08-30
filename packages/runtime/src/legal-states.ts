@@ -19,6 +19,16 @@ const ACTIVE: readonly RunProjectionStatus[] = [
   "paused",
 ];
 
+/**
+ * A failed terminal result may be committed only after consequential work has
+ * settled. `waiting_for_agent` necessarily owns an Advance/Fetch command and
+ * `executing_action` necessarily owns ExecuteCapabilityAction, so those two
+ * states must first record AgentAttemptFailed or ActionFailed/Observation.
+ */
+const FAILABLE: readonly RunProjectionStatus[] = ACTIVE.filter(
+  (status) => status !== "waiting_for_agent" && status !== "executing_action"
+);
+
 const CANCELLABLE: readonly RunProjectionStatus[] = ACTIVE.filter(
   (status) => status !== "cancellation_requested"
 );
@@ -47,7 +57,7 @@ export const EVENT_LEGAL_STATES = Object.freeze({
   RunResumed: Object.freeze(["paused"]),
   CancellationRequested: Object.freeze(CANCELLABLE),
   RunCancelled: Object.freeze(["cancellation_requested"]),
-  RunFailed: Object.freeze(ACTIVE),
+  RunFailed: Object.freeze(FAILABLE),
   RunCompleted: Object.freeze(["planning"]),
   RunOrphaned: Object.freeze([
     "recovering",
