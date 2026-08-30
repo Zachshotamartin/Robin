@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "minimumScorePercent": 100,
+  "requireZeroCriticalSurvivors": true,
+  "scope": [
+    "dist/evaluator.js",
+    "dist/glob.js"
+  ],
+  "equivalentMutants": []
+}

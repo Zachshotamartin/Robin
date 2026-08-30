@@ -1,0 +1,30 @@
+{
+  "name": "@guard/policy-engine",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Typed, three-valued, explainable policy evaluation over immutable .guard snapshots.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "testdata",
+    "mutation.config.json"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc --build --force",
+    "test": "npm run build && node --test dist/*.test.js",
+    "test:mutation": "npm run build && node ../../scripts/run-policy-mutation-tests.mjs"
+  },
+  "dependencies": {
+    "@guard/contracts": "0.0.0",
+    "@guard/policy-language": "0.0.0"
+  }
+}

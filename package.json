@@ -20,8 +20,10 @@
     "test": "npm run test:repository && npm run test:unit",
     "test:repository": "node --test scripts/check-docs.test.mjs scripts/check-architecture.test.mjs scripts/check-repository-policy.test.mjs",
     "test:unit": "npm run test --workspaces --if-present",
-    "test:contracts": "npm run test --workspace @guard/contracts --workspace @guard/schema-validation --workspace @guard/profile-registry --workspace @guard/event-store --workspace @guard/agent-driver --workspace @guard/model-provider --workspace @guard/policy-language --workspace @guard/context-broker --workspace @guard/capability-gateway --workspace @guard/capability-synthetic --workspace @guard/capability-repository --workspace @guard/runtime --workspace @guard/runtime-host --workspace @guard/milestone-a-scenarios --workspace @guard/cli",
+    "test:contracts": "npm run test --workspace @guard/contracts --workspace @guard/schema-validation --workspace @guard/profile-registry --workspace @guard/event-store --workspace @guard/agent-driver --workspace @guard/model-provider --workspace @guard/policy-language --workspace @guard/policy-engine --workspace @guard/context-broker --workspace @guard/capability-gateway --workspace @guard/capability-synthetic --workspace @guard/capability-repository --workspace @guard/runtime --workspace @guard/runtime-host --workspace @guard/milestone-a-scenarios --workspace @guard/cli",
     "test:policy-parser": "npm run test --workspace @guard/policy-language",
+    "test:policy-engine": "npm run test --workspace @guard/policy-engine",
+    "test:mutation:policy": "npm run test:mutation --workspace @guard/policy-engine",
     "test:gate:a": "npm run test:repository && npm run test:contracts",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
