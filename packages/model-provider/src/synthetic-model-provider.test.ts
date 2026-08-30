@@ -163,6 +163,29 @@ test("replays an exact request as a deterministic immutable event sequence", asy
   provider.assertExhausted();
 });
 
+test("captures exact final UTF-8 request bytes through defensive copies", async () => {
+  const requestValue = request();
+  const provider = new SyntheticModelProvider(script(requestValue));
+  assert.deepEqual(provider.capturedRequestBytes, []);
+
+  await collect(provider.respond(requestValue, new AbortController().signal));
+  const captured = provider.capturedRequestBytes;
+  assert.equal(captured.length, 1);
+  assert.equal(Object.isFrozen(captured), true);
+  assert.deepEqual(
+    captured[0],
+    new TextEncoder().encode(canonicalize(requestValue)),
+  );
+
+  const capturedAgain = provider.capturedRequestBytes;
+  assert.notEqual(
+    capturedAgain[0],
+    captured[0],
+    "each access receives a new byte array",
+  );
+  assert.deepEqual(capturedAgain, captured);
+});
+
 test("rejects constructor proxies without invoking traps or leaking canaries", () => {
   const secret = "model-provider-proxy-get-canary";
   let trapCalls = 0;
@@ -262,6 +285,7 @@ test("fails closed on exact-request divergence without consuming the step", asyn
     collect(provider.respond(divergent, new AbortController().signal)),
     (error: unknown) => isDomainCode(error, "invariant_violated"),
   );
+  assert.equal(provider.capturedRequestBytes.length, 0);
 
   assert.throws(
     () => provider.assertExhausted(),
@@ -271,6 +295,7 @@ test("fails closed on exact-request divergence without consuming the step", asyn
     await collect(provider.respond(request(), new AbortController().signal)),
     SUCCESS_EVENTS,
   );
+  assert.equal(provider.capturedRequestBytes.length, 1);
 });
 
 test("detects an exhausted or incomplete script", async () => {
@@ -299,11 +324,13 @@ test("honors cancellation before and during event delivery", async () => {
     (error: unknown) => isDomainCode(error, "cancelled"),
   );
   assert.equal(untouched.remainingSteps, 1);
+  assert.equal(untouched.capturedRequestBytes.length, 0);
 
   const during = new AbortController();
   const provider = new SyntheticModelProvider(script());
   const iterator = provider.respond(request(), during.signal)[Symbol.asyncIterator]();
   assert.deepEqual(await iterator.next(), { done: false, value: SUCCESS_EVENTS[0] });
+  assert.equal(provider.capturedRequestBytes.length, 1);
   during.abort();
   await assert.rejects(
     iterator.next(),

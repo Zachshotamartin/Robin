@@ -81,6 +81,7 @@ export class SyntheticModelProvider implements ModelProvider {
   public readonly descriptor = SYNTHETIC_DESCRIPTOR;
 
   readonly #script: SyntheticModelScript;
+  readonly #capturedRequestBytes: Uint8Array[] = [];
   #nextStep = 0;
 
   public constructor(script: SyntheticModelScript) {
@@ -91,6 +92,18 @@ export class SyntheticModelProvider implements ModelProvider {
 
   public get remainingSteps(): number {
     return this.#script.steps.length - this.#nextStep;
+  }
+
+  /**
+   * Exact UTF-8 bytes produced by this synthetic adapter for accepted semantic
+   * requests. Each access returns new byte arrays so a test cannot mutate the
+   * adapter's evidence. No bytes are recorded for invalid, divergent, or
+   * pre-cancelled requests because those never reach the provider boundary.
+   */
+  public get capturedRequestBytes(): readonly Uint8Array[] {
+    return Object.freeze(
+      this.#capturedRequestBytes.map((bytes) => Uint8Array.from(bytes)),
+    );
   }
 
   public respond(
@@ -149,6 +162,9 @@ export class SyntheticModelProvider implements ModelProvider {
       });
     }
 
+    this.#capturedRequestBytes.push(
+      new TextEncoder().encode(actualCanonical),
+    );
     // Reserve only after successful validation. A divergent or pre-cancelled
     // request can therefore be corrected and retried against the same step.
     this.#nextStep += 1;
