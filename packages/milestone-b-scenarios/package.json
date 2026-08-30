@@ -19,7 +19,7 @@
     "build": "tsc --build",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "generate:goldens": "npm run build && node dist/generate-goldens.js",
-    "typecheck": "tsc --build --force",
+    "typecheck": "tsc --build",
     "test": "npm run build && node --test dist/*.test.js"
   },
   "dependencies": {

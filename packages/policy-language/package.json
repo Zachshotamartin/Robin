@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "typecheck": "tsc --build --force",
+    "typecheck": "tsc --build",
     "test": "npm run build && node --test dist/*.test.js"
   }
 }

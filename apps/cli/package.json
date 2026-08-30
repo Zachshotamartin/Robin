@@ -31,7 +31,7 @@
   "scripts": {
     "build": "tsc --build && node scripts/ensure-bin-executable.mjs",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "typecheck": "tsc --build --force",
+    "typecheck": "tsc --build",
     "test": "npm run build && node --test dist/*.test.js"
   },
   "dependencies": {

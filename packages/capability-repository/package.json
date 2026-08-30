@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "build": "tsc --build",
-    "typecheck": "tsc --build --force",
+    "typecheck": "tsc --build",
     "test": "npm run build && node --test dist/*.test.js"
   },
   "dependencies": {
