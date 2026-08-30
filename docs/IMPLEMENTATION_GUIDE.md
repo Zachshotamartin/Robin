@@ -677,7 +677,9 @@ Search should invoke a fixed executable such as `rg` through the process adapter
 The provider returns unified-diff text. Before path-policy evaluation, perform
 only provider-byte-free proposal normalization (ADR-0006):
 
-1. Normalize line endings.
+1. Require well-formed, NUL-free, LF-only, newline-terminated UTF-8 and preserve
+   its exact bytes; reject carriage returns rather than normalizing them
+   (ADR-0007).
 2. Limit total bytes, files, and hunks.
 3. Parse every file header and hunk header.
 4. Reject absolute paths, traversal, device paths, submodule changes, and binary patches in v1.
@@ -702,7 +704,10 @@ B virtual `inspect_diff` operation implements the same split with a strict
 structural AST before policy and exact preimage verification only after allow;
 this section does not move Milestone C patch application into Gate B.
 
-The approval binds the patch artifact hash. The apply step reads those exact bytes; it does not ask the model to regenerate the patch.
+The approval binds the patch artifact hash. The apply step reads, rehashes,
+reparses, and applies those exact artifact bytes; it does not normalize the
+patch or ask the model to regenerate it. Post-policy preparation, pending
+execution, acknowledgement, compensation, and orphaning follow ADR-0007.
 
 ### 8.3 Patch execution
 
