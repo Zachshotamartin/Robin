@@ -16,19 +16,32 @@ import {
 } from "@guard/capability-gateway";
 
 import { snapshotBoundaryObject } from "./boundary.js";
+import {
+  minimumLiteralSearchOutputBytes,
+  runLiteralSearch,
+} from "./literal-search.js";
 import { REPOSITORY_POLICY_ATTRIBUTE_CATALOG } from "./policy-catalog.js";
 import { normalizeRepositoryPath } from "./repository-path.js";
+import { inspectUnifiedDiffProposal } from "./unified-diff-inspection.js";
 import { VirtualRepository } from "./virtual-repository.js";
 
 export const VIRTUAL_REPOSITORY_REFERENCES: Readonly<{
   list: CapabilityOperationReference;
+  search: CapabilityOperationReference;
   read: CapabilityOperationReference;
   patch: CapabilityOperationReference;
+  inspectDiff: CapabilityOperationReference;
 }> = Object.freeze({
   list: Object.freeze({
     packId: "coding.virtual-repository",
     packVersion: 1,
     operationId: "list_files",
+    operationVersion: 1,
+  }),
+  search: Object.freeze({
+    packId: "coding.virtual-repository",
+    packVersion: 1,
+    operationId: "search_text",
     operationVersion: 1,
   }),
   read: Object.freeze({
@@ -43,18 +56,60 @@ export const VIRTUAL_REPOSITORY_REFERENCES: Readonly<{
     operationId: "propose_patch",
     operationVersion: 1,
   }),
+  inspectDiff: Object.freeze({
+    packId: "coding.virtual-repository",
+    packVersion: 1,
+    operationId: "inspect_diff",
+    operationVersion: 1,
+  }),
 });
 
 export interface VirtualRepositoryPackLimits {
   readonly maximumListResults: number;
   readonly maximumReadBytes: number;
   readonly maximumPatchBytes: number;
+  readonly maximumSearchQueryBytes?: number;
+  readonly maximumSearchPaths?: number;
+  readonly maximumSearchMatches?: number;
+  readonly maximumSearchSnippetBytes?: number;
+  readonly maximumSearchOutputBytes?: number;
+  readonly maximumDiffBytes?: number;
+  readonly maximumDiffPaths?: number;
+  readonly maximumDiffHunks?: number;
+  readonly maximumDiffLines?: number;
+  readonly maximumDiffOutputBytes?: number;
 }
 
-const DEFAULT_LIMITS: VirtualRepositoryPackLimits = Object.freeze({
+interface ResolvedVirtualRepositoryPackLimits {
+  readonly maximumListResults: number;
+  readonly maximumReadBytes: number;
+  readonly maximumPatchBytes: number;
+  readonly maximumSearchQueryBytes: number;
+  readonly maximumSearchPaths: number;
+  readonly maximumSearchMatches: number;
+  readonly maximumSearchSnippetBytes: number;
+  readonly maximumSearchOutputBytes: number;
+  readonly maximumDiffBytes: number;
+  readonly maximumDiffPaths: number;
+  readonly maximumDiffHunks: number;
+  readonly maximumDiffLines: number;
+  readonly maximumDiffOutputBytes: number;
+}
+
+const DEFAULT_LIMITS: ResolvedVirtualRepositoryPackLimits = Object.freeze({
   maximumListResults: 256,
   maximumReadBytes: 64 * 1024,
   maximumPatchBytes: 256 * 1024,
+  maximumSearchQueryBytes: 1024,
+  maximumSearchPaths: 256,
+  maximumSearchMatches: 512,
+  maximumSearchSnippetBytes: 512,
+  maximumSearchOutputBytes: 256 * 1024,
+  maximumDiffBytes: 256 * 1024,
+  maximumDiffPaths: 64,
+  maximumDiffHunks: 256,
+  maximumDiffLines: 10_000,
+  maximumDiffOutputBytes: 512 * 1024,
 });
 
 function agentContextReleaseDefinition(
@@ -77,8 +132,14 @@ const LIST_AGENT_CONTEXT_RELEASE = agentContextReleaseDefinition(
 const READ_AGENT_CONTEXT_RELEASE = agentContextReleaseDefinition(
   "capability.read_file.output",
 );
+const SEARCH_AGENT_CONTEXT_RELEASE = agentContextReleaseDefinition(
+  "capability.search_text.output",
+);
 const PATCH_AGENT_CONTEXT_RELEASE = agentContextReleaseDefinition(
   "capability.propose_patch.output",
+);
+const INSPECT_DIFF_AGENT_CONTEXT_RELEASE = agentContextReleaseDefinition(
+  "capability.inspect_diff.output",
 );
 
 export function createVirtualRepositoryPack(
@@ -96,9 +157,190 @@ export function createVirtualRepositoryPack(
     packVersion: VIRTUAL_REPOSITORY_REFERENCES.list.packVersion,
     operations: [
       listOperation(repository, detachedLimits),
+      searchOperation(repository, detachedLimits),
       readOperation(repository, detachedLimits),
       patchOperation(repository, detachedLimits),
+      inspectDiffOperation(repository, detachedLimits),
     ],
+  };
+}
+
+function searchOperation(
+  repository: VirtualRepository,
+  limits: ResolvedVirtualRepositoryPackLimits,
+): CapabilityOperation {
+  return {
+    definition: {
+      operationId: VIRTUAL_REPOSITORY_REFERENCES.search.operationId,
+      operationVersion: VIRTUAL_REPOSITORY_REFERENCES.search.operationVersion,
+      description:
+        "Search selected virtual files for an exact bounded literal string.",
+      inputSchema: {
+        schemaId: "coding.virtual.search_text.input",
+        schemaVersion: 1,
+        document: {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "query",
+            "paths",
+            "maxMatches",
+            "maxSnippetBytes",
+            "maxOutputBytes",
+          ],
+          properties: {
+            query: { type: "string" },
+            paths: {
+              type: "array",
+              minItems: 1,
+              items: { type: "string" },
+            },
+            maxMatches: { type: "integer", minimum: 1 },
+            maxSnippetBytes: { type: "integer", minimum: 1 },
+            maxOutputBytes: { type: "integer", minimum: 1 },
+          },
+        },
+      },
+      outputSchema: {
+        schemaId: "coding.virtual.search_text.output",
+        schemaVersion: 1,
+        document: {
+          type: "object",
+          additionalProperties: false,
+          required: ["matches", "matchedCount", "truncated"],
+          properties: {
+            matches: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["path", "line", "column", "snippet"],
+                properties: {
+                  path: { type: "string" },
+                  line: { type: "integer", minimum: 1 },
+                  column: { type: "integer", minimum: 1 },
+                  snippet: { type: "string" },
+                },
+              },
+            },
+            matchedCount: { type: "integer", minimum: 0 },
+            truncated: { type: "boolean" },
+          },
+        },
+      },
+      sideEffectClass: "none",
+    },
+    agentContextRelease: SEARCH_AGENT_CONTEXT_RELEASE,
+    normalize(input) {
+      const query = normalizeLiteralQuery(
+        input["query"] as string,
+        limits.maximumSearchQueryBytes,
+      );
+      const rawPaths = input["paths"] as readonly string[];
+      if (rawPaths.length > limits.maximumSearchPaths) {
+        throw invalidInput("search_text exceeds the installed path-count bound.");
+      }
+      const paths = canonicalSelectedPaths(repository, rawPaths);
+      const maximumMatches = requestedBound(
+        input["maxMatches"],
+        limits.maximumSearchMatches,
+        "search_text maxMatches",
+      );
+      const maximumSnippetBytes = requestedBound(
+        input["maxSnippetBytes"],
+        limits.maximumSearchSnippetBytes,
+        "search_text maxSnippetBytes",
+      );
+      const maximumOutputBytes = requestedBound(
+        input["maxOutputBytes"],
+        limits.maximumSearchOutputBytes,
+        "search_text maxOutputBytes",
+      );
+      const queryBytes = Buffer.byteLength(query, "utf8");
+      if (queryBytes > maximumSnippetBytes) {
+        throw invalidInput("search_text query must fit in every released snippet.");
+      }
+      if (maximumOutputBytes < minimumLiteralSearchOutputBytes()) {
+        throw invalidInput("search_text output bound cannot hold its result envelope.");
+      }
+      const path = commonRepositoryScope(paths);
+      return {
+        normalizedInput: {
+          query,
+          paths,
+          maximumMatches,
+          maximumSnippetBytes,
+          maximumOutputBytes,
+        },
+        resource: {
+          scheme: "repo",
+          sourceId: "virtual-repository",
+          path,
+          paths,
+          classification: "fixture",
+        },
+        request: {
+          intent: "search_text",
+          literal: true,
+          queryBytes,
+          querySha256: sha256Hex(query),
+          selectedPaths: paths,
+          maximumMatches,
+          maximumSnippetBytes,
+          maximumOutputBytes,
+        },
+        preconditions: [
+          {
+            preconditionType: "virtual.repository.snapshot",
+            preconditionVersion: 1,
+            attributes: { sha256: repository.snapshotHash },
+          },
+        ],
+      };
+    },
+    execute(action): JsonObject {
+      return runLiteralSearch(repository, {
+        query: action.normalizedInput["query"] as string,
+        paths: action.normalizedInput["paths"] as readonly string[],
+        maximumMatches: action.normalizedInput["maximumMatches"] as number,
+        maximumSnippetBytes:
+          action.normalizedInput["maximumSnippetBytes"] as number,
+        maximumOutputBytes:
+          action.normalizedInput["maximumOutputBytes"] as number,
+      });
+    },
+    release(raw, action) {
+      const agent: JsonObject = {
+        matches: raw["matches"]!,
+        matchedCount: raw["matchedCount"]!,
+        truncated: raw["truncated"]!,
+      };
+      return {
+        audit: {
+          querySha256: action.request["querySha256"]!,
+          selectedPathCount: (
+            action.normalizedInput["paths"] as readonly unknown[]
+          ).length,
+          matchedCount: raw["matchedCount"]!,
+          releasedCount: Array.isArray(raw["matches"])
+            ? raw["matches"].length
+            : 0,
+          truncated: raw["truncated"]!,
+        },
+        human: {
+          summary: `Released ${String(
+            Array.isArray(raw["matches"]) ? raw["matches"].length : 0,
+          )} of ${String(raw["matchedCount"])} literal match(es).`,
+        },
+        agent,
+        agentContextRelease: repositoryAgentContextRelease(
+          SEARCH_AGENT_CONTEXT_RELEASE,
+          action,
+          raw,
+          agent,
+        ),
+      };
+    },
   };
 }
 
@@ -337,7 +579,7 @@ function readOperation(
 
 function patchOperation(
   repository: VirtualRepository,
-  limits: VirtualRepositoryPackLimits,
+  limits: ResolvedVirtualRepositoryPackLimits,
 ): CapabilityOperation {
   return {
     definition: {
@@ -458,6 +700,144 @@ function patchOperation(
   };
 }
 
+function inspectDiffOperation(
+  repository: VirtualRepository,
+  limits: ResolvedVirtualRepositoryPackLimits,
+): CapabilityOperation {
+  return {
+    definition: {
+      operationId: VIRTUAL_REPOSITORY_REFERENCES.inspectDiff.operationId,
+      operationVersion: VIRTUAL_REPOSITORY_REFERENCES.inspectDiff.operationVersion,
+      description:
+        "Inspect, but never apply, one canonical bounded unified diff proposal.",
+      inputSchema: {
+        schemaId: "coding.virtual.inspect_diff.input",
+        schemaVersion: 1,
+        document: {
+          type: "object",
+          additionalProperties: false,
+          required: ["patch"],
+          properties: { patch: { type: "string" } },
+        },
+      },
+      outputSchema: {
+        schemaId: "coding.virtual.inspect_diff.output",
+        schemaVersion: 1,
+        document: {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "paths",
+            "hunkCount",
+            "additions",
+            "deletions",
+            "lineCount",
+            "byteLength",
+            "patch",
+          ],
+          properties: {
+            paths: { type: "array", items: { type: "string" } },
+            hunkCount: { type: "integer", minimum: 1 },
+            additions: { type: "integer", minimum: 0 },
+            deletions: { type: "integer", minimum: 0 },
+            lineCount: { type: "integer", minimum: 1 },
+            byteLength: { type: "integer", minimum: 1 },
+            patch: { type: "string" },
+          },
+        },
+      },
+      sideEffectClass: "none",
+    },
+    agentContextRelease: INSPECT_DIFF_AGENT_CONTEXT_RELEASE,
+    normalize(input) {
+      const inspection = inspectUnifiedDiffProposal(
+        input["patch"] as string,
+        repository,
+        {
+          maximumPatchBytes: limits.maximumDiffBytes,
+          maximumPaths: limits.maximumDiffPaths,
+          maximumHunks: limits.maximumDiffHunks,
+          maximumLines: limits.maximumDiffLines,
+          maximumOutputBytes: limits.maximumDiffOutputBytes,
+        },
+      );
+      const path = commonRepositoryScope(inspection.paths);
+      return {
+        normalizedInput: inspection,
+        resource: {
+          scheme: "repo",
+          sourceId: "virtual-repository",
+          path,
+          paths: inspection.paths,
+          classification: "fixture",
+        },
+        request: {
+          intent: "inspect_diff",
+          affectedPaths: inspection.paths,
+          patchBytes: inspection.byteLength,
+          patchSha256: sha256Hex(inspection.patch),
+          hunkCount: inspection.hunkCount,
+          lineCount: inspection.lineCount,
+        },
+        preconditions: [
+          {
+            preconditionType: "virtual.repository.snapshot",
+            preconditionVersion: 1,
+            attributes: { sha256: repository.snapshotHash },
+          },
+        ],
+      };
+    },
+    execute(action): JsonObject {
+      return {
+        paths: action.normalizedInput["paths"]!,
+        hunkCount: action.normalizedInput["hunkCount"]!,
+        additions: action.normalizedInput["additions"]!,
+        deletions: action.normalizedInput["deletions"]!,
+        lineCount: action.normalizedInput["lineCount"]!,
+        byteLength: action.normalizedInput["byteLength"]!,
+        patch: action.normalizedInput["patch"]!,
+      };
+    },
+    release(raw, action) {
+      const agent: JsonObject = {
+        paths: raw["paths"]!,
+        hunkCount: raw["hunkCount"]!,
+        additions: raw["additions"]!,
+        deletions: raw["deletions"]!,
+        lineCount: raw["lineCount"]!,
+        byteLength: raw["byteLength"]!,
+        patch: raw["patch"]!,
+      };
+      return {
+        audit: {
+          paths: raw["paths"]!,
+          hunkCount: raw["hunkCount"]!,
+          additions: raw["additions"]!,
+          deletions: raw["deletions"]!,
+          lineCount: raw["lineCount"]!,
+          byteLength: raw["byteLength"]!,
+          patchSha256: action.request["patchSha256"]!,
+          applied: false,
+        },
+        human: {
+          summary: `Inspected ${String(raw["hunkCount"])} hunk(s) across ${String(
+            Array.isArray(raw["paths"]) ? raw["paths"].length : 0,
+          )} path(s); no repository content was changed.`,
+          patch: raw["patch"]!,
+        },
+        agent,
+        agentContextRelease: repositoryAgentContextRelease(
+          INSPECT_DIFF_AGENT_CONTEXT_RELEASE,
+          action,
+          raw,
+          agent,
+        ),
+      };
+    },
+  };
+}
+
 function repositoryAgentContextRelease(
   definition: CapabilityAgentContextReleaseDefinition,
   action: NormalizedAction,
@@ -465,6 +845,10 @@ function repositoryAgentContextRelease(
   agent: JsonObject,
 ) {
   const path = action.resource["path"] as string;
+  const paths = action.resource["paths"];
+  const locator: JsonObject = Array.isArray(paths)
+    ? { path, paths }
+    : { path };
   return bindCapabilityAgentContextRelease(
     {
       schemaVersion: CONTRACT_SCHEMA_VERSION,
@@ -473,7 +857,7 @@ function repositoryAgentContextRelease(
         schemaVersion: CONTRACT_SCHEMA_VERSION,
         scheme: "repo",
         sourceId: "virtual-repository",
-        locator: { path },
+        locator,
         mediaType: "application/json",
         classification: definition.classification,
       },
@@ -535,18 +919,113 @@ function truncateUtf8(value: string, maximumBytes: number): {
   return { text: "", truncated: true };
 }
 
+function normalizeLiteralQuery(value: string, maximumBytes: number): string {
+  if (
+    value.length === 0 ||
+    !isWellFormedUnicode(value) ||
+    /[\u0000-\u001f\u007f]/u.test(value)
+  ) {
+    throw invalidInput(
+      "search_text query must be non-empty, well-formed single-line text.",
+    );
+  }
+  const normalized = value.normalize("NFC");
+  if (
+    Buffer.byteLength(value, "utf8") > maximumBytes ||
+    Buffer.byteLength(normalized, "utf8") > maximumBytes
+  ) {
+    throw invalidInput("search_text query exceeds the installed byte bound.");
+  }
+  return normalized;
+}
+
+function isWellFormedUnicode(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function requestedBound(value: unknown, installed: number, label: string): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 1 ||
+    value > installed
+  ) {
+    throw invalidInput(`${label} exceeds its installed positive bound.`);
+  }
+  return value;
+}
+
+function canonicalSelectedPaths(
+  repository: VirtualRepository,
+  rawPaths: readonly string[],
+): readonly string[] {
+  const selected = new Set<string>();
+  for (const rawPath of rawPaths) {
+    const path = normalizeRepositoryPath(rawPath, { allowRoot: false });
+    repository.read(path);
+    selected.add(path);
+  }
+  const paths = [...selected].sort(compareUtf8);
+  if (paths.length === 0) {
+    throw invalidInput("search_text requires at least one selected file.");
+  }
+  return Object.freeze(paths);
+}
+
+function commonRepositoryScope(paths: readonly string[]): string {
+  if (paths.length === 1) return paths[0]!;
+  const split = paths.map((path) => path.split("/"));
+  const first = split[0]!;
+  let commonLength = first.length - 1;
+  for (const segments of split.slice(1)) {
+    commonLength = Math.min(commonLength, segments.length - 1);
+    let index = 0;
+    while (index < commonLength && segments[index] === first[index]) {
+      index += 1;
+    }
+    commonLength = index;
+  }
+  return first.slice(0, commonLength).join("/");
+}
+
+function compareUtf8(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+}
+
 function parseLimits(
   limits: Readonly<Record<string, unknown>>,
-): VirtualRepositoryPackLimits {
-  const expected = [
+): ResolvedVirtualRepositoryPackLimits {
+  const required = [
     "maximumListResults",
     "maximumReadBytes",
     "maximumPatchBytes",
   ];
+  const optional = [
+    "maximumSearchQueryBytes",
+    "maximumSearchPaths",
+    "maximumSearchMatches",
+    "maximumSearchSnippetBytes",
+    "maximumSearchOutputBytes",
+    "maximumDiffBytes",
+    "maximumDiffPaths",
+    "maximumDiffHunks",
+    "maximumDiffLines",
+    "maximumDiffOutputBytes",
+  ];
   const keys = Object.keys(limits);
   if (
-    keys.length !== expected.length ||
-    expected.some((key) => !Object.hasOwn(limits, key))
+    required.some((key) => !Object.hasOwn(limits, key)) ||
+    keys.some((key) => !required.includes(key) && !optional.includes(key))
   ) {
     throw invalidInput("Virtual coding pack limits contain unknown or missing fields.");
   }
@@ -559,7 +1038,33 @@ function parseLimits(
     maximumListResults: limits["maximumListResults"] as number,
     maximumReadBytes: limits["maximumReadBytes"] as number,
     maximumPatchBytes: limits["maximumPatchBytes"] as number,
+    maximumSearchQueryBytes: optionalLimit(
+      limits,
+      "maximumSearchQueryBytes",
+    ),
+    maximumSearchPaths: optionalLimit(limits, "maximumSearchPaths"),
+    maximumSearchMatches: optionalLimit(limits, "maximumSearchMatches"),
+    maximumSearchSnippetBytes: optionalLimit(
+      limits,
+      "maximumSearchSnippetBytes",
+    ),
+    maximumSearchOutputBytes: optionalLimit(
+      limits,
+      "maximumSearchOutputBytes",
+    ),
+    maximumDiffBytes: optionalLimit(limits, "maximumDiffBytes"),
+    maximumDiffPaths: optionalLimit(limits, "maximumDiffPaths"),
+    maximumDiffHunks: optionalLimit(limits, "maximumDiffHunks"),
+    maximumDiffLines: optionalLimit(limits, "maximumDiffLines"),
+    maximumDiffOutputBytes: optionalLimit(limits, "maximumDiffOutputBytes"),
   });
+}
+
+function optionalLimit(
+  limits: Readonly<Record<string, unknown>>,
+  field: keyof ResolvedVirtualRepositoryPackLimits,
+): number {
+  return (limits[field] ?? DEFAULT_LIMITS[field]) as number;
 }
 
 function isTrustedVirtualRepository(value: unknown): value is VirtualRepository {

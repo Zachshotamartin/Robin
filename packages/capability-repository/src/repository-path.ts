@@ -21,6 +21,7 @@ export function normalizeRepositoryPath(
     throw invalidPath("A file path must not be empty.");
   }
   if (
+    !isWellFormedUnicode(value) ||
     value.includes("\u0000") ||
     /[\u0001-\u001f\u007f]/u.test(value) ||
     value.includes("\\") ||
@@ -47,6 +48,20 @@ export function normalizeRepositoryPath(
     throw invalidPath("Repository path is not relative to the fixture root.");
   }
   return canonical;
+}
+
+function isWellFormedUnicode(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function parseAllowRoot(value: unknown): boolean {

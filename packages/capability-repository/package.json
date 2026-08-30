@@ -2,7 +2,7 @@
   "name": "@guard/capability-repository",
   "version": "0.0.0",
   "private": true,
-  "description": "Virtual in-memory coding fixture pack for bounded listing, reading, and patch proposals.",
+  "description": "Virtual coding fixture pack for bounded listing, literal search, reads, patch proposals, and diff inspection.",
   "license": "MIT",
   "type": "module",
   "exports": {
