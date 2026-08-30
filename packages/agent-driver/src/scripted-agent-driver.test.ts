@@ -283,41 +283,68 @@ test("asserts every turn input and emits deterministic immutable generic events"
   driver.assertExhausted();
 });
 
-test("snapshots scripts before validation without invoking proxy get traps", async () => {
-  const secret = "agent-driver-proxy-get-canary";
+test("rejects proxied scripts without invoking proxy traps", () => {
+  const secret = "agent-driver-script-proxy-canary";
   let getCalls = 0;
+  let ownKeysCalls = 0;
   const proxied = new Proxy(driverScript(), {
     get() {
       getCalls += 1;
       throw new Error(secret);
     },
+    ownKeys() {
+      ownKeysCalls += 1;
+      throw new Error(secret);
+    },
   });
 
-  const driver = new ScriptedAgentDriver(proxied);
-  assert.equal(getCalls, 0);
-  assert.deepEqual(
-    await collect(driver.advance(turn(1), new AbortController().signal)),
-    FIRST_EVENTS,
+  assert.throws(
+    () => new ScriptedAgentDriver(proxied),
+    (error: unknown) => {
+      assert.equal(isDomainCode(error, "invalid_input"), true);
+      assert.equal(JSON.stringify(error).includes(secret), false);
+      return true;
+    },
   );
   assert.equal(getCalls, 0);
+  assert.equal(ownKeysCalls, 0);
 });
 
-test("turn requests are detached before validation and hostile proxies fail safely", async () => {
+test("rejects proxied turn requests without traps or turn consumption", async () => {
   const secret = "agent-driver-hostile-request-canary";
   let getCalls = 0;
+  let ownKeysCalls = 0;
   const proxiedRequest = new Proxy(turn(1), {
     get() {
       getCalls += 1;
       throw new Error(secret);
     },
+    ownKeys() {
+      ownKeysCalls += 1;
+      throw new Error(secret);
+    },
   });
   const driver = new ScriptedAgentDriver(driverScript());
-  assert.deepEqual(
-    await collect(driver.advance(proxiedRequest, new AbortController().signal)),
-    FIRST_EVENTS,
+  await assert.rejects(
+    collect(driver.advance(proxiedRequest, new AbortController().signal)),
+    (error: unknown) => {
+      assert.equal(isDomainCode(error, "invalid_input"), true);
+      assert.equal(JSON.stringify(error).includes(secret), false);
+      return true;
+    },
   );
   assert.equal(getCalls, 0);
+  assert.equal(ownKeysCalls, 0);
+  assert.equal(driver.remainingTurns, 2);
+  assert.deepEqual(
+    await collect(driver.advance(turn(1), new AbortController().signal)),
+    FIRST_EVENTS,
+  );
+  assert.equal(driver.remainingTurns, 1);
+});
 
+test("revoked and hostile proxied scripts fail safely", () => {
+  const secret = "agent-driver-hostile-script-canary";
   const revocable = Proxy.revocable(driverScript(), {});
   revocable.revoke();
   assert.throws(
@@ -329,8 +356,10 @@ test("turn requests are detached before validation and hostile proxies fail safe
     },
   );
 
+  let ownKeysCalls = 0;
   const hostile = new Proxy(driverScript(), {
     ownKeys() {
+      ownKeysCalls += 1;
       throw createDomainError({ code: "driver_failed", message: secret });
     },
   });
@@ -342,6 +371,7 @@ test("turn requests are detached before validation and hostile proxies fail safe
       return true;
     },
   );
+  assert.equal(ownKeysCalls, 0);
 });
 
 test("fails closed for divergence in turn, objective, operations, context, or observations", async () => {

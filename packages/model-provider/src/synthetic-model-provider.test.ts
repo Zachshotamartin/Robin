@@ -163,40 +163,70 @@ test("replays an exact request as a deterministic immutable event sequence", asy
   provider.assertExhausted();
 });
 
-test("snapshots scripts before validation without invoking proxy get traps", async () => {
+test("rejects constructor proxies without invoking traps or leaking canaries", () => {
   const secret = "model-provider-proxy-get-canary";
-  let getCalls = 0;
+  let trapCalls = 0;
   const proxied = new Proxy(script(), {
     get() {
-      getCalls += 1;
+      trapCalls += 1;
+      throw new Error(secret);
+    },
+    getOwnPropertyDescriptor() {
+      trapCalls += 1;
+      throw new Error(secret);
+    },
+    ownKeys() {
+      trapCalls += 1;
       throw new Error(secret);
     },
   });
 
-  const provider = new SyntheticModelProvider(proxied);
-  assert.equal(getCalls, 0);
-  assert.deepEqual(
-    await collect(provider.respond(request(), new AbortController().signal)),
-    SUCCESS_EVENTS,
+  assert.throws(
+    () => new SyntheticModelProvider(proxied),
+    (error: unknown) => {
+      assert.equal(isDomainCode(error, "invalid_input"), true);
+      assert.equal(JSON.stringify(error).includes(secret), false);
+      return true;
+    },
   );
-  assert.equal(getCalls, 0);
+  assert.equal(trapCalls, 0);
 });
 
-test("requests are detached before validation and hostile proxies fail safely", async () => {
+test("rejects request proxies safely without consuming the scripted step", async () => {
   const secret = "model-provider-hostile-request-canary";
-  let getCalls = 0;
+  let trapCalls = 0;
   const proxiedRequest = new Proxy(request(), {
     get() {
-      getCalls += 1;
+      trapCalls += 1;
+      throw new Error(secret);
+    },
+    getOwnPropertyDescriptor() {
+      trapCalls += 1;
+      throw new Error(secret);
+    },
+    ownKeys() {
+      trapCalls += 1;
       throw new Error(secret);
     },
   });
   const provider = new SyntheticModelProvider(script());
+
+  await assert.rejects(
+    collect(provider.respond(proxiedRequest, new AbortController().signal)),
+    (error: unknown) => {
+      assert.equal(isDomainCode(error, "invalid_input"), true);
+      assert.equal(JSON.stringify(error).includes(secret), false);
+      return true;
+    },
+  );
+  assert.equal(trapCalls, 0);
+  assert.equal(provider.remainingSteps, 1);
+
   assert.deepEqual(
-    await collect(provider.respond(proxiedRequest, new AbortController().signal)),
+    await collect(provider.respond(request(), new AbortController().signal)),
     SUCCESS_EVENTS,
   );
-  assert.equal(getCalls, 0);
+  provider.assertExhausted();
 
   const revocable = Proxy.revocable(script(), {});
   revocable.revoke();
