@@ -48,7 +48,7 @@ function localMarkdownLinks(markdown) {
 
 test("Markdown files have balanced fences, no trailing whitespace, and valid local links", async () => {
   const files = await collectMarkdownFiles(repositoryRoot);
-  assert.ok(files.length >= 7, "expected repository documentation files");
+  assert.ok(files.length >= 10, "expected complete repository documentation set");
 
   for (const file of files) {
     const markdown = await readFile(file, "utf8");
@@ -68,4 +68,34 @@ test("Markdown files have balanced fences, no trailing whitespace, and valid loc
       assert.ok(linkedStat.isFile() || linkedStat.isDirectory(), `${relativeFile} has missing link ${link}`);
     }
   }
+});
+
+test("general runtime and compatibility plans remain first-class documentation", async () => {
+  const requiredFiles = [
+    "README.md",
+    "docs/BUILD_PLAN.md",
+    "docs/DEEP_AUDIT.md",
+    "docs/GENERAL_RUNTIME_ARCHITECTURE.md",
+    "docs/IMPLEMENTATION_GUIDE.md",
+    "docs/OPERATIONS_TEST_PLAN.md",
+    "docs/PRODUCT_REQUIREMENTS.md",
+    "docs/PROVIDER_AGENT_COMPATIBILITY.md",
+    "docs/THREAT_MODEL.md",
+  ];
+
+  for (const relativeFile of requiredFiles) {
+    const contents = await readFile(path.join(repositoryRoot, relativeFile), "utf8");
+    assert.ok(contents.length > 1_000, `${relativeFile} is unexpectedly incomplete`);
+  }
+
+  const readme = await readFile(path.join(repositoryRoot, "README.md"), "utf8");
+  const buildPlan = await readFile(path.join(repositoryRoot, "docs/BUILD_PLAN.md"), "utf8");
+  const requirements = await readFile(path.join(repositoryRoot, "docs/PRODUCT_REQUIREMENTS.md"), "utf8");
+
+  assert.match(readme, /general policy-enforced agent runtime/i);
+  assert.match(buildPlan, /AgentDriver/);
+  assert.match(buildPlan, /local-corpus research/i);
+  assert.match(buildPlan, /Multi-provider and external-agent compatibility/);
+  assert.match(requirements, /FR-CRED-001/);
+  assert.match(requirements, /FR-COMP-001/);
 });

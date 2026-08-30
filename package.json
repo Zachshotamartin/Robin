@@ -2,7 +2,7 @@
   "name": "guarded-agent",
   "version": "0.0.0",
   "private": true,
-  "description": "A policy-enforced coding-agent runtime with guarded context, sandboxed tools, durable execution, and adversarial evaluation.",
+  "description": "A policy-enforced runtime for interchangeable agents, models, context sources, and capability packs.",
   "license": "MIT",
   "type": "module",
   "engines": {

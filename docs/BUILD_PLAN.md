@@ -1,10 +1,13 @@
-# Policy-Enforced Coding Agent: Full Build Plan
+# Policy-Enforced Agent Runtime: Full Build Plan
 
 Working title: **Guarded Agent**. The name can change; the architecture should not depend on it.
 
 Companion documents:
 
 - [Critical plan review](./PLAN_REVIEW.md)
+- [Deep plan audit and resolution register](./DEEP_AUDIT.md)
+- [General multi-agent and multi-model runtime architecture](./GENERAL_RUNTIME_ARCHITECTURE.md)
+- [Provider, credential, and external-agent compatibility plan](./PROVIDER_AGENT_COMPATIBILITY.md)
 - [Detailed implementation guide](./IMPLEMENTATION_GUIDE.md)
 - [Installation, testing, operations, and release plan](./OPERATIONS_TEST_PLAN.md)
 - [Product requirements and user flows](./PRODUCT_REQUIREMENTS.md)
@@ -14,20 +17,21 @@ Companion documents:
 
 The architecture is worth building and the combined project is more distinctive than any of its individual source ideas. A critical review produced the following corrections:
 
-1. **Keep the custom work at the product boundary.** Build the policy parser, evaluator, agent state machine, context broker, tool gateway, approvals, event model, workflow recovery, and eval system. Use the official model SDK and a mature JSON Schema validator; transport and schema-validation bugs would weaken rather than differentiate the security story.
+1. **Keep the custom work at the product boundary.** Build the policy parser, evaluator, agent state machine, task-profile system, context broker, capability gateway, approvals, event model, workflow recovery, compatibility harness, credential boundary, and eval system. Use official provider SDKs and a mature JSON Schema validator; transport and schema-validation bugs would weaken rather than differentiate the security story.
 2. **Ship two meaningful checkpoints.** The deterministic MVP proves the design before PostgreSQL, containers, and a real model are added. The portfolio v1 adds those production systems. Neither checkpoint depends on VS Code.
-3. **Serialize tool execution in v1.** Parallel model tool calls multiply approval, locking, causality, and replay problems. The provider may stream output, but the runtime accepts and executes at most one consequential action at a time until parallel semantics are deliberately designed.
+3. **Serialize consequential actions in v1.** Parallel proposals multiply approval, locking, causality, and replay problems. A provider/agent may stream output, but the runtime accepts and executes at most one consequential action at a time until parallel semantics are deliberately designed.
 4. **Treat model calls as costly, non-idempotent external operations.** Persist completed responses and never regenerate them during replay. An ambiguous transport failure may be retried only as a new, explicitly recorded attempt with budget impact.
-5. **Default to minimal provider retention.** Request `store: false` where supported, reconstruct conversation state from the local event history, and make any provider-side storage an explicit configuration choice.
-6. **Bind approvals to observed state, not only arguments.** File hashes, worktree revision, executable resolution, and relevant environment facts are preconditions. A change between approval and execution invalidates the approval.
+5. **Default to no provider-side retention while making local replay honest.** Request retention off where supported. A durable run stores its exact agent-visible semantic transcript and any required provider/protocol continuation items as encrypted local artifacts; a metadata-only run explicitly gives up restart resume rather than silently regenerating missing history.
+6. **Bind approvals to observed state, not only arguments.** Every pack supplies resource and execution preconditions; coding examples include file hashes, worktree revision, executable resolution, and sandbox facts. A change between approval and execution invalidates the approval.
 7. **Use PostgreSQL when it starts earning its cost.** Early reducer and policy milestones use an in-memory event store. PostgreSQL arrives with concurrent workers, leases, and crash recovery rather than blocking the first vertical slice.
-8. **Use honest scheduling.** A credible deterministic MVP is about 8–12 part-time weeks; the full CLI portfolio release is approximately 18–24 part-time weeks; the extension is another 4–6 weeks. Security and fault-injection acceptance criteria should not be traded for an artificial date.
+8. **Use honest scheduling.** A credible deterministic MVP is about 10–14 part-time weeks. The full durable CLI portfolio release is approximately 24–36 part-time weeks including integration, fault injection, packaging, and contingency. Broad provider/external-agent compatibility adds 8–12 weeks, and the editor client adds another 5–8 weeks. These are effort ranges, not promises; milestone evidence cannot be traded for an artificial date.
+9. **Keep one authoritative mutation path.** Trusted host-side Git adapters apply approved patch artifacts and create internal checkpoints. Untrusted tests and builds run in disposable execution snapshots and cannot mutate the authoritative run worktree.
 
 ## 1. Product Definition
 
-Build a CLI-first coding agent whose defining feature is that the model never receives context or performs an action without passing through a deterministic policy and execution layer.
+Build a CLI-first general agent runtime whose defining feature is that a model or external agent never receives guarded context or performs a mediated action without passing through deterministic policy and execution layers. Coding is the first reference task profile and the flagship proof of the architecture.
 
-The product is not another chat wrapper. It is the runtime between a hosted model and a developer's machine:
+The product is not another chat wrapper. It is the control plane between an agent, the context it may receive, and the capabilities it may request:
 
 ```text
 Developer
@@ -35,20 +39,21 @@ Developer
 CLI now / VS Code later
    |
 Durable agent runtime
-   |---- Context broker ---- Repository
+   |---- Task profile ------ Objective, driver, sources, capabilities, outcome
+   |---- Context broker ---- Repositories, documents, data, artifacts
    |---- Policy engine ----- Rules and approvals
-   |---- Tool gateway ------ Files, processes, Git, network
+   |---- Capability gateway  Files, processes, research, domain operations
    |---- Event ledger ------ Audit, replay, recovery
    |---- Eval runner ------- Adversarial scenarios
    |
-Hosted model API
+Model API or external agent
 ```
 
-The model proposes. The runtime decides what the model may see, which proposed calls may run, where they run, and whether a human must approve them.
+The selected agent driver proposes. The runtime decides what the agent may see, which proposed actions may run, where they run, and whether a human must approve them. A direct-model driver is the first implementation, not a privileged special case in the kernel.
 
 ### The one-sentence pitch
 
-> A policy-enforced coding-agent runtime that gives developers an explainable security boundary, sandboxed execution, human approvals, crash recovery, and behavioral evaluation across CLI and VS Code.
+> A general policy-enforced agent runtime that hosts interchangeable models, external agents, context sources, and capability packs behind explainable authorization, approvals, isolation, durable recovery, and behavioral evaluation.
 
 ### The flagship demonstration
 
@@ -76,27 +81,25 @@ That demo unifies the original authorization debugger, AI evaluation control pla
 
 The CLI is the first real product because it forces the runtime to work without editor-specific shortcuts, is easy to test in CI, and makes the security boundary observable. The VS Code extension will be a client of the same daemon rather than a second agent implementation.
 
-### Model strategy
+### Agent and model strategy
 
-Use a hosted model API for reasoning. Build the agent loop and every consequential runtime component locally. Start with OpenAI's Responses API using custom function tools; the API lets the model request strongly typed calls into custom code, but the harness remains responsible for actually executing them. See the current [Responses API reference](https://developers.openai.com/api/reference/cli/resources/responses/methods/create).
+The runtime hosts an `AgentDriver`; a direct-model driver is one implementation. Other implementations include the deterministic scripted driver, ACP agent driver, MCP-mediated agent bridge, hosted-agent adapter, and sandboxed black-box CLI adapter. Every driver produces the same generic content, action-proposal, usage, outcome, and failure events.
 
-Add a provider interface from the beginning, but implement only:
+Model APIs sit behind a separate modality-aware provider interface. Start with a fake transport and OpenAI Responses adapter, then prove the boundary with Anthropic, Gemini, a conformant OpenAI-compatible endpoint, and a local no-credential adapter. Tool-calling models receive the strongest action integration. Constrained-schema models may emit a versioned proposal envelope. Unconstrained text-only models are answer/planning-only and cannot trigger consequential actions.
 
-- `FakeModelProvider` for deterministic tests
-- `OpenAIResponsesProvider` for the real MVP
-
-An OpenAI-compatible local endpoint or another provider can come later. Do not run or fine-tune a raw model in the first release; that would turn an agent-runtime project into an ML-infrastructure project.
-
-For the first provider, use the official OpenAI JavaScript SDK as a transport dependency while keeping request construction, tool normalization, budgets, policy enforcement, and the agent loop inside this repository. Set provider storage off by default and disable parallel tool calls in v1.
+For the first provider, use the official OpenAI JavaScript SDK as a transport dependency while keeping request construction, normalization, budgets, policy enforcement, and the agent loop inside this repository. Set provider storage off by default and disable parallel tool calls in v1. The [general runtime architecture](./GENERAL_RUNTIME_ARCHITECTURE.md) defines model types; the [compatibility plan](./PROVIDER_AGENT_COMPATIBILITY.md) defines adapters and bring-your-own credentials.
 
 ### Initial platform scope
 
 - macOS and Linux
-- Git repositories
+- General task profiles with versioned objectives, outcomes, context sources, and capability packs
+- Coding reference profile for Git repositories
+- Local-corpus research reference profile proving the kernel does not depend on Git
 - Docker or Podman available locally
 - One developer and one machine
 - TypeScript repositories in the polished demo, while keeping file and process tools language-agnostic
-- No autonomous Git push, deployment, email, cloud mutation, or multi-agent coordination in v1
+- Multiple interchangeable single-agent drivers; no concurrent multi-agent coordination in v1
+- No autonomous Git push, deployment, email, or cloud mutation in v1
 
 ## 3. What “From Scratch” Means
 
@@ -105,11 +108,12 @@ The goal is to write the differentiating systems yourself without reimplementing
 ### Build yourself
 
 - Agent loop and explicit state machine
-- Provider-neutral model protocol
-- Streaming response and tool-call normalization above the provider SDK
+- Generic task-profile, agent-driver, model-capability, context-source, capability-pack, content-block, and outcome contracts
+- Provider-neutral and modality-aware model protocol
+- Streaming response and structured-action normalization above provider SDKs and agent protocols
 - Policy-language lexer, parser, typed AST, evaluator, precedence rules, and explanation traces
 - Context broker and provenance tracking
-- Tool registry, schemas, argument validation, and capability model
+- Capability-pack registry, schemas, action validation, and generic capability model
 - Approval state machine
 - Git-worktree orchestration
 - Sandbox lifecycle and resource-policy orchestration
@@ -123,13 +127,13 @@ The goal is to write the differentiating systems yourself without reimplementing
 
 ### Use proven primitives
 
-- A hosted foundation model rather than training or serving one
+- Hosted foundation models and existing local inference servers rather than training one
 - Git rather than implementing version control
 - Docker/Podman and the operating system rather than implementing process isolation
 - PostgreSQL and its driver rather than implementing a database
 - Standard cryptographic hash functions rather than inventing cryptography
 - Node's HTTP, filesystem, process, test, and assertion libraries
-- The official OpenAI JavaScript SDK as the provider transport
+- Official provider SDKs as narrow transport dependencies for in-tree adapters
 - JSON Schema plus Ajv for untrusted model/tool argument validation
 - The VS Code extension API rather than building an editor engine
 
@@ -145,28 +149,30 @@ Do not use LangChain, an Agents SDK, Temporal, BullMQ, OPA, Cedar, Casbin, an OR
 |---|---|---|
 | CLI / editor client | Collect intent, show events, request approvals | Trusted UI, not enforcement |
 | Local daemon | Own runs, workers, persistence, and client sessions | Trusted coordinator |
-| Agent runtime | Advance the run state machine and call the model | Trusted control logic |
-| Model provider | Return text and proposed tool calls | Untrusted proposer |
-| Context broker | Select, bound, redact, and record model context | Trusted data boundary |
+| Task-profile registry | Pin objective, driver, model, sources, packs, budgets, outcome, and eval contract | Trusted configuration |
+| Agent runtime | Advance the generic run state machine and invoke the selected driver | Trusted control logic |
+| Agent driver | Return content, action proposals, and outcome proposals | Untrusted proposer |
+| Model provider | Translate model-specific content and structured calls for a direct-model driver | Untrusted external service |
+| Context broker and source adapters | Select, bound, transform, redact, and record agent context | Trusted data boundary |
 | Policy engine | Return allow, deny, or approval with a trace | Trusted decision point |
-| Tool gateway | Validate and dispatch every action | Trusted enforcement point |
+| Capability gateway and packs | Validate and dispatch every installed operation | Trusted enforcement point |
 | Sandbox manager | Isolate processes and workspaces | Trusted orchestrator |
 | Event store | Persist the canonical history | Trusted record |
 | Eval runner | Execute scenarios and calculate release metrics | Trusted verifier |
-| Repository content | Source code, instructions, and possible attacks | Untrusted input |
+| Source content | Repositories, documents, datasets, pages, outputs, and possible attacks | Untrusted input |
 
 ### Non-negotiable invariants
 
-1. The model cannot call operating-system or repository APIs directly.
-2. A tool handler cannot run until its normalized request has a recorded policy decision.
-3. Approval is bound to the exact tool, normalized arguments, policy version, and request hash.
-4. A denied resource cannot be smuggled through another tool's output.
-5. The original checkout is not directly writable during an agent run.
+1. An agent driver cannot call a guarded capability adapter directly.
+2. A capability handler cannot run until its normalized action has a recorded policy decision.
+3. Approval is bound to the exact operation, normalized input, policy version, request hash, and live preconditions.
+4. A denied resource cannot be smuggled through another operation's output.
+5. Profile-specific authoritative resources are not directly writable by an untrusted agent process.
 6. Every externally visible state transition is represented by an append-only event.
 7. Replaying events never repeats side effects.
-8. Tool output is bounded before it is persisted or sent to the model.
-9. Repository instructions are treated as data, not as trusted system instructions.
-10. A completed run always has a reviewable patch, an audit trace, or an explicit no-change result.
+8. Capability output is bounded before it is persisted or sent to an agent or model.
+9. Source instructions are treated as data, not as trusted system instructions.
+10. A completed run has an outcome matching the pinned task profile plus an audit trace.
 
 ## 5. Technology Choices
 
@@ -174,10 +180,11 @@ Do not use LangChain, an Agents SDK, Temporal, BullMQ, OPA, Cedar, Casbin, an OR
 - **Workspace:** npm workspaces, with strict TypeScript project references
 - **Persistence:** PostgreSQL 17 with handwritten SQL migrations and queries
 - **Local transport:** JSON-RPC 2.0 over a Unix domain socket; Windows named pipes later
-- **Model transport:** official OpenAI JavaScript SDK behind the repository's provider interface
+- **Agent drivers:** direct-model, scripted, ACP, MCP-mediated, hosted-agent, and contained CLI ports
+- **Model transport:** official provider SDKs behind the modality-aware provider interface
 - **Boundary validation:** JSON Schema with Ajv in strict mode; schemas remain owned and versioned here
 - **Isolation:** Docker first, Podman adapter second
-- **Source control:** Git CLI through an argument-array process runner
+- **Reference capabilities:** Git and process adapters for coding; local document source for research
 - **Tests:** built-in `node:test` and `node:assert`
 - **Configuration:** JSON for machine configuration and a custom `.guard` language for policies
 - **Packaging:** one `guard` CLI plus one `guardd` daemon executable
@@ -193,22 +200,31 @@ guarded-agent/
     daemon/
     vscode/
   packages/
-    contracts/          # IDs, events, schemas, shared domain types
+    contracts/          # generic IDs, content, actions, outcomes, schemas
     event-store/        # append, subscribe, projections, migrations
     runtime/            # run state machine and orchestration
-    model-core/         # provider interface and normalized model events
-    model-fake/         # deterministic scripted model
-    model-openai/       # Responses API adapter
+    profile-registry/   # immutable task-profile validation and loading
+    agent-driver/       # generic planning-driver interface and events
+    driver-scripted/    # deterministic scripted agent
+    model-provider/     # modality-aware provider interface
+    adapter-openai/     # Responses API adapter
+    adapter-anthropic/  # Messages API adapter
+    adapter-gemini/     # Gemini adapter
+    credentials/        # key references, OS store, origin-bound injection
     policy-language/    # lexer, parser, AST, formatter
     policy-engine/      # evaluator, trace, impact simulation
-    context-broker/     # selection, budgets, redaction, provenance
-    tool-gateway/       # registry, validation, dispatch, idempotency
-    tools-core/         # read/search/patch/process/test/Git tools
+    context-broker/     # source registry, budgets, redaction, provenance
+    capability-gateway/ # pack registry, validation, dispatch, idempotency
+    capability-repository/ # coding reads, search, patch, Git checkpoint
+    capability-process/ # contained process recipes
+    capability-research/# local document corpus and citations
     sandbox/            # container profiles and lifecycle
     worktree/           # disposable Git worktree management
     approvals/          # approval tokens and expiry
-    evals/              # cases, graders, metrics, regression gates
+    eval-engine/        # cases, graders, metrics, regression gates
     json-rpc/           # daemon/client protocol
+    adapter-acp/        # external ACP agent driver
+    bridge-mcp/         # run-scoped guarded MCP tools
   policies/
     default.guard
     strict.guard
@@ -216,6 +232,7 @@ guarded-agent/
     safe-repo/
     hostile-repo/
     crash-recovery-repo/
+    research-corpus/
   migrations/
   docs/
     architecture.md
@@ -234,17 +251,22 @@ Keep package boundaries real: each package exposes a narrow public API and canno
 The first implementation should establish small stable interfaces before any real model calls are made.
 
 ```ts
+interface AgentDriver {
+  advance(request: AgentTurnRequest): AsyncIterable<AgentDriverEvent>;
+}
+
 interface ModelProvider {
-  respond(request: ModelRequest): AsyncIterable<ModelEvent>;
+  respond(request: SemanticModelRequest): AsyncIterable<NormalizedProviderEvent>;
 }
 
 interface PolicyEngine {
   evaluate(request: ActionRequest, snapshot: PolicySnapshot): PolicyDecision;
 }
 
-interface Tool<TInput, TOutput> {
-  definition: ToolDefinition<TInput>;
-  execute(context: ToolContext, input: TInput): Promise<ToolResult<TOutput>>;
+interface CapabilityOperation<TInput, TOutput> {
+  definition: CapabilityOperationDefinition<TInput>;
+  normalize(input: unknown, context: NormalizationContext): NormalizedAction;
+  execute(context: CapabilityContext, action: NormalizedAction): Promise<CapabilityResult<TOutput>>;
 }
 
 interface EventStore {
@@ -253,7 +275,7 @@ interface EventStore {
 }
 ```
 
-Important IDs should be distinct types rather than interchangeable strings: `RunId`, `ToolCallId`, `ApprovalId`, `PolicyVersion`, `ArtifactId`, and `IdempotencyKey`.
+Important IDs should be distinct types rather than interchangeable strings: `RunId`, `AgentAttemptId`, `ActionId`, `ApprovalId`, `PolicyVersion`, `ArtifactId`, and `IdempotencyKey`. Coding packs may additionally define `CheckpointId` and Git-specific IDs without leaking them into the kernel.
 
 ## 8. Policy System
 
@@ -311,10 +333,13 @@ policy "tests-in-sandbox" priority 50 {
 
 ### Precedence
 
-- Higher priority evaluates first.
-- Any matching `deny` wins.
+- Every clause evaluates to `true`, `false`, or `unknown`. Missing optional attributes produce `unknown`; negating `unknown` remains `unknown`; only a complete `true` expression matches.
+- Use `exists(attribute)` to test presence. Do not infer presence with negated comparisons.
+- `matches` means an anchored path glob compiled at policy-load time over canonical forward-slash paths. Runtime regular expressions are not part of v1.
+- Any matching `deny` wins, regardless of priority.
 - Otherwise, any matching `require_approval` wins.
 - Otherwise, a matching `allow` permits the action.
+- Priority selects the dominant explanation and trace ordering within the winning effect; it never lets an allow override a deny.
 - No match means deny for consequential tools and approval for read-only unknowns during development.
 - The final production default is deny.
 
@@ -337,63 +362,72 @@ This is where the original authorization-policy-debugger idea remains visible as
 ```text
 created
   -> planning
-  -> waiting_for_model
+  -> waiting_for_agent
   -> evaluating_action
   -> waiting_for_approval
-  -> executing_tool
+  -> executing_action
   -> recording_observation
-  -> waiting_for_model
-  -> completed | failed | cancelled
+  -> waiting_for_agent
+  -> completed
+
+Any active state may enter cancellation_requested, then cancelled after active work stops.
+Recoverable process loss enters recovering.
+An ambiguous external driver/provider attempt enters attempt_result_uncertain with the attempt kind and transmission evidence.
+An operator or resumability boundary may enter paused.
+An effect that cannot yet be reconciled enters orphaned and requires inspection.
+failed, cancelled, completed, and orphaned are terminal for automatic execution.
 ```
 
 The runtime should be a reducer: current state plus event produces next state and commands. Commands cause side effects; results return as new events. This separation makes recovery and unit testing possible.
+
+The implementation guide owns the legal-transition table. An unknown state or transition fails closed. A recoverable policy denial becomes a bounded agent observation so the driver may propose a safer action; repeated denials consume a configured denial budget. Protocol violations, invariant failures, and denial-budget exhaustion terminate the run.
 
 ### Per-turn loop
 
 1. Load run history and projection.
 2. Ask the context broker for an allowed, budgeted context package.
 3. Record the exact context manifest and hashes.
-4. Send instructions, history, and tool definitions to the model.
-5. Normalize streamed text and proposed tool calls.
-6. Reject malformed or unknown calls before policy evaluation.
+4. Advance the selected driver with the objective, released context, prior agent-visible observations, and currently advertised operation definitions.
+5. Normalize streamed content, structured action proposals, usage, and outcome proposals.
+6. Reject malformed, unsupported, or unknown proposals before policy evaluation.
 7. Evaluate the action against a pinned policy snapshot.
 8. Deny, request approval, or execute it.
-9. Record bounded tool output as an observation.
-10. Repeat until the model finishes or a hard budget is reached.
+9. Record and release a bounded capability result as an observation.
+10. Repeat until the driver proposes a schema-valid outcome or a hard budget is reached.
 
 Set parallel model tool calls off in v1. If a provider still returns more than one proposed call, record the protocol violation and fail closed rather than inventing an execution order.
 
 ### Hard budgets
 
 - Maximum turns
-- Maximum tool calls
+- Maximum proposed and executed capability actions
 - Maximum wall-clock time
 - Maximum input/output tokens
-- Maximum estimated model cost
+- Maximum estimated agent/provider cost
 - Maximum process runtime
-- Maximum bytes per tool output and per run
+- Maximum bytes per capability output and per run
 - Maximum consecutive identical or equivalent actions
 
 Budget exhaustion is a first-class terminal event, not an uncaught exception.
 
 ## 10. Context Broker
 
-The context broker is the read side of the security boundary. It should prevent “the model saw it, so the damage was already done.”
+The context broker is the read side of the security boundary. It should prevent “the agent/model saw it, so the damage was already done.”
 
 ### Responsibilities
 
-- Canonicalize requested paths and resolve symlinks
-- Enforce include/exclude and secret policies before reading
-- Refuse binary files and oversized files by default
+- Resolve each generic `ResourceRef` through its installed source adapter; coding adapters canonicalize paths and resolve symlinks
+- Enforce source/profile include, exclusion, classification, and secret policies before reading
+- Refuse unsupported media and oversized resources by default
 - Detect likely secrets and redact or deny according to policy
 - Track byte and token estimates
-- Attach provenance: path, byte range, content hash, requesting tool, policy version
-- Delimit repository content as untrusted data
+- Attach provenance: source, resource locator, range/selector, content hash, requesting action, transformation, and policy version
+- Delimit all source content as untrusted data
 - Deduplicate unchanged context
 - Apply a per-turn and per-run context budget
 - Record what was withheld and why without logging the secret itself
 
-### Initial context tools
+### Initial coding context operations
 
 - `list_files(root, glob, max_results)`
 - `search_text(query, paths, max_matches)`
@@ -403,11 +437,11 @@ The context broker is the read side of the security boundary. It should prevent 
 
 Do not upload the entire repository or use unrestricted hosted file search in v1. Context enters the model only through these controlled paths.
 
-## 11. Tool Gateway
+## 11. Capability Gateway and Coding Operations
 
-### Initial tool set
+### Initial coding operation set
 
-| Tool | Default effect | Notes |
+| Operation | Default effect | Notes |
 |---|---|---|
 | `list_files` | allow | Bounded and filtered |
 | `search_text` | allow | Bounded and filtered |
@@ -420,40 +454,44 @@ Do not upload the entire repository or use unrestricted hosted file search in v1
 | `inspect_diff` | allow | Read-only, bounded |
 | `network_request` | deny initially | Later proxy with host/method policy |
 
-### Tool contract rules
+### Operation contract rules
 
 - Strict input schema with unknown properties rejected
 - Normalized arguments are the only arguments policy evaluates or execution receives
-- Paths are repository-relative in the model protocol and canonical internally
+- Coding paths are repository-relative in model/agent protocols and canonical internally; other packs own equally strict resource normalization
 - Processes use `executable` plus `argv`; avoid `sh -c`
 - Every call receives a deterministic idempotency key
-- Output has separate human, model, and audit representations
+- Output has separate raw-trusted, human, agent, and audit representations
 - Stdout and stderr are truncated with hashes and artifact references
-- Tools declare side-effect class, required capability, timeout, and compensability
-- No tool can invoke another tool without returning through the gateway
+- Operations declare pack/version, side-effect class, required authority, timeout, cancellation, idempotency, reconciliation, output release, and compensability
+- No operation can invoke another operation without returning through the gateway
 
 ## 12. Sandbox and Git Isolation
 
 ### Run workspace
 
 1. Verify a clean or explicitly acknowledged repository state.
-2. Create a disposable branch and Git worktree in a run-specific directory.
-3. Mount only that worktree into the container.
-4. Preserve the user's original checkout untouched.
-5. Export the final diff as an artifact; applying it to the user's branch is a separate human action.
+2. Create a detached Git worktree in a run-specific owner-only directory; do not create an ordinary branch.
+3. Treat the worktree as an authoritative workspace reachable only by trusted Git and patch adapters.
+4. After each accepted write, create an internal no-hook checkpoint commit with a controlled identity and record its tree and manifest.
+5. Give untrusted tests and builds a disposable copy or overlay of the latest checkpoint, not a writable mount of the authoritative worktree.
+6. Discard process-created source mutations and import only declared, bounded, policy-checked artifacts.
+7. Preserve the user's original checkout untouched.
+8. Export the final diff from the pinned base commit to the final checkpoint; applying it to the user's branch is a separate human action.
 
 ### Container profile
 
 - Non-root UID/GID
 - Read-only root filesystem
-- Writable worktree plus bounded `tmpfs`
+- Writable disposable execution snapshot plus bounded `tmpfs`; authoritative worktree is not mounted
 - Network disabled by default
 - CPU, memory, PID, file-size, and wall-time limits
 - No host Docker socket
-- No SSH agent, cloud credentials, or model API key inside the container
+- No SSH agent, cloud/provider/external-agent credentials, credential-store handle, or auth token inside the container
 - Minimal environment-variable allowlist
 - Process-group termination on timeout or cancellation
 - Captured and bounded stdout/stderr
+- No writable live Git common directory, repository-controlled hooks, filters, text conversion, or external diff helper
 
 On macOS, Docker Desktop adds a VM boundary, but the documentation should not claim perfect isolation. State the actual guarantees and limitations.
 
@@ -471,33 +509,46 @@ On macOS, Docker Desktop adds a VM boundary, but the documentation should not cl
 
 ## 13. Durable Execution and Event Ledger
 
-### Canonical events
+### Canonical generic events
 
 ```text
 RunCreated
 RunStarted
+RunIntentAppended
+TaskProfilePinned
+AgentDriverStarted
+AgentAttemptStarted
+AgentAttemptUncertain
 ContextRequested
 ContextReleased
 ContextDenied
-ModelRequestStarted
-ModelOutputReceived
-ModelRequestUncertain
-ToolRequested
-ToolValidated
+ContextRedacted
+AgentContentCompleted
+AgentUsageRecorded
+ActionProposed
+ActionNormalized
 PolicyEvaluated
+ActionDenied
 ApprovalRequested
 ApprovalGranted
 ApprovalDenied
-ToolStarted
-ToolSucceeded
-ToolFailed
+ActionStarted
+ActionSucceeded
+ActionFailed
+ActionReconciled
+ObservationReleased
 RetryScheduled
 BudgetExceeded
-PatchProduced
+OutcomeProposed
+OutcomeValidated
+ArtifactReferenced
 RunCancelled
 RunFailed
+RunOrphaned
 RunCompleted
 ```
+
+The authoritative event union also includes `CancellationRequested`, `RunPaused`, `RunResumed`, `RecoveryStarted`, `RecoveryCompleted`, `ApprovalExpired`, `ApprovalInvalidated`, and `ApprovalConsumed`. Driver- or capability-specific facts use namespaced typed payloads, such as `provider.ModelRequestStarted`, `provider.ModelResponseCompleted`, `provider.ModelRequestUncertain`, `coding.WorkspaceCheckpointCreated`, and `coding.PatchProduced`. They may extend the ledger but cannot replace the generic facts required by the reducer. Lease claims and heartbeats remain command-table mechanics and operational telemetry unless they change business-visible run state.
 
 Each event includes stream ID, sequence number, event ID, timestamp, causation ID, correlation ID, actor, schema version, and payload.
 
@@ -505,11 +556,15 @@ Each event includes stream ID, sequence number, event ID, timestamp, causation I
 
 - `event_streams`
 - `events`
-- `run_queue`
-- `worker_leases`
+- `commands`, including lease, generation, and reconciliation fields
+- `task_profile_versions`
+- `credential_references`, containing metadata and OS-store references but never secret bytes
 - `policy_versions`
 - `approval_requests`
-- `artifacts`
+- `artifact_objects`
+- `artifact_references`
+- `driver_transcript_items`, with optional namespaced provider/protocol fields
+- `client_requests`
 - `eval_suites`
 - `eval_cases`
 - `eval_results`
@@ -520,7 +575,7 @@ The `events` table is canonical. Read models such as run status, pending approva
 
 Claim jobs transactionally with leases and heartbeats. Promise at-least-once command delivery, not exactly once. Prevent duplicated effects with idempotency records and tool-specific reconciliation.
 
-Example: if the worker crashes after applying a patch but before recording success, recovery compares the expected patch hash to the worktree before deciding whether to execute again.
+Example: if the worker crashes after applying a patch but before recording success, recovery compares the expected pre-action checkpoint, exact patch artifact, changed-path manifest, and resulting tree. It either records recovered success for the existing postimage, safely reapplies from the unchanged preimage, or enters `orphaned` when neither state is provable.
 
 Model requests require different recovery behavior. Once a completed provider response has been recorded, replay reuses it. If the connection fails after the request may have reached the provider but before a response is recorded, mark the attempt uncertain. A retry creates a new attempt event, consumes budget again, and is never described as an idempotent replay.
 
@@ -534,8 +589,8 @@ An approval is an authorization artifact, not a chat message.
 
 It must bind:
 
-- Tool name and normalized arguments hash
-- Run and tool-call IDs
+- Capability pack/operation version and normalized action hash
+- Run and action IDs
 - Policy version and matched rule
 - Workspace and Git revision
 - Relevant input-file hashes, resolved executable, and sandbox profile
@@ -543,7 +598,7 @@ It must bind:
 - Creation and expiry times
 - One-time use state
 
-If any bound value or execution precondition changes, request approval again. Approvals expire, cannot be replayed across runs, and are consumed transactionally with the tool start event.
+If any bound value or execution precondition changes, request approval again. Approvals expire, cannot be replayed across runs, and are consumed transactionally with the action-start event.
 
 The UI must show:
 
@@ -561,8 +616,15 @@ The UI must show:
 ```text
 guard init
 guard doctor
-guard run "add rate limiting"
-guard run --policy strict.guard --jsonl "fix the failing test"
+guard profiles list
+guard profiles inspect <profile-id>
+guard credentials add|list|validate|rotate|remove ...
+guard providers add|list|doctor ...
+guard agents register|list|doctor ...
+guard run --profile coding-local --provider <provider-profile> --objective-file <file>
+guard run --profile research-local-corpus --provider <provider-profile> --objective-file <file>
+guard run --profile <profile> --agent <agent-profile> --objective-file <file>
+guard run --profile synthetic-demo --objective-file <file>
 guard status <run-id>
 guard inspect <run-id>
 guard approve <approval-id>
@@ -572,11 +634,13 @@ guard replay <run-id>
 guard cancel <run-id>
 guard policy check policies/default.guard
 guard policy test
-guard policy explain <tool-call-id>
+guard policy explain <action-id>
 guard policy simulate --from <version> --to <file>
 guard eval run evals/security.json
 guard eval compare <baseline> <candidate>
 ```
+
+The profile decides whether `--provider`, `--agent`, or neither is legal. Secret bytes are accepted only by credential commands through hidden input, stdin, or a deliberate one-time environment import; they are never accepted by `guard run`, profile files, provider files, or agent registration arguments.
 
 ### Output modes
 
@@ -589,16 +653,18 @@ The CLI renderer consumes domain events. It must not contain enforcement logic.
 
 ## 16. Local Daemon
 
-The daemon becomes the single owner of workers, database connections, sandboxes, and active runs.
+The daemon becomes the single owner of workers, database connections, sandboxes, and active runs. A minimal headless daemon is introduced with PostgreSQL durability in Phase 6 so restart recovery can be tested honestly; Phase 10 hardens the multi-client protocol and adds VS Code.
 
 - JSON-RPC 2.0 over a permission-restricted Unix socket
+- OS advisory lock held for daemon lifetime and peer-credential verification where supported
 - Explicit protocol version and capability negotiation
-- Clients subscribe from an event cursor and can reconnect without losing events
-- Mutating requests carry client-generated idempotency keys
+- Clients subscribe from an event cursor through bounded server notifications and can reconnect without losing committed events
+- Mutating requests carry client-generated idempotency keys stored with caller, method, canonical request hash, result, and expiry
+- Artifacts transfer through bounded chunks with byte cursors and final hash checks, never an undefined raw stream inside JSON framing
 - Local authentication uses socket permissions first; add a short-lived session token if TCP transport is ever introduced
 - The API supports CLI and VS Code without exposing provider secrets to either client
 
-Start with an in-process runtime for early milestones. Extract `guardd` only after the state machine and event store are stable.
+Start with an in-process runtime for early milestones. Extract the minimal `guardd` when PostgreSQL commands and leases arrive; retain in-process adapters for deterministic tests.
 
 ## 17. VS Code Extension
 
@@ -616,7 +682,7 @@ The extension is phase two of the product, not a separate implementation.
 
 ### Security rules
 
-- No provider API key stored in extension state
+- No provider or external-agent credential stored in extension state
 - No direct tool execution from the extension host
 - Workspace trust checked before starting the daemon or run
 - Webviews use strict content security policy and message validation
@@ -647,7 +713,7 @@ Each eval case declares:
 
 ### Deterministic security suite
 
-Use `FakeModelProvider` to force exact adversarial behavior:
+Use `ScriptedAgentDriver` and a `SyntheticModelProvider` to force exact adversarial behavior at both abstraction layers:
 
 - Requests `.env` directly
 - Reads a symlink pointing outside the repository
@@ -702,7 +768,7 @@ Document assets, actors, boundaries, threats, mitigations, and residual risks be
 - Local secrets and credentials
 - Developer machine and network
 - Git history and protected branches
-- Model API key and spend budget
+- Provider/external-agent credentials and spend budget
 - Audit integrity and approval identity
 
 ### Main threats
@@ -759,9 +825,9 @@ Every discovered bypass gets a minimal permanent fixture and an incident note ex
 
 ## 21. Phased Implementation Roadmap
 
-The schedule assumes roughly 15–20 focused hours per week. Expect 8–12 weeks for the deterministic MVP through Phase 3, approximately 18–24 weeks for the strong CLI portfolio release through Phase 8, and another 4–6 weeks for the editor extension. Full-time work can compress elapsed time, but the acceptance criteria should not be compressed.
+The schedule assumes roughly 15–20 focused hours per week. Expect 10–14 weeks for the deterministic MVP through Phase 3 and approximately 24–36 weeks for the strong durable CLI portfolio release through Phase 8. Broad provider and external-agent compatibility in Phase 9 adds roughly 8–12 weeks; the editor client in Phase 10 adds another 5–8 weeks. The full plan is therefore approximately 37–56 part-time weeks before optional expansion. The ranges include integration and hardening but not a major redesign after implementation evidence. Full-time work can compress elapsed time, but the acceptance criteria should not be compressed.
 
-### Phase 0 — Specification and threat model (3–4 days)
+### Phase 0 — Specification and threat model (1 week)
 
 Build:
 
@@ -769,34 +835,34 @@ Build:
 - Architecture decision records
 - Trust-boundary diagram
 - Initial threat model
-- Event and tool vocabulary
+- Generic task-profile, event, action, observation, and outcome vocabulary
 - Three hand-written end-to-end scenarios
 
 Exit criteria:
 
 - Every side effect has an identified enforcement point.
 - The demo can be described without mentioning a UI.
-- v1 scope excludes multi-agent, remote deployment, and Code-OSS fork work.
+- v1 scope excludes concurrent multi-agent coordination, remote deployment, and Code-OSS fork work.
 
-### Phase 1 — Core contracts and deterministic vertical slice (1 week)
+### Phase 1 — Core contracts and deterministic vertical slice (2–3 weeks)
 
 Build:
 
 - Monorepo and strict TypeScript configuration
-- Domain IDs, events, errors, and result types
+- Generic task-profile, objective, resource, content-block, action, observation, outcome, event, error, and result types
 - In-memory event store
 - Reducer-based run state machine
-- Scripted fake model
-- Three fake tools
+- Scripted agent driver plus synthetic model provider
+- Generic capability registry plus three fake operations
 - Minimal `guard run` CLI
 
 Exit criteria:
 
-- A deterministic scripted agent reads a fixture, proposes a patch, and completes.
+- A deterministic scripted agent uses a synthetic profile, proposes an action and typed outcome, and completes without Git- or model-specific kernel code.
 - The full run is represented by events.
 - Unit tests replay the history to the same terminal state.
 
-### Phase 2 — Policy language and debugger (1.5–2 weeks)
+### Phase 2 — Policy language and debugger (3–4 weeks)
 
 Build:
 
@@ -813,23 +879,24 @@ Exit criteria:
 - A deny rule cannot be bypassed by a lower-priority allow.
 - The deterministic security suite covers at least 25 policy cases.
 
-### Phase 3 — Context broker and guarded tools (1.5–2 weeks)
+### Phase 3 — Generic context broker and coding capability pack (4–5 weeks)
 
 Build:
 
-- Canonical path model
-- Include/exclude/secret filtering
-- Provenance and context budgets
-- File listing, search, bounded reading, patch proposal, and diff inspection
-- Strict tool registry and input validators
+- Context-source and capability-pack registries
+- Generic resource, provenance, release-policy, and context-budget pipeline
+- Coding source adapter with canonical repository paths and include/exclude/secret filtering
+- Coding operations for file listing, search, bounded reading, patch proposal, and diff inspection
+- Strict operation schemas, semantic normalizers, and output classifiers
 
 Exit criteria:
 
 - `.env`, traversal, symlink, binary, and oversized-file cases are handled correctly.
-- No tool bypasses policy dispatch.
+- No capability operation bypasses policy dispatch.
 - Every released context item has a source and content hash.
+- A non-repository in-memory source passes the same generic release pipeline.
 
-### Phase 4 — Worktrees and process sandbox (2 weeks)
+### Phase 4 — Worktrees and process sandbox (3–4 weeks)
 
 Build:
 
@@ -847,11 +914,13 @@ Exit criteria:
 - Deliberate path and symlink escapes fail closed.
 - A final patch can be exported and reviewed.
 
-### Phase 5 — Real model adapter and complete agent loop (1 week)
+### Phase 5 — Direct-model driver, credentials, and first real provider (3–4 weeks)
 
 Build:
 
-- Official SDK-backed Responses API provider
+- Direct-model `AgentDriver` using the generic driver protocol
+- Credential metadata store, OS credential-store references, origin-bound transport, and redacted diagnostics
+- Official SDK-backed OpenAI Responses provider adapter
 - Streaming event normalization and request/response recording
 - Custom function-tool translation
 - Conversation/context reconstruction
@@ -865,27 +934,31 @@ Exit criteria:
 - The provider never receives a denied context item.
 - Malformed or unsupported tool calls fail safely.
 - Ambiguous model-call failures become recorded new attempts rather than invisible retries.
-- API keys never appear in logs, events, sandboxes, or extension state.
+- Credential bytes never appear in logs, events, sandboxes, agent/model context, clients, or extension state.
+- The same scripted run works against a no-key local synthetic adapter and the real provider without changing runtime code.
 
-### Phase 6 — PostgreSQL, workers, approvals, and recovery (2 weeks)
+### Phase 6 — PostgreSQL, minimal daemon, approvals, and recovery (5–7 weeks)
 
 Build:
 
 - Handwritten migrations and PostgreSQL event store
+- Minimal foreground `guardd` owning database connections and workers
 - Transactional queue, leases, and heartbeats
 - Projection rebuilds
 - Approval records and one-time consumption
 - Crash reconciliation and idempotency handling
 - Cancellation and retry policies
+- Encrypted durable transcript storage and metadata-only non-resumable behavior
 
 Exit criteria:
 
 - Two workers cannot own the same valid lease.
 - All injected crash windows recover without duplicated visible effects.
 - Approval mutation or replay is rejected.
-- A run resumes after daemon restart from its last durable event.
+- A durable-encrypted run resumes after daemon restart from its exact recorded transcript and last accepted checkpoint.
+- A metadata-only run that lost its owning process terminates with an explicit non-resumable result.
 
-### Phase 7 — Evaluation system and release gates (1.5–2 weeks)
+### Phase 7 — Evaluation system, research profile, and release gates (3–4 weeks)
 
 Build:
 
@@ -895,6 +968,7 @@ Build:
 - Fault scheduler
 - Machine-readable and HTML/Markdown reports
 - CI regression command
+- Local-corpus research source, search/read operations, citation outcome, and research eval fixtures
 
 Exit criteria:
 
@@ -902,8 +976,9 @@ Exit criteria:
 - A seeded policy regression fails CI with an understandable explanation.
 - A seeded crash produces a correct recovery result.
 - Real-model reports separate stochastic quality from deterministic safety.
+- The research profile completes without a repository, Git worktree, patch, or process capability and proves the kernel is not coding-specific.
 
-### Phase 8 — CLI hardening and portfolio release (1–1.5 weeks)
+### Phase 8 — CLI hardening and portfolio release (2–3 weeks)
 
 Build:
 
@@ -919,13 +994,36 @@ Exit criteria:
 - A new user can run the flagship demo from a clean machine using the README.
 - Failure messages explain remediation.
 - No manual database edits or hidden setup steps are required.
-- The demo works without a real model using the fake provider.
+- The demo works without a real model using the scripted driver and synthetic provider.
 
-### Phase 9 — Local daemon and VS Code extension (4–6 weeks)
+### Phase 9 — Multi-provider and external-agent compatibility (8–12 weeks)
 
 Build:
 
-- JSON-RPC daemon protocol and cursor subscriptions
+- Provider/profile management and `guard credentials`, `guard providers`, `guard agents`, and `guard profiles` commands
+- Anthropic, Gemini, conformant OpenAI-compatible, and local no-credential provider adapters
+- Tool-calling, constrained-schema, text-only planning, and supported multimodal content paths
+- Provider conformance corpus, golden transcript fixtures, capability negotiation, cost metadata, and failure classification
+- ACP agent driver with every filesystem and terminal operation mapped through guarded capabilities
+- Run-scoped stdio MCP bridge whose annotations are treated as untrusted hints
+- Containment-only CLI agent adapter with filtered snapshot, disabled credentials, and candidate-output import
+- Compatibility-tier display, audit evidence, BYOK rotation/removal, and adapter SDK documentation
+
+Exit criteria:
+
+- The same policy and scripted action scenario passes against every direct provider adapter without kernel changes.
+- At least one hosted provider, one different hosted provider family, and one local no-key endpoint complete the conformance suite.
+- Tool-calling, schema-only, and text-only models receive only the operations their manifest safely supports.
+- ACP and MCP-mediated actions cannot bypass context, policy, approval, capability, sandbox, or output-release boundaries.
+- Black-box CLI runs are labeled containment-only and never claim exact context or per-action mediation.
+- Credential references are selectable per run; secret bytes are strategy/origin-bound, absent from agent/model context and child processes, rotatable, removable, and covered by leak canaries.
+- The compatibility matrix and residual limitations are exported with each run.
+
+### Phase 10 — Multi-client daemon hardening and VS Code extension (5–8 weeks)
+
+Build:
+
+- Peer-authenticated JSON-RPC protocol, bounded notifications, artifact chunks, and cursor subscriptions
 - CLI converted into a daemon client
 - VS Code run explorer, approval panel, event trace, and native diff flow
 - Extension security hardening and packaging
@@ -937,14 +1035,14 @@ Exit criteria:
 - Closing VS Code does not kill a durable run.
 - The extension cannot bypass daemon policy enforcement.
 
-### Phase 10 — Optional expansion, one track only
+### Phase 11 — Optional expansion, one track only
 
 Choose based on the roles being targeted:
 
 - **Enterprise/security:** team identities, signed policy bundles, policy review workflow, PostgreSQL row-level security
-- **AI platform:** multiple providers, richer eval datasets, prompt/model rollout gates
+- **AI platform:** hosted fleet management, richer eval datasets, prompt/model rollout gates
 - **Distributed systems:** remote workers, artifact storage, partition/failure simulation
-- **Developer tools:** MCP adapter, Cursor Agent Client Protocol adapter if still useful, or a narrowly justified Code-OSS fork
+- **Developer tools:** additional reviewed agent protocols or a narrowly justified Code-OSS fork
 
 Do not start more than one expansion track before the core portfolio release is complete.
 
@@ -956,48 +1054,56 @@ Do not start more than one expansion track before the core portfolio release is 
 4. Define versioned event envelopes and the initial event union.
 5. Implement the in-memory optimistic-concurrency event store.
 6. Implement run-state reducer and illegal-transition tests.
-7. Implement scripted fake model and normalized model events.
-8. Implement an in-memory tool registry with strict hand-written validators.
-9. Implement `list_files`, `read_file`, and `propose_patch` against a virtual fixture filesystem.
+7. Implement a scripted `AgentDriver`, synthetic `ModelProvider`, and normalized driver/provider events.
+8. Implement an in-memory capability-pack registry with versioned JSON Schemas compiled by Ajv strict mode and separate handwritten semantic normalizers.
+9. Implement one synthetic non-coding operation plus coding `list_files`, `read_file`, and `propose_patch` against virtual fixture sources.
 10. Implement the smallest `guard run` and event renderer.
 11. Define the `.guard` grammar in EBNF.
 12. Implement the policy lexer with source spans.
 13. Implement parser and formatter round-trip tests.
 14. Implement type checking and pure evaluation.
 15. Implement decision traces and precedence tests.
-16. Add the first ten malicious-action policy fixtures.
+16. Add the first ten malicious-action policy fixtures across generic, coding, and context-release attributes.
 17. Implement canonical repository paths and symlink checks.
 18. Implement context manifests, hashes, and byte budgets.
-19. Add a real-filesystem adapter behind the same tool interfaces.
-20. Run the first full fake-model scenario from the CLI.
+19. Add a real-filesystem source/capability adapter behind the same generic interfaces.
+20. Run the first full scripted-driver scenario from the CLI without a provider credential.
 
-Do not call the real model before ticket 20 works. Otherwise nondeterminism will hide flaws in the runtime.
+Do not call a real model or external agent before ticket 20 works. Otherwise nondeterminism and protocol behavior will hide flaws in the runtime.
 
 ## 23. Scope Control
 
 ### Required for the portfolio release
 
+- Generic task-profile, agent-driver, model-provider, context-source, capability-pack, content-block, and outcome contracts
 - Custom policy language and explainable decisions
-- Controlled repository context
-- Guarded file, patch, process, test, and Git tools
+- Generic controlled context release plus coding and local-corpus research reference profiles
+- Guarded file, patch, process, test, Git, document-search, document-read, and citation operations
 - Worktree plus container isolation
 - Approvals bound to exact actions
 - Durable PostgreSQL workflow and crash recovery
-- Fake and real model providers
+- Scripted driver, synthetic provider, BYOK credential broker, OpenAI provider, and local no-key provider path
 - Adversarial eval suite and regression gate
 - Production-quality CLI and documented demo
 
+### Required for the broad compatibility release
+
+- Anthropic, Gemini, and conformant OpenAI-compatible provider adapters
+- Capability negotiation for tool-calling, schema-output, text-only, and supported multimodal models
+- ACP-mediated external agent, run-scoped MCP bridge, and containment-only CLI agent
+- Conformance corpus, compatibility tiers, credential rotation/removal, and cross-adapter evals
+
 ### Explicitly deferred
 
-- Multi-agent planning
+- Concurrent multi-agent coordination and delegation
 - Browser/computer-use automation
 - Remote SaaS control plane
 - Kubernetes
 - Autonomous Git push or deployment
-- Arbitrary MCP server trust
+- Arbitrary or repository-supplied MCP server trust
 - Windows support
 - Mobile/web clients
-- Fine-tuning or self-hosted inference
+- Training, fine-tuning, or implementing a model server; reviewed local inference endpoints remain supported adapters
 - Code-OSS fork
 
 If schedule pressure appears, cut the VS Code extension before cutting policy explanations, durability, sandbox tests, or evals. Those four systems are the project's differentiator.
@@ -1019,7 +1125,7 @@ Ship more than a repository:
 
 Possible resume bullet structure:
 
-> Built a policy-enforced coding-agent runtime in TypeScript and PostgreSQL with a custom policy parser, sandboxed tool gateway, event-sourced recovery, and adversarial evaluation suite; blocked secret/path/network attacks and recovered injected worker crashes without duplicate side effects.
+> Built a policy-enforced agent runtime in TypeScript and PostgreSQL with interchangeable hosted/local model and external-agent adapters, generic capability packs, a custom policy parser, sandboxed execution, event-sourced recovery, and adversarial evaluation; demonstrated coding and research profiles while blocking measured secret/path/network attacks and recovering injected crashes without duplicate side effects.
 
 Replace the final claims with actual measured counts and rates before publishing.
 
@@ -1028,15 +1134,18 @@ Replace the final claims with actual measured counts and rates before publishing
 The v1 project is done when all of the following are true:
 
 - A fresh user can install it and complete the flagship demo.
-- The fake provider makes every safety and durability test deterministic.
+- The scripted driver and synthetic provider make every safety and durability test deterministic without an API key.
 - At least 40 adversarial cases run in CI.
-- The real provider completes a curated coding-task suite with recorded cost and latency.
-- Denied context never appears in model requests, logs, or artifacts.
+- The coding profile and local-corpus research profile both complete through the same generic kernel.
+- At least one real hosted provider and one local no-key provider complete curated suites with recorded cost and latency where applicable.
+- Denied context never appears in agent/model requests, logs, or artifacts.
 - Approval replay and argument mutation are rejected.
-- Original repositories remain untouched until the user explicitly applies a patch.
+- Profile-owned authoritative resources remain protected; original repositories remain untouched until the user explicitly applies a patch.
 - Injected crashes do not duplicate completed effects.
 - Every action can be explained from a pinned policy and event history.
 - The README states guarantees and limitations without overstating sandbox security.
+- The broad compatibility release passes the provider/agent conformance matrix and truthfully labels guarantee tiers.
+- Transport-owned credentials are origin-bound, never enter agent context or capability sandboxes, and pass leak-canary, rotation, and removal tests; any credential intentionally delivered to an external agent is confined to that pinned agent sandbox, explicitly disclosed, and lowers the applicable credential-confinement claim.
 - The CLI stands on its own; the editor extension is an additional client.
 
 At that point, this is no longer “an AI wrapper.” It is a compact developer-infrastructure product demonstrating security engineering, distributed systems, backend persistence, applied AI, evaluation, and developer-tool UX in one defensible project.

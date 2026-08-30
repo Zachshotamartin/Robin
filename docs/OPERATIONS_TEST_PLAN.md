@@ -38,7 +38,8 @@ The plan covers each stage explicitly:
 | Git | Version supporting worktrees and required diff flags | Newer stable versions | Alternative VCS |
 | Database | PostgreSQL 17 | PostgreSQL 16 after compatibility tests | Managed cloud database requirement |
 | Sandbox | Docker Desktop on macOS, Docker Engine on Linux | Podman adapter after Docker path is stable | Kubernetes |
-| Editor | CLI on any terminal; VS Code after Phase 9 | Compatible Code-OSS distributions after tests | Maintained editor fork |
+| Agent/model | Scripted driver, OpenAI, local compatible endpoint in core; broad adapters after Phase 9 | Anthropic, Gemini, ACP, MCP bridge, contained CLI after conformance | Concurrent multi-agent coordination, arbitrary agent/server trust |
+| Editor | CLI on any terminal; VS Code after Phase 10 | Compatible Code-OSS distributions after tests | Maintained editor fork |
 
 Do not describe an environment as supported until CI or a documented manual release test covers it.
 
@@ -53,7 +54,7 @@ Every release records:
 - Sandbox image digests
 - Host OS images or runner versions
 - VS Code engine range for the extension
-- Provider adapter and API assumptions
+- Task-profile, agent-driver, provider-adapter, protocol, model-capability, credential-strategy, and compatibility-tier assumptions
 
 Store the record in the release artifact and `docs/compatibility/<version>.md`.
 
@@ -137,6 +138,8 @@ The developer setup command eventually becomes `npm run doctor:dev`. It checks a
 - Adequate disk space for worktrees, images, artifacts, and database data
 - Repository path and Git status
 - Whether required environment variables exist without printing values
+- Whether the OS credential-store adapter can create, retrieve, and delete a synthetic Guarded Agent test key
+- Whether the local socket transport can obtain the required peer identity and fit within platform path-length limits
 
 Each failed check gives a remediation category and documentation link. The doctor command never installs software itself.
 
@@ -175,16 +178,15 @@ Create directories with owner-only permissions. Refuse startup if the data direc
 
 ### 4.4 Environment template
 
-Commit `.env.example` only after the provider milestone begins. It documents variable names without sample secrets:
+Do not make long-lived provider keys an ordinary environment configuration mechanism. Commit `.env.example` only for non-secret development settings:
 
 ```text
-OPENAI_API_KEY=
 GUARDED_AGENT_DATABASE_URL=
 GUARDED_AGENT_DATA_DIR=
 GUARDED_AGENT_LOG_LEVEL=info
 ```
 
-The application does not automatically load arbitrary `.env` files from analyzed repositories. Development-only loading must target the Guarded Agent repository's known configuration path.
+The application does not automatically load arbitrary `.env` files from analyzed repositories. A deliberate `guard credentials import-env --name ... --variable ...` migration reads one named variable, writes it to the OS credential store, and does not persist the value elsewhere. Development-only non-secret loading must target the Guarded Agent repository's known configuration path.
 
 ## 5. Dependency Installation Policy
 
@@ -214,7 +216,8 @@ Then:
 
 ### 5.2 Allowed dependency categories
 
-- Official OpenAI SDK for provider transport
+- Official provider SDKs used only inside reviewed adapters
+- Narrow OS credential-store bindings after supply-chain review
 - PostgreSQL driver
 - Ajv for JSON Schema validation
 - Maintained UUID/ULID generator
@@ -294,7 +297,7 @@ Provide one reviewed base image for the flagship TypeScript fixture. Build steps
 8. Scan the image.
 9. Record final digest in sandbox-profile configuration.
 
-The agent cannot modify the trusted sandbox image during a run. Dependency installation occurs in the disposable worktree/container layer and requires approval.
+The agent cannot modify the trusted sandbox image during a run. A dependency install requires approval and executes only in a disposable execution snapshot. v1 keeps network disabled and requires every package byte to exist in a reviewed image or integrity-verified read-only offline cache. A cache miss is denied. Networked registry access remains unavailable until a policy-enforcing egress proxy has its own threat model and tests.
 
 ### 6.4 Infrastructure cleanup
 
@@ -318,13 +321,14 @@ At startup:
 2. Validate directory ownership and permissions.
 3. Load built-in defaults.
 4. Load and validate user config.
-5. Locate repository config and verify containment.
+5. Locate task-profile-specific source configuration; for coding, locate repository config and verify containment.
 6. Merge configuration using documented precedence.
 7. Parse and pin policy files.
-8. Validate sandbox profiles and image digests.
+8. Validate context sources, capability packs, sandbox profiles, and image digests.
 9. Validate database connectivity and schema version when required.
-10. Validate provider configuration without making a paid request.
-11. Produce a redacted effective-config fingerprint.
+10. Resolve the task profile and validate agent-driver/model capability compatibility without making a paid request.
+11. Validate credential-reference presence, strategy, and origin binding without reading the secret into printable configuration.
+12. Produce a redacted effective-config fingerprint and achieved compatibility tier.
 
 Startup fails before any run is accepted if a required layer is invalid.
 
@@ -337,7 +341,7 @@ Startup fails before any run is accepted if a required layer is invalid.
 - Duplicate policy IDs
 - Missing policy file
 - Invalid sandbox digest
-- Unsupported tool capability
+- Unsupported driver, model modality, structured-action mode, context source, capability pack, protocol mapping, or compatibility tier
 - Budget below safe minimum or above administrative maximum
 - Invalid log level
 - Environment secret accidentally present in printable configuration
@@ -355,13 +359,13 @@ Tests provide evidence for specific claims. Code coverage alone does not prove a
 | Unit | Pure functions and one module | None | Every PR |
 | Golden | Parser, formatter, event and audit output | None | Every PR |
 | Generative | Policies, paths, event sequences | None | Every PR with bounded seed set |
-| Contract | Provider, tool, RPC, event schemas | Fake adapters | Every PR |
+| Contract | Profiles, drivers, providers, capabilities, credentials, RPC, event schemas | Synthetic adapters | Every PR |
 | Integration | PostgreSQL, Git, filesystem, Docker | Local service/container | Relevant PRs and main |
 | End-to-end | CLI through final patch | Full local stack | Main and release |
-| Adversarial | Bypass and malicious fixtures | Fake provider and sandbox | Every PR for deterministic set |
+| Adversarial | Bypass and malicious fixtures | Scripted driver, synthetic provider, protocol fixtures, sandbox | Every PR for deterministic set |
 | Fault injection | Crash and partial failure | PostgreSQL and adapters | Main and relevant PRs |
 | Performance | Latency, memory, throughput, artifact size | Controlled runner | Nightly and release |
-| Compatibility | OS, Node, Git, PostgreSQL, Docker | Matrix runners | Main and release |
+| Compatibility | OS/runtime/infrastructure plus agent, provider, endpoint, modality, and protocol tiers | Matrix runners and synthetic transports | Main and release |
 | Real-model eval | Stochastic task behavior | API credential and spend | Nightly/manual release gate |
 | Manual UX | Terminal and extension workflows | Packaged build | Release candidate |
 
@@ -381,7 +385,7 @@ Tests control:
 - Clock
 - ID generator
 - Random seed
-- Fake provider output
+- Scripted-driver and synthetic-provider output
 - Database time where practical through injected time or tolerance windows
 - Sandbox image digest
 - Fixture Git commit
@@ -423,6 +427,8 @@ Policy language:
 - Formatter idempotence
 - Type mismatch diagnostics
 - Unknown attributes
+- Complete three-valued truth tables for missing operands, negation, conjunction, disjunction, and explicit presence
+- Anchored path-glob case, separator, complexity, and invalid-pattern behavior
 - Deterministic precedence and tie breaking
 - Secret-safe traces
 
@@ -449,7 +455,7 @@ Context broker:
 - Manifest hashes and token estimates
 - Denied-content non-retention
 
-Tool gateway:
+Capability gateway:
 
 - Schema rejection
 - Unknown property rejection
@@ -503,6 +509,8 @@ Event-sequence generator:
 
 Fuzz targets receive maximum input size and execution time. A crashing or hanging input is minimized and committed as a regression fixture.
 
+Mutation testing targets the enforcement branches in policy combination, path normalization, tool schema rejection, action canonicalization, approval precondition checks, reducer transition guards, lease ownership, and reconciliation. The initial threshold is established after removing equivalent mutants, then may only decrease through an accepted security-test decision record. Surviving mutants in a deny, approval, or effect-reconciliation branch block that milestone even when line coverage passes.
+
 ### 8.9 PostgreSQL integration tests
 
 - Append new stream
@@ -514,8 +522,11 @@ Fuzz targets receive maximum input size and execution time. A crashing or hangin
 - `SKIP LOCKED` claims across workers
 - Heartbeat ownership
 - Expired lease recovery
+- Lease-generation takeover and stale heartbeat/completion rejection
 - Stale worker completion rejection
 - Approval consume transaction
+- Concurrent approval, cancellation, command completion, and stream append under the global lock order
+- Deadlock and lock-timeout detection at the selected PostgreSQL isolation level
 - Projection rebuild equality
 - Migration from every supported schema fixture
 - Connection loss and retry classification
@@ -532,9 +543,13 @@ Use real PostgreSQL, not an in-memory SQL substitute.
 - Patch path validation
 - Patch check failure
 - Changed-path set verification
+- Two successful patches followed by one failed patch preserves both earlier checkpoints
+- Crash after internal checkpoint creation before event append reconciles the exact tree
 - Executable-bit change handling
 - Rename policy behavior
 - Submodule and binary patch rejection
+- Repository-configured hook, filter, text conversion, external diff, file-system monitor, and smudge helper suppression or fail-closed rejection
+- LFS pointer, sparse checkout, and unsupported attributes fail closed
 - Worktree retention and cleanup
 - Orphan quarantine
 - Repository path containing spaces and Unicode
@@ -543,9 +558,11 @@ Use real PostgreSQL, not an in-memory SQL substitute.
 
 - Non-root identity
 - Read-only root filesystem
-- Writable worktree only
+- Writable disposable execution snapshot only
+- Authoritative run worktree absent from container mounts
+- Live Git common directory absent
 - No host environment leakage
-- No model API key
+- No provider/external-agent credential or credential-store handle
 - No Docker socket
 - Network denied
 - Memory limit enforcement
@@ -556,12 +573,14 @@ Use real PostgreSQL, not an in-memory SQL substitute.
 - Image digest recorded
 - Malicious package lifecycle script contained
 - Host path outside worktree unreadable
+- Source rewrites inside process snapshot are discarded
+- Authoritative checkpoint remains unchanged after every process outcome
 
 Run the escape-oriented set only on isolated CI runners suitable for untrusted containers.
 
 ### 8.12 Provider contract tests
 
-Use a fake SDK transport or recorded synthetic responses to cover:
+Run the following common corpus against every direct-provider adapter using a synthetic SDK/HTTP transport or recorded synthetic responses:
 
 - Text-only completion
 - One complete function call
@@ -578,14 +597,61 @@ Use a fake SDK transport or recorded synthetic responses to cover:
 - Provider terminal incomplete state
 - `store: false` present
 - `parallel_tool_calls: false` present
-- No denied context in serialized request
+- Required encrypted reasoning item requested, stored opaquely, and returned unchanged when the selected model contract supports it
+- Function-call IDs, function outputs, item order, and provider-required protocol fields survive reconstruction
+- Local custom-function-call budget applies even when provider built-in-tool limits do not
+- Provider fingerprint changes when any request-affecting field changes
+- No denied context in exact serialized request bytes
+- Raw, encoded, split, filename, search-output, and transformed canaries remain absent
 
 Real API smoke tests validate only the live adapter contract and curated task behavior. They do not replace fake contract tests.
+
+Provider-family fixtures additionally verify native role/content encoding, schema restrictions, streaming frame boundaries, call/result association, finish reasons, continuation items, retention flags, parallel-call controls, cancellation semantics, request IDs, usage uncertainty, endpoint origins, and API-version headers. The generic OpenAI-compatible adapter must pass a named versioned dialect; a server label is not evidence. A provider model unsupported by its declared manifest fails startup before any source content or credentialed request is sent.
+
+### 8.12a Agent-driver and model-mode conformance
+
+Run one normalized scenario corpus against scripted, direct-model, ACP, MCP-mediated, and contained-CLI drivers. Assert stable `AgentDriverEvent` ordering, action-envelope validation, outcome validation, cancellation, budget use, transcript/evidence behavior, and truthful compatibility tier.
+
+- Native tool-call mode emits an action only after the provider marks a complete structured call.
+- Schema-output mode rejects unknown envelope properties, unknown operations, malformed versions, trailing prose, and multiple consequential actions.
+- Text-only mode treats commands, JSON-looking text, Markdown code fences, XML-like calls, and prompt-injected “execute” directives as content only; the capability-handler spy remains uncalled.
+- Multimodal mode bounds and hashes original, released, transformed, and provider-visible blocks; unsupported media or transforms fail before transmission.
+- Embedding/reranking/classification results may affect ranking under the profile but cannot set policy effect or approval state.
+- One active driver per v1 run is enforced; hidden delegation, recursive agent start, or undeclared subprocess/protocol requests are denied.
+
+### 8.12b Credential broker tests
+
+- Hidden input and one-time environment import do not echo or serialize secret bytes.
+- OS-store add/get/rotate/remove adapters use synthetic secrets and clean up fixtures.
+- Exact origin, scheme, port, strategy, header name, and redirect behavior are enforced.
+- User-supplied authorization headers and credential-bearing query values are rejected.
+- SDK/HTTP errors, trace hooks, proxy errors, cancellation, retries, request dumps, JSONL, events, metrics, audit, diagnostics, protocol messages, extension state, and child environments contain no raw, encoded, split, or transformed canary.
+- Removal prevents new attempts; rotation affects only new attempts; in-flight attempts retain a pinned safe credential version reference without storing bytes.
+- Network validation is opt-in, sends no task/source bytes, reports possible spend, and records only safe result metadata.
+
+### 8.12c External-agent protocol and containment tests
+
+- ACP reads route through context policy; writes become candidate patches; terminal operations route through process recipes; no authoritative worktree mount exists.
+- ACP permission messages do not create `ApprovalGranted` or bypass exact-action approval.
+- MCP tool annotations and server-provided titles/descriptions cannot change policy, effect class, normalized input, origin, or approval behavior.
+- The MCP endpoint is run-scoped, stdio-only by default, advertises only installed operations, bounds all messages, and dies with the run.
+- Unknown methods, capability escalation, path aliases, terminal escape attempts, duplicate IDs, reordering, partial messages, oversized frames, and disconnect/reconnect cases fail closed.
+- Tier C CLI agents receive filtered snapshots with no `.git`, credential, socket, or authoritative resource; network/resource limits apply; only candidate output is imported.
+- The exported tier never exceeds evidence: B omits exact-provider claims when unavailable; C omits per-action/context claims; D makes no prevention claim.
+
+### 8.12d Generic-profile architecture tests
+
+- Runtime and reducer packages compile and test with coding and research packages absent.
+- A synthetic profile, coding profile, and local-research profile traverse the same generic state/event/approval/budget/outcome code.
+- Research runs reject path/symlink escapes, unrelated corpus reads, citation references to unreleased sources, invalid spans, duplicate/source-confused IDs, and unsupported document media.
+- Research completion requires a schema-valid answer, released-source manifest, citation verification, and uncertainty field, and creates no Git/worktree/process command.
+- Generic outcome cases reject cross-run artifact references, unreleased resources, stale candidate/profile versions, invented action/test/receipt claims, unknown fields, missing completeness evidence, and sensitive output denied by release policy; no rejected candidate can precede `RunCompleted`.
+- Adding a fixture-only capability pack and source adapter requires registration and schemas but no runtime switch or event-union edit beyond a namespaced optional fact.
 
 ### 8.13 Approval security tests
 
 - Action hash mutation
-- Tool version mutation
+- Capability/operation version mutation
 - Policy version mutation
 - Base commit mutation
 - Input file mutation
@@ -598,8 +664,18 @@ Real API smoke tests validate only the live adapter contract and curated task be
 - Approval from another run
 - Two concurrent consume attempts
 - Stale UI decision after a new request
+- Approval decision racing cancellation follows the stream-first lock order without deadlock
 
-Every case asserts the tool handler remains uncalled when validation fails.
+Every case asserts the capability handler remains uncalled when validation fails.
+
+### 8.14a Evidence-mode tests
+
+- Durable encrypted mode resumes a multi-turn scripted/direct-model run after daemon termination with byte-identical ordered semantic and required opaque items.
+- Opaque provider items remain byte-identical and are never present in UI, logs, policy traces, or diagnostic bundles.
+- Wrong key, missing key, revoked key, corrupted ciphertext, reused nonce fixture, and unknown encryption version fail closed before model transmission.
+- Rotation interruption resumes from its durable cursor and never replaces the only verified object before the new ciphertext and reference commit.
+- Metadata-only mode resumes within the owning process but becomes explicitly non-resumable after process loss.
+- Metadata-only recovery never calls the provider to recreate a missing historical turn.
 
 ### 8.14 Crash-recovery matrix
 
@@ -623,12 +699,34 @@ Inject a crash:
 
 For each point, define expected run state, eligible retry, reconciliation action, budget effect, artifact state, and user-visible explanation.
 
+The v1 oracle is:
+
+| Crash point | Durable fact before loss | Recovery and retry | Required observable result |
+|---|---|---|---|
+| Before command claim | Command remains pending. | Another worker may claim normally. | No attempt or effect count increases. |
+| After claim before handler boundary | Lease generation and owner exist; no tool-start boundary exists. | Lease expires and the command retries without effect reconciliation. | One expired attempt, no tool effect, new lease generation. |
+| After approval consumption before execution command start | Approval is consumed and exact execution command exists. | Same action may execute after preconditions revalidate; no new approval is needed unless a bound value changed. | One consumption event and at most one visible effect. |
+| After tool-start event before patch apply | Exact patch, pre-action checkpoint, and start fact exist. | Reconcile authoritative tree; matching preimage permits exact reapply. | One accepted checkpoint or an orphaned state, never an assumed success. |
+| During patch apply | Index or worktree may be partial. | Validate ownership, restore only the pre-action checkpoint, verify clean state, then retry exact bytes if budget permits. | Earlier checkpoints remain unchanged; partial paths do not survive. |
+| After checkpoint object creation before checkpoint event | Detached checkpoint object and postimage tree may exist without ledger reference. | Reconcile patch hash, parent checkpoint, tree, and manifest; append recovered checkpoint fact if exact. | One checkpoint in ledger and one resulting tree. |
+| During process output | Disposable container and snapshot may still exist. | Stop labeled container if live; discard snapshot; retry only if recipe policy permits. | Authoritative checkpoint unchanged; each started attempt consumes process budget. |
+| After process exit before result event | Output/artifact staging and exit receipt may or may not be complete. | Recover only from a flushed, hashed terminal receipt; otherwise discard snapshot and retry as a new attempt. | Unknown exit is never reported as success; duplicate attempt is visible. |
+| Before artifact rename | Temporary object is incomplete or complete but unpublished. | Validate bounded temporary file; finish or quarantine it. | No artifact reference points to an incomplete object. |
+| After artifact rename before object/reference insert | Content-addressed object may be orphaned. | Hash object, upsert immutable object row, and create reference only when the causing command still requires it. | Object deduplicates safely; GC cannot remove a live reference. |
+| Before model transmission | Started attempt exists with transmission state not sent. | Adapter may start a new attempt when transport proves no bytes were sent. | Failed attempt and replacement attempt are separately recorded. |
+| After possible model transmission | Transmission may have reached provider without a terminal durable response. | Mark provider result uncertain; no automatic retry. User or policy may authorize a new paid attempt. | Cost is unknown rather than zero and replay does not call provider. |
+| After provider completion before domain event append | In durable mode, encrypted response spool has a flushed terminal marker, item count, and hash, or lacks one. Metadata-only mode has no durable spool. | Exact complete spool becomes transcript objects and completion event; incomplete durable spool becomes uncertain; metadata-only process loss becomes non-resumable. | No silent response loss and no synthetic regeneration. |
+| During projection update | Events, projection, and commands share one transaction. | Transaction rollback leaves none of the partial writes; committed events can rebuild projection. | Projection equals replay and command count remains deterministic. |
+| During client event delivery | Event commit precedes notification. | Client reconnects from last processed durable cursor. | Duplicate delivery is tolerated by cursor; committed event is not skipped. |
+
+Every fault test records the injected fault ID, seed, event-stream tip, command row, lease generation, current checkpoint, artifact-reference set, transcript item count, budget ledger, and final user-facing error code. The assertion compares all of them, not only the terminal run state.
+
 ### 8.15 End-to-end suites
 
 Deterministic smoke:
 
 1. Initialize fixture repository.
-2. Start runtime with fake provider and strict policy.
+2. Start runtime with the scripted driver, synthetic provider, and strict policy.
 3. Request a small code change.
 4. Observe reads and patch proposal.
 5. Approve exact patch if policy requires it.
@@ -743,15 +841,19 @@ Add jobs in this order:
 
 1. `static`: formatting, lint, forbidden imports, type check
 2. `unit`: unit, golden, bounded generative tests
-3. `contracts`: schemas, fake provider, RPC protocol
+3. `contracts`: profiles, schemas, scripted driver, synthetic providers, credentials, adapter/protocol fixtures, RPC protocol
 4. `postgres`: migrations, event store, queue, approvals
 5. `git-filesystem`: worktree and patch integration
 6. `sandbox-linux`: container restrictions and process lifecycle
-7. `eval-deterministic`: full fake-provider adversarial suite
+7. `eval-deterministic`: full scripted-driver/synthetic-provider adversarial suite for coding and research profiles
 8. `e2e-cli`: packaged CLI against local daemon
 9. `package`: produce but do not publish artifacts
 
 Use job-specific permissions. Default GitHub token permissions to read-only. Upload only redacted test artifacts with short retention.
+
+The hostile container escape suite does not run on a general shared hosted runner or on a self-hosted machine containing organization credentials. It runs on an ephemeral isolated worker with no long-lived credentials, no privileged sibling workloads, a freshly provisioned container runtime, and full teardown after the job.
+
+Persisted-format compatibility uses a permanent golden corpus containing every supported event, policy, tool, eval, encryption-envelope, database-schema, and RPC version. A format version cannot be declared supported unless the current release reads its fixture and produces the documented canonical current representation. Corpus changes require review rather than blind snapshot replacement.
 
 ### 10.3 Secret-bearing workflows
 
@@ -801,14 +903,15 @@ Stage 3, signed standalone binaries is optional and requires a maintained bundli
 
 `guard init` performs only project-local, reversible setup:
 
-1. Confirm current Git repository.
-2. Show files it proposes to create.
-3. Create `.guarded-agent/config.json` with safe defaults.
-4. Create `policies/default.guard` if absent.
-5. Add recommended run-artifact paths to `.gitignore` only with confirmation.
-6. Run policy check.
-7. Run environment doctor.
-8. Explain that provider credentials are not required for fake-provider demo.
+1. List installed task profiles and select one explicitly; default to the credential-free synthetic demo only in an interactive terminal.
+2. Validate profile-specific sources: coding confirms a Git repository, while local research confirms an owner-selected corpus root.
+3. Show exact files/directories it proposes to create.
+4. Create `.guarded-agent/config.json` with safe profile/source identifiers and no secret bytes.
+5. Create `policies/default.guard` if absent.
+6. For coding only, add recommended run-artifact paths to `.gitignore` only with confirmation.
+7. Run profile, policy, source, capability, sandbox, and credential-reference checks as applicable.
+8. Run environment doctor and display the achieved compatibility tier.
+9. Explain that provider credentials are not required for the scripted/synthetic demo or configured local no-key profiles; a hosted profile directs the user to hidden-input credential setup without accepting a key in config.
 
 Do not automatically start Docker, install PostgreSQL, create a Git commit, or make a paid model call.
 
@@ -826,6 +929,8 @@ Background service integration comes after lifecycle behavior is reliable:
 - `systemd --user` service on Linux
 
 Service install commands print and require confirmation for the exact service file. Uninstall stops the service and removes only Guarded Agent-owned service definitions.
+
+Uninstall treats application binaries, service definitions, database, run workspaces, artifacts, configuration, and credential-store keys as separate targets. The default removes only binaries and service integration. Data and encryption-key deletion each require a dry-run inventory and separate explicit confirmation; deleting a key while encrypted retained artifacts exist warns that those artifacts will become permanently unreadable.
 
 ### 11.4 VS Code extension installation
 
@@ -916,6 +1021,8 @@ Back up together:
 
 The database and artifact snapshot need a shared backup ID and cutoff position so references are consistent.
 
+The artifact-encryption master key is not copied into an ordinary backup archive. The backup manifest records required key IDs and encryption-envelope versions. Restore preflight must prove those key IDs are available in the destination credential store before it declares encrypted content restorable. The initial portfolio release supports same-user restore on a machine where the key remains available; cross-machine key export is gated until a separately reviewed standard key-wrapping and recovery design exists.
+
 ### 13.2 Restore test
 
 At release checkpoints:
@@ -926,9 +1033,12 @@ At release checkpoints:
 4. Run migrations if required.
 5. Rebuild projections.
 6. Verify artifact hashes.
-7. Inspect audit timelines.
-8. Resume only the synthetic active run.
-9. Confirm no completed side effect repeats.
+7. Verify every artifact reference resolves to the expected immutable object.
+8. Decrypt synthetic transcript artifacts with the required key and reject a wrong-key restore.
+9. Inspect audit timelines and chained event-envelope hashes.
+10. Resume only the synthetic durable-encrypted active run.
+11. Confirm the synthetic metadata-only process-loss run is explicitly non-resumable.
+12. Confirm no completed side effect repeats.
 
 A backup is not considered valid until restore is tested.
 
@@ -939,6 +1049,7 @@ A backup is not considered valid until restore is tested.
 - Event metadata
 - Provider-visible context metadata
 - Optional released-content artifacts
+- Encrypted exact provider transcript and opaque protocol items
 - Source-code patches
 - Process output
 - Policy snapshots
@@ -951,7 +1062,9 @@ For each class, document purpose, default retention, deletion mechanism, and whe
 ### 14.2 Defaults
 
 - Denied secret content: never retained
-- API keys: never retained
+- Provider/external-agent credential bytes: never retained outside the OS credential store
+- Durable-encrypted transcript content: encrypted locally and retained with the run unless a shorter configured policy applies
+- Metadata-only transcript content: not persisted and unavailable after process loss
 - Event metadata: retained with run until deletion
 - Worktrees: short retention after terminal state for review
 - Large process output: shorter retention than audit metadata
@@ -1048,10 +1161,13 @@ Do not include real secrets or private repository content in public advisories.
 - Product and non-goals approved
 - Threat model reviewed
 - Domain dependency test passing
+- Generic task profile, content, action, observation, outcome, driver, provider, source, and capability contracts versioned
+- Synthetic non-coding profile completes without coding/provider imports
+- Completion requires a semantically verified typed outcome whose references reconcile to the run ledger
 - Event envelope versioned
 - Reducer replay deterministic
-- Fake provider contract enforced
-- Virtual tools complete
+- Scripted-driver and synthetic-provider contracts enforced
+- Virtual capability operations complete
 - CLI vertical slice completes fixture task
 - Documentation and clean install verified
 
@@ -1063,7 +1179,7 @@ Do not include real secrets or private repository content in public advisories.
 - Simulation output reviewed
 - Path and secret corpus passing
 - Denied content absent from provider captures and artifacts
-- Tool handlers unreachable after denial
+- Capability handlers unreachable after denial
 - At least 25 policy cases
 
 ### 17.3 Sandbox release gate
@@ -1080,13 +1196,18 @@ Do not include real secrets or private repository content in public advisories.
 ### 17.4 Provider release gate
 
 - Official SDK adapter contract tests passing
+- Direct-model driver/provider separation and capability negotiation passing
 - Storage disabled by default
 - Parallel calls disabled
 - Usage and budgets recorded
 - Ambiguous requests visible
-- Fake key leak test passing
+- OS credential-store, origin binding, redirect denial, hidden input, rotation, removal, and credential-canary tests passing
 - Credentialed smoke suite spend bounded
 - Provider outage behavior documented
+- Stateless multi-turn protocol continuity verified for selected models
+- Durable and metadata-only evidence-mode restart behavior verified
+- Provider fingerprint covers every request-affecting field
+- Text-only mode cannot create an action; schema-output mode requires the strict envelope
 
 ### 17.5 Durable CLI v1 gate
 
@@ -1095,13 +1216,31 @@ Do not include real secrets or private repository content in public advisories.
 - Worker lease matrix passing
 - Approval preconditions and replay tests passing
 - Crash matrix passing
+- Global lock-order and transaction-isolation concurrency suite passing
+- Lease-generation stale-worker suite passing
+- Encryption key loss, wrong-key, corruption, and rotation-interruption suite passing
 - Projection rebuild equality passing
 - 40 or more adversarial cases passing
+- Local-corpus research profile completes and citation/source-manifest adversarial suite passes without coding packages
 - Packaged CLI tested on macOS and Linux
 - Flagship demo reproducible
 - Claims tied to measured results
 
-### 17.6 Editor release gate
+### 17.6 Broad compatibility release gate
+
+- OpenAI, Anthropic, Gemini, named OpenAI-compatible dialect, and local no-key adapters pass the shared conformance corpus
+- Provider-specific role/content/stream/call/continuation/error/storage/cancellation fixtures pass
+- Supported text, structured, and multimodal modes match pinned model capability manifests
+- ACP virtual filesystem and terminal mapping has no direct authoritative-resource path
+- ACP permission messages and MCP annotations cannot grant authorization
+- Run-scoped MCP bridge lifecycle, message bounds, operation allowlist, and hostile protocol corpus pass
+- Contained CLI agent has no credentials or authoritative mount and imports only validated candidate output
+- Tier A/B/C/D labeling matches evidence in CLI, events, reports, and audit export
+- Cross-adapter policy/effect outcomes match for the shared scenario corpus
+- Provider/profile/agent/credential install, validate, select, rotate, remove, and upgrade flows pass on clean machines
+- No adapter loads executable code from analyzed repositories or untrusted task profiles
+
+### 17.7 Editor release gate
 
 - Daemon protocol versioned
 - Subscription race and reconnect tested
@@ -1109,7 +1248,7 @@ Do not include real secrets or private repository content in public advisories.
 - Workspace trust enforced
 - Webview CSP and message validation passing
 - Native diff uses read-only virtual documents
-- API key absent from extension storage
+- Provider/external-agent credential absent from extension storage
 - VSIX clean-profile installation tested
 - Marketplace disclosures complete
 
@@ -1128,6 +1267,8 @@ Before presenting the project:
 - Commit history shows incremental engineering decisions.
 - Issues and milestones reflect planned versus implemented status.
 - Resume claims use measured counts and outcomes.
+- Dependency, image, build, and package provenance accompany the demonstrated release.
+- Public license, package scope, and repository visibility decisions have accepted architecture decision records.
 
 ## 19. Exhaustiveness Audit
 

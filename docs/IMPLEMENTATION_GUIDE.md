@@ -11,17 +11,21 @@ Use a ports-and-adapters layout with one-way dependencies:
 ```text
 contracts
   ^
+  |-- profile-registry
+  |-- agent-driver ports
+  |-- model-provider ports
   |-- policy-language
-  |-- model-core
   |-- event-store interfaces
-  |-- tool interfaces
+  |-- context-source ports
+  |-- capability-pack ports
   ^
 runtime application layer
   ^
-adapters: PostgreSQL, OpenAI, Docker, Git, CLI, JSON-RPC, VS Code
+adapters and packs: PostgreSQL, providers, ACP, MCP, credentials, repository,
+                    research, Docker, Git, CLI, JSON-RPC, VS Code
 ```
 
-The domain packages must not import PostgreSQL, the OpenAI SDK, Docker, Git process helpers, CLI rendering, or VS Code APIs. Adapters implement ports defined by the domain.
+The domain packages must not import PostgreSQL, a provider SDK, an agent protocol, an OS credential API, Docker, Git process helpers, CLI rendering, or VS Code APIs. Adapters implement ports defined by the domain. The generic runtime and reducer must not import coding or research capability packs.
 
 Enforce the boundary in three ways:
 
@@ -34,9 +38,9 @@ Enforce the boundary in three ways:
 Untrusted data follows a single pipeline:
 
 ```text
-raw provider arguments
+raw agent-driver action proposal
   -> JSON parse
-  -> JSON Schema validation
+  -> operation-envelope and JSON Schema validation
   -> semantic validation
   -> canonicalization
   -> immutable NormalizedAction
@@ -45,7 +49,7 @@ raw provider arguments
   -> execution of the same NormalizedAction
 ```
 
-Never reconstruct execution arguments from raw model output after policy evaluation. Freeze the normalized object in development, serialize it canonically, hash the canonical bytes, and pass that exact object to the tool handler.
+Never reconstruct execution arguments from raw model or external-agent output after policy evaluation. Freeze the normalized object in development, serialize it canonically, hash the canonical bytes, and pass that exact object to the capability handler.
 
 ### 1.3 Separate decisions from effects
 
@@ -60,7 +64,7 @@ This structure allows replay to call only `evolve`; replay never calls an adapte
 
 ### 1.4 Fail closed at boundaries
 
-Unknown event version, tool, policy attribute, schema property, decision effect, provider output type, or run state must produce a typed failure. Do not silently ignore unknown input in security-sensitive code.
+Unknown profile, driver event, model capability, content block, event version, capability/operation, policy attribute, schema property, decision effect, provider output type, protocol message, or run state must produce a typed failure. Do not silently ignore unknown input in security-sensitive code.
 
 ### 1.5 Preserve evidence without preserving secrets
 
@@ -74,6 +78,14 @@ For sensitive content, store:
 - Denial reason
 
 Do not store the matched secret, a surrounding excerpt, or the raw provider request containing it.
+
+### 1.6 Keep the kernel domain-neutral
+
+The kernel owns `TaskProfile`, `ObjectiveEnvelope`, `ResourceRef`, `ContentBlock`, `NormalizedAction`, `Observation`, `OutcomeEnvelope`, budgets, approvals, commands, and generic events. Coding owns repository paths, Git revisions, patches, checkpoints, and test reports. Research owns corpus locators, document spans, citations, and source manifests. Provider adapters own protocol call IDs and opaque continuation items. Agent adapters own protocol session IDs.
+
+Enforce this separation with an architectural test that scans runtime imports and compiled dependency graphs. A generic-kernel package fails CI if it imports a capability pack or switches on a provider brand, protocol family, `repo:` scheme, Git field, patch field, citation field, or operation ID. Cross-domain behavior is dispatched through installed ports and schemas.
+
+The detailed generic contracts and adapter capability matrix live in [GENERAL_RUNTIME_ARCHITECTURE.md](./GENERAL_RUNTIME_ARCHITECTURE.md) and [PROVIDER_AGENT_COMPATIBILITY.md](./PROVIDER_AGENT_COMPATIBILITY.md); their ports are implementation requirements, not optional future notes.
 
 ## 2. Repository Bootstrap
 
@@ -147,7 +159,9 @@ export type Brand<T, Name extends string> = T & {
 
 export type RunId = Brand<string, "RunId">;
 export type EventId = Brand<string, "EventId">;
-export type ToolCallId = Brand<string, "ToolCallId">;
+export type AgentAttemptId = Brand<string, "AgentAttemptId">;
+export type DriverProposalId = Brand<string, "DriverProposalId">;
+export type ActionId = Brand<string, "ActionId">;
 export type ApprovalId = Brand<string, "ApprovalId">;
 export type CommandId = Brand<string, "CommandId">;
 export type PolicyVersionId = Brand<string, "PolicyVersionId">;
@@ -165,7 +179,9 @@ All expected failures become serializable domain errors:
 - `approval_required`
 - `approval_invalid`
 - `budget_exceeded`
-- `tool_failed`
+- `action_failed`
+- `driver_failed`
+- `attempt_result_uncertain`
 - `provider_failed`
 - `provider_result_uncertain`
 - `sandbox_failed`
@@ -205,7 +221,7 @@ export interface EventEnvelope<TType extends string, TPayload> {
   readonly occurredAt: string;
   readonly recordedAt: string;
   readonly actor: {
-    readonly kind: "user" | "runtime" | "worker" | "provider";
+    readonly kind: "user" | "client" | "runtime" | "agent_driver" | "provider" | "capability_worker";
     readonly id: string;
   };
   readonly correlationId: string;
@@ -214,24 +230,42 @@ export interface EventEnvelope<TType extends string, TPayload> {
 }
 ```
 
-Use database time for `recordedAt`. `occurredAt` may come from a worker and is useful for latency, but it cannot decide ordering.
+Use database time for `recordedAt`. `occurredAt` may come from a driver, provider, or worker and is useful for latency, but it cannot decide ordering.
 
 ### 4.2 Aggregate state
 
 The run projection contains only state derivable from history:
 
 - Lifecycle status
-- Objective and repository snapshot
+- Resolved task profile, objective, and context-source snapshots
 - Pinned policy version
-- Provider configuration fingerprint
+- Agent-driver fingerprint and optional provider configuration fingerprint
 - Current turn and outstanding command
 - Pending approval
 - Consumed budgets
-- Tool-call records
+- Action/proposal records and optional protocol/provider call associations
 - Artifact references
 - Final result
 
 Do not place open sockets, child-process handles, database clients, or SDK objects in aggregate state.
+
+The authoritative lifecycle values are:
+
+- `created`: accepted but not yet planned.
+- `planning`: selecting the next deterministic command.
+- `waiting_for_agent`: one driver attempt may be active.
+- `attempt_result_uncertain`: an external driver/provider request may have been transmitted but no terminal result is known; its namespaced evidence identifies the adapter and attempt type.
+- `evaluating_action`: a complete proposed action is being normalized and authorized.
+- `waiting_for_approval`: exactly one live approval is bound to the current action.
+- `executing_action`: one consequential command owns a valid lease.
+- `recording_observation`: a capability result is being classified and converted to agent, human, and audit views.
+- `cancellation_requested`: no new work may start; active work is being stopped or reconciled.
+- `recovering`: a durable command or transcript is being reconciled after process loss.
+- `paused`: no command may start until an explicit resume intent.
+- `completed`, `failed`, and `cancelled`: terminal outcomes.
+- `orphaned`: terminal automatic-execution state used when an effect cannot be proven absent or complete; inspection and export remain available.
+
+Every intent has an explicit allowed-state set. Cancellation is legal from every nonterminal state. Pause is legal only when no non-cancellable effect is in its commit window. Resume is legal only from `paused` after profile/configuration, policy snapshot, evidence key, profile-specific authoritative checkpoint when present, and budgets validate. An uncertain external attempt requires a user- or policy-authorized new attempt; replay never converts it to success.
 
 ### 4.3 Decision function
 
@@ -263,14 +297,30 @@ After an append commits, a projector inserts durable commands in the same databa
 
 Commands include:
 
-- `RequestModelResponse`
-- `EvaluateToolAction`
+- `AdvanceAgentDriver`
+- `FetchContextResource`
+- `EvaluateCapabilityAction`
 - `CreateApprovalRequest`
-- `ExecuteTool`
-- `CancelTool`
+- `ExecuteCapabilityAction`
+- `CancelCapabilityAction`
+- `ValidateOutcome`
 - `FinalizeRun`
 
 Every command has a stable ID derived from the event that caused it. This lets duplicate projection safely use `ON CONFLICT DO NOTHING`.
+
+Domain events are business-visible facts. The initial authoritative families are:
+
+- Run/profile: `RunCreated`, `TaskProfilePinned`, `RunStarted`, `RunIntentAppended`, `RunPaused`, `RunResumed`, `CancellationRequested`, `RunCancelled`, `RunFailed`, `RunCompleted`, `RunOrphaned`.
+- Driver: `AgentDriverStarted`, `AgentAttemptStarted`, `AgentContentCompleted`, `AgentUsageRecorded`, `AgentAttemptUncertain`, `AgentAttemptFailed`.
+- Context: `ContextRequested`, `ContextReleased`, `ContextDenied`, `ContextRedacted`.
+- Action and policy: `ActionProposed`, `ActionNormalized`, `PolicyEvaluated`, `ActionDenied`, `ActionStarted`, `ActionSucceeded`, `ActionFailed`, `ActionReconciled`, `ObservationReleased`.
+- Approval: `ApprovalRequested`, `ApprovalGranted`, `ApprovalDenied`, `ApprovalExpired`, `ApprovalInvalidated`, `ApprovalConsumed`.
+- Outcome and artifacts: `OutcomeProposed`, `OutcomeValidated`, `ArtifactReferenced`.
+- Control: `RetryScheduled`, `BudgetExceeded`, `RecoveryStarted`, `RecoveryCompleted`.
+
+Direct-model drivers additionally append namespaced provider evidence such as `provider.ModelRequestStarted`, `provider.ModelRequestTransmissionObserved`, `provider.ModelResponseCompleted`, `provider.ModelRequestFailed`, and `provider.ModelRequestUncertain`. Capability packs append namespaced facts such as `coding.WorkspaceCheckpointCreated` and `coding.PatchProduced`. These extensions never substitute for the generic action/outcome facts consumed by the kernel.
+
+Lease claims, heartbeats, streaming deltas, connection counters, and cache hits are operational records or metrics unless they change a business-visible invariant. This separation prevents hot operational updates from bloating the aggregate stream while retaining the durable facts needed for replay.
 
 ### 4.6 Replay and upcasting
 
@@ -304,6 +354,7 @@ or_expression   = and_expression, { "or", and_expression } ;
 and_expression  = unary_expression, { "and", unary_expression } ;
 unary_expression = [ "not" ], primary ;
 primary         = "(", expression, ")"
+                | "exists", "(", attribute, ")"
                 | comparison ;
 comparison      = attribute, operator, value ;
 operator        = "==" | "!=" | "in" | "matches" | "starts_with" ;
@@ -362,22 +413,39 @@ environment.repo_trust   string
 subject.kind             string
 ```
 
-The checker rejects unknown attributes, comparisons between incompatible types, heterogeneous lists, invalid glob patterns, and effects without reasons. Compile glob patterns once when loading the policy snapshot.
+The checker rejects unknown attributes, comparisons between incompatible types, heterogeneous lists, invalid glob patterns, and effects without reasons. `exists` accepts any catalogued optional attribute and is a type error for an unknown name. Compile glob patterns once when loading the policy snapshot.
 
 ### 5.5 Evaluation
 
-Evaluation is a pure function:
+Evaluation is a pure function with three-valued expression results: `true`, `false`, and `unknown`.
+
+Truth rules:
+
+| Expression | Result |
+|---|---|
+| comparison with a missing operand | `unknown` |
+| `not unknown` | `unknown` |
+| `unknown and false` | `false` |
+| `unknown and true` | `unknown` |
+| `unknown or true` | `true` |
+| `unknown or false` | `unknown` |
+| `exists(missing)` | `false` |
+| `exists(present)` | `true` |
+
+A policy matches only when its full expression is `true`. `matches` is an anchored path glob over canonical forward-slash paths with case-sensitive matching on every host so policy behavior does not change between macOS and Linux. Reject patterns with invalid syntax or configured complexity excess at load time. No user-supplied runtime regular expression is evaluated in v1.
+
+Decision steps:
 
 1. Validate that the action was normalized against the same attribute schema version.
 2. Evaluate each policy expression and create a trace node for every clause.
 3. Collect matching policies.
-4. Sort by priority descending, then stable policy ID ascending.
+4. Partition matches by effect, sorting each partition by priority descending and stable policy ID ascending.
 5. If any matching policy has `deny`, return denial using the highest-priority deny while retaining every match in the trace.
 6. Otherwise, if any match requires approval, return approval.
 7. Otherwise, if any match allows, return allow.
 8. Otherwise, apply the policy set's declared default effect.
 
-Trace nodes contain attribute names and safe values. Attributes marked secret contain a classification and hash, not the value.
+This is a deny-overrides combining algorithm: priority never changes the winning effect. Trace nodes contain attribute names and safe values. Attributes marked secret contain a classification, count, and random per-run correlation token, not the value or a guessable deterministic hash. A test-only high-entropy canary hash is permitted only in synthetic fixtures.
 
 ### 5.6 Policy snapshots
 
@@ -413,18 +481,20 @@ For large histories, process action IDs in stable pages and persist a simulation
 Every read follows this order:
 
 1. Validate request schema.
-2. Convert model path syntax to a normalized repository-relative path.
-3. Resolve the candidate resource against the run's worktree root.
-4. Evaluate path policy before opening content.
-5. Open and inspect metadata.
-6. Confirm the opened object still satisfies containment and file-type rules.
-7. Read a bounded region.
+2. Resolve the source ID to the exact context-source adapter pinned by the task profile.
+3. Ask that adapter to normalize untrusted locator/selector input into a canonical `ResourceRef` without opening content.
+4. Evaluate resource metadata and path/locator policy before opening content.
+5. Open through the source adapter and inspect bounded metadata.
+6. Confirm the opened object still satisfies source-version, containment, media/type, and classification rules.
+7. Read or derive a bounded region/block.
 8. Run content secret classifiers.
 9. Deny, redact, or release according to policy.
 10. Record a context manifest without unsafe content.
-11. Add only the released representation to the next model input.
+11. Add only the released representation to the next agent turn; a direct-model driver performs a second bounded provider encoding.
 
-### 6.2 Path normalization
+### 6.2 Coding-source path normalization
+
+The generic broker never assumes a path. The coding source adapter implements the following repository-path rules and returns a `repo:` resource. The local-research adapter implements equivalent corpus-root and document-ID containment without importing Git/worktree types.
 
 Reject NUL bytes, absolute paths, Windows drive prefixes, UNC paths, empty segments created by malformed encoding, and paths that normalize above the root.
 
@@ -441,26 +511,27 @@ The worktree can change after validation. The read result therefore binds path, 
 
 For baseline tracked files, prefer reading an immutable Git object using the pinned commit and repository-relative path. Use worktree reads only when the agent has created uncommitted changes that need to enter context.
 
-### 6.3 Bounded reads
+### 6.3 Bounded resource reads
 
 Apply limits before allocation:
 
-- Maximum file size eligible for text reading
-- Maximum requested line count
+- Maximum resource size eligible for the selected decoder/deriver
+- Maximum requested selector span, such as lines, bytes, pages, rows, samples, or duration
 - Maximum bytes returned per call
 - Maximum aggregate bytes per turn
 - Maximum aggregate bytes per run
 
 Read through a bounded stream. If the output crosses the limit, stop reading, mark the result truncated, and store the full-content hash only if it can be calculated without violating the memory budget.
 
-### 6.4 Binary detection
+### 6.4 Media and decoder selection
 
 Use a conservative classifier:
 
-- Known binary extension denies immediately unless a specialized reader exists.
-- NUL byte in the sample marks binary.
+- Known binary/media type denies immediately unless the pinned profile provides a reviewed bounded decoder/renderer.
+- NUL byte in a purported text sample marks it non-text.
 - Invalid UTF-8 denies ordinary text release.
-- Excessive control-character ratio denies release.
+- Excessive control-character ratio denies ordinary text release.
+- Images, audio, documents, and structured data must satisfy the modality rules and transformation lineage in the general runtime architecture.
 
 Do not silently decode arbitrary bytes with replacement characters because that can hide policy-relevant content.
 
@@ -474,93 +545,104 @@ Run path-based policy before content detection. Content classifiers should inclu
 - Assignment patterns for names containing `token`, `secret`, `password`, or `key`
 - User-configured regular expressions
 
-Classifiers emit ranges and categories. Redaction replaces each range with a stable marker such as `[REDACTED:api_token:sha256-prefix]`. Never place the original match in a diagnostic.
+Classifiers emit ranges and categories. Redaction replaces each range with a stable marker such as `[REDACTED:api_token:run-correlation-id]`. The correlation ID is random and scoped to the run; do not deterministically hash low-entropy secrets. Never place the original match in a diagnostic.
 
 ### 6.6 Prompt-injection treatment
 
-Repository text is wrapped in a structured context item containing resource identity and trust label. System instructions tell the model that repository instructions may be malicious, but enforcement must not depend on the model following that warning.
+All source content is wrapped in a structured context item containing source/resource identity, classification, provenance, and trust label. Direct-model instructions state that source instructions may be malicious, but enforcement must not depend on the model following that warning.
 
-The broker tags likely instruction-like content for audit and eval metrics. It does not claim to solve prompt injection through text classification; policy and tool isolation remain the actual controls.
+The broker tags likely instruction-like content for audit and eval metrics. It does not claim to solve prompt injection through content classification; policy and capability isolation remain the actual controls.
+
+Resource identifiers, file/document names, directory/collection names, search match locators, snippets, line/page labels, metadata, and generated operation summaries are content. They pass through the same resource policy, classification, redaction, budget, and agent-safe output steps before release. Listing a denied resource may reveal only a configured safe category, never the secret-bearing identifier by default.
 
 ### 6.7 Context manifest
 
-For each provider request, persist:
+For each agent turn and each underlying provider request when present, persist:
 
 - Ordered context item IDs
-- Resource paths
-- Line or byte ranges
+- Canonical source/resource references
+- Selectors such as line, byte, document span, row, or media region
 - Released-content hashes
 - Redaction categories and counts
-- Token estimates
+- Byte counts and conservative token estimates
 - Policy snapshot ID
 - Reason each item was included
 
-The raw released content may be stored as an encrypted artifact only if local configuration permits. The default event payload stores hashes and metadata.
+Byte budgets are authoritative preflight limits and are enforced independently of token estimates. The driver/provider adapter supplies a versioned model-specific estimator where available; otherwise use a conservative documented upper bound. Final token and cost accounting uses reported usage when present and marks unavailable usage as unknown rather than zero.
 
-## 7. Tool Gateway Implementation
+Every run pins one evidence mode:
 
-### 7.1 Tool definition
+- `durable_encrypted`: store the exact ordered agent-visible semantic transcript and, for direct-model drivers, required opaque provider-protocol items as local encrypted artifacts. This mode supports restart resume after the durability milestone when the selected driver implements lossless resume.
+- `ephemeral_metadata`: store only hashes and safe metadata; retain released content in memory for the current process. Process loss makes the run non-resumable and appends a terminal explanation instead of regenerating agent/model history.
 
-Each tool exports one immutable definition:
+Encryption uses a vetted authenticated-encryption implementation with a random nonce per object, an OS credential-store-backed master key, a recorded key ID and format version, and authenticated metadata binding artifact ID, run ID, media type, and schema version. Missing or revoked keys fail closed. Rotation rewrites objects to a new key in bounded, resumable batches and verifies plaintext hash before replacing references. Guarded Agent does not design a custom cipher.
+
+## 7. Capability Gateway Implementation
+
+### 7.1 Capability operation definition
+
+Each installed pack exports immutable operation definitions:
 
 ```ts
-export interface ToolDefinition<TInput, TOutput> {
-  readonly name: string;
+export interface OperationDefinition<TOutput> {
+  readonly packId: string;
+  readonly operationId: string;
   readonly version: number;
   readonly description: string;
   readonly inputSchema: object;
   readonly outputSchema: object;
-  readonly sideEffect: "none" | "workspace_read" | "workspace_write" | "process" | "network";
-  readonly capability: string;
+  readonly sideEffect: "none" | "local_reversible" | "local_irreversible" | "external";
   readonly defaultTimeoutMs: number;
-  normalize(raw: unknown, context: NormalizationContext): Promise<TInput>;
-  summarize(input: TInput): ActionSummary;
-  reconcile(context: ToolContext, input: TInput): Promise<ReconciliationResult>;
-  execute(context: ToolContext, input: TInput): Promise<TOutput>;
+  normalize(raw: unknown, context: NormalizationContext): Promise<NormalizedAction>;
+  buildApproval(action: NormalizedAction): Promise<ApprovalPresentation>;
+  reconcile(context: CapabilityContext, action: NormalizedAction): Promise<ReconciliationResult>;
+  execute(context: CapabilityContext, action: NormalizedAction): Promise<TOutput>;
+  release(result: TOutput, decision: OutputDecision): Promise<ReleasedObservation>;
 }
 ```
 
-Compile every JSON Schema at startup with Ajv strict mode. Startup fails if any schema is invalid or two tool versions collide.
+Compile every JSON Schema at startup with Ajv strict mode. Startup fails if any schema is invalid; pack/operation/version collides; a pack attribute catalog is missing; or execution, reconciliation, output classification, approval display, budgets, and default policy are incomplete.
 
 ### 7.2 Request pipeline
 
-For every requested call:
+For every proposed action, regardless of direct-model, ACP, MCP, client, or scripted origin:
 
-1. Verify provider call ID has not been used in the run.
-2. Look up the exact tool name/version advertised in that provider request.
-3. Parse arguments once as JSON.
+1. Verify the driver proposal ID and optional provider/protocol call ID have not been reused or rebound in the run.
+2. Look up the exact installed pack/operation/version advertised to that driver turn.
+3. Parse the versioned action envelope and operation input once.
 4. Validate structural schema and reject unknown keys.
 5. Run semantic normalization.
 6. Canonically serialize and hash the normalized action.
-7. Append `ToolValidated` containing safe metadata and the action hash.
+7. Append `ActionNormalized` containing safe metadata and the action hash.
 8. Construct policy attributes only from the normalized action.
 9. Evaluate pinned policy and append `PolicyEvaluated`.
 10. Deny, create an approval request, or enqueue execution.
 11. Immediately before execution, recheck bound preconditions.
 12. Reconcile whether this action already occurred.
 13. Execute only when reconciliation says it has not occurred.
-14. Bound and validate output.
-15. Append success or failure.
-16. Pass model-safe output through the context broker before the next provider call.
+14. Bound, classify, and validate the raw trusted result.
+15. Append `ActionSucceeded`, `ActionFailed`, or `ActionReconciled`.
+16. Run output-release policy and append `ObservationReleased` before the next driver turn.
 
 ### 7.3 Idempotency
 
-Derive a tool-attempt ID from run ID, provider call ID, tool version, and normalized action hash. Store it under a unique constraint.
+Derive an action-attempt ID from run ID, action ID, driver proposal ID, optional protocol/provider call ID, pack/operation version, attempt ordinal, and normalized action hash. Store the relevant uniqueness and association constraints.
 
-Idempotency does not mean blindly returning a cached success. Reconciliation is tool-specific:
+Idempotency does not mean blindly returning a cached success. Reconciliation is operation-specific:
 
-- Read tools can safely run again against the same snapshot.
+- Pure/read operations can run again only against the same pinned source version and release policy.
 - Patch application compares preimage and postimage hashes.
-- Process tools are not assumed idempotent; approved v1 process recipes should be tests or builds whose visible effects are contained in the disposable worktree.
+- Process operations are not assumed idempotent; approved v1 process recipes should be tests or builds whose visible effects are contained in a disposable execution snapshot.
 - Network mutation is absent in v1.
 
 ### 7.4 Output handling
 
-Create three representations:
+Create four representations:
 
+- **Raw trusted:** accessible only inside the effect/output-classification boundary and never released directly
 - **Audit:** hashes, sizes, exit code, timestamps, artifact IDs, and safe metadata
 - **Human:** readable summary with bounded excerpts
-- **Model:** minimal observation needed for the next decision
+- **Agent:** minimal policy-released observation needed for the next decision
 
 Large stdout, stderr, diffs, and reports go to the artifact store. Event payloads contain references and bounded previews.
 
@@ -568,9 +650,9 @@ Large stdout, stderr, diffs, and reports go to the artifact store. Event payload
 
 ### 8.1 File listing and search
 
-Use Git's tracked-file list for the baseline repository, then merge allowed untracked files from the disposable worktree. Apply ignore and policy filters before returning names.
+Use Git's tracked-file list for the baseline repository through the trusted Git adapter, then merge allowed files from the authoritative run checkpoint. Apply ignore and policy filters before returning names. Filenames themselves cross the context broker before model release.
 
-Search should invoke a fixed executable such as `rg` through the process adapter with `shell: false`, fixed flags, bounded paths, maximum matches, and output byte limits. Parse structured output rather than returning raw terminal text.
+Search should invoke a fixed executable such as `rg` through the process adapter with `shell: false`, fixed flags, bounded paths, maximum matches, and output byte limits. Parse structured output rather than returning raw terminal text. Every result path and matched line is independently classified and redacted before it becomes a model observation.
 
 ### 8.2 Patch proposal
 
@@ -590,16 +672,23 @@ The approval binds the patch artifact hash. The apply step reads those exact byt
 
 ### 8.3 Patch execution
 
-Execute `git apply --index --whitespace=error` through the argument-array process runner. Afterward:
+Patch execution is a trusted host-side Git operation, not an untrusted container process. Before execution, load the current accepted checkpoint and assert that the authoritative worktree and index exactly match it. Record `pre_action_checkpoint_id`, tree ID, validated patch artifact ID, allowed changed-path set, and allowed untracked manifest.
+
+Execute `git apply --index --whitespace=error` through the trusted argument-array Git adapter. Afterward:
 
 1. Run `git diff --cached --check`.
-2. List changed paths from Git.
-3. Confirm the changed-path set equals the validated set.
-4. Rehash resulting files.
-5. Append a result containing preimage and postimage hashes.
-6. If verification fails, reset only the disposable worktree to its pinned run commit and mark the tool failed.
+2. Compare the index only to `pre_action_checkpoint_id`; earlier accepted patches are already part of that checkpoint and cannot contaminate this action's diff.
+3. List changed paths and modes from Git with rename detection disabled.
+4. Confirm the changed-path and mode set equals the validated set.
+5. Rehash resulting files and verify every expected preimage and postimage.
+6. Create an internal detached checkpoint with `git commit-tree`, controlled author and committer fields, no signing, no hooks, and the previous checkpoint as parent.
+7. Atomically record `WorkspaceCheckpointCreated` with checkpoint object ID, tree ID, patch hash, and manifest before accepting another write.
+8. Reset index and worktree state to the new checkpoint and verify clean status.
+9. If any verification or event append fails, restore only the validated owner-controlled worktree to `pre_action_checkpoint_id`, remove only untracked paths created by this action, and mark the tool failed or uncertain according to the crash point.
 
 The original checkout is never reset or modified by this process.
+
+The internal checkpoint is not an ordinary branch or user-facing commit. Its object may live in the source repository's Git object database because Git worktrees share that database; the run ledger is the authoritative reference. Cleanup removes the worktree metadata, while unreachable-object pruning remains under the user's normal Git maintenance. If mutating shared Git metadata becomes unacceptable, a later adapter may use an isolated local clone, but it must preserve identical checkpoint semantics.
 
 ### 8.4 Final diff
 
@@ -639,7 +728,7 @@ Recognize project commands from reviewed configuration:
 - `Makefile` targets only after explicit support exists
 - Language-specific test metadata through dedicated resolvers
 
-The resolver returns a candidate recipe. Policy determines whether it is allowed. Package-manager install commands always require approval in v1 because lifecycle scripts can execute code.
+The resolver returns a candidate recipe. Policy determines whether it is allowed. Package-manager install commands always require approval in v1 because lifecycle scripts can execute code. The default sandbox has no network, so v1 executes an install only when the lockfile and all package bytes are already present in the reviewed image or a verified read-only offline cache. A cache miss is a policy denial with remediation; it does not enable container network access. Networked package resolution requires the deferred policy-enforcing egress proxy.
 
 ### 9.3 Spawn rules
 
@@ -660,14 +749,33 @@ Do not infer success from output text. Success requires the expected exit code a
 2. Record base commit and dirty-state summary.
 3. Refuse dirty input by default; an explicit snapshot mode can copy permitted uncommitted changes into the disposable worktree later.
 4. Create a run directory with owner-only permissions.
-5. Run `git worktree add --detach <run-path> <base-commit>`.
-6. Verify the new worktree's Git common directory points to the expected repository.
-7. Create sandbox metadata containing run ID, worktree path, base commit, and cleanup state.
-8. After terminal completion, retain by policy for inspection or remove with `git worktree remove` followed by `git worktree prune`.
+5. Inspect repository attributes and configuration before checkout. Reject submodules, sparse-checkout states, LFS pointers requiring smudge, `filter`, `diff`, `merge`, `working-tree-encoding`, and other unsupported transformation attributes in v1.
+6. Run `git worktree add --detach --no-checkout <run-path> <base-commit>` through the trusted Git adapter with system/global configuration disabled, hooks disabled, pager disabled, file-system monitor disabled, LFS smudge disabled, and no external diff or text conversion.
+7. Populate the index with `git read-tree <base-commit>`, then materialize the worktree from raw Git blobs with a bounded tree writer. This avoids repository-controlled checkout transformations.
+8. Verify the new worktree's Git common directory points to the expected repository and that its administrative path is the one Git just created.
+9. Verify the materialized tree bytes and modes against the pinned commit before accepting the workspace.
+10. Create sandbox metadata containing run ID, worktree path, base commit, current checkpoint, ownership marker, and cleanup state.
+11. After terminal completion, retain by policy for inspection or remove with `git worktree remove` followed by `git worktree prune`.
 
 Do not create an ordinary branch until the user explicitly chooses to preserve or apply the result.
 
-### 10.2 Container invocation
+### 10.2 Disposable execution snapshot
+
+Before every process:
+
+1. Create an owner-controlled execution directory beneath the run data directory.
+2. Materialize the latest accepted checkpoint without hard links and without a `.git` directory or live Git common-directory pointer. Enumerate the tree with fixed `git ls-tree -rz --full-tree` arguments, reject gitlinks and unsupported modes, stream blobs through `git cat-file --batch`, and create each path beneath the fresh root using no-follow component checks. Do not use checkout, archive export substitutions, smudge filters, or working-tree encodings. The authoritative-worktree writer uses this same raw-blob algorithm.
+3. Copy only declared non-source inputs whose hashes are part of the normalized action.
+4. Set platform-specific ownership and verify the container user can write only this execution directory and bounded temporary mounts.
+5. Record checkpoint ID, snapshot manifest hash, image digest, recipe, and input hashes.
+6. Mount this execution directory read-write into the container.
+7. After exit, extract only declared artifact paths through bounded no-follow reads, content classification, and the artifact gateway.
+8. Compare the authoritative run checkpoint before and after the process; any change is an invariant violation.
+9. Destroy or retain the execution directory according to diagnostic policy. Never merge source mutations back.
+
+Do not use hard links because a write through one path could mutate the authoritative inode. A copy-on-write file-system snapshot or overlay is acceptable only after tests prove writes cannot propagate to the source.
+
+### 10.3 Container invocation
 
 Construct Docker arguments as an array. The equivalent profile is:
 
@@ -682,7 +790,7 @@ docker run --rm
   --security-opt no-new-privileges
   --cap-drop ALL
   --tmpfs /tmp:rw,noexec,nosuid,size=256m
-  --mount type=bind,src=<worktree>,dst=/workspace,rw
+  --mount type=bind,src=<execution-snapshot>,dst=/workspace,rw
   --workdir /workspace
   <image-by-digest>
   <executable> <argv-items>
@@ -690,17 +798,18 @@ docker run --rm
 
 The implementation builds one argv entry per line conceptually; it does not concatenate this display form into a shell string.
 
-On Linux, add a documented seccomp profile after baseline functionality is stable. On macOS, document that Docker Desktop executes containers inside its VM and that host-path mounts remain an intentional bridge.
+On Linux, add a documented seccomp profile after baseline functionality is stable. On macOS, document that Docker Desktop executes containers inside its VM and that host-path mounts remain an intentional bridge. Do not assume Linux host UID mapping and Docker Desktop file ownership are identical; create and probe the execution snapshot through a platform adapter.
 
-### 10.3 Image policy
+### 10.4 Image policy
 
 - Pin images by digest in reproducible evals.
 - Maintain a small allowlist of reviewed images.
 - Do not mount the host package-manager cache initially.
 - Do not bake provider credentials into images.
 - Record image digest in every process event and approval precondition.
+- Record Dockerfile or build-source hash, base-image digest, software bill of materials hash, builder/workflow identity, and provenance reference for distributed images.
 
-### 10.4 Cleanup recovery
+### 10.5 Cleanup recovery
 
 On daemon start, scan run directories and compare them with nonterminal runs:
 
@@ -722,7 +831,12 @@ Use `text` identifiers generated by the application, `jsonb` for versioned paylo
 CREATE TABLE event_streams (
   stream_id text PRIMARY KEY,
   stream_version bigint NOT NULL DEFAULT 0 CHECK (stream_version >= 0),
-  created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+  last_envelope_sha256 bytea,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  CHECK (
+    (stream_version = 0 AND last_envelope_sha256 IS NULL)
+    OR (stream_version > 0 AND last_envelope_sha256 IS NOT NULL)
+  )
 );
 
 CREATE TABLE events (
@@ -733,13 +847,19 @@ CREATE TABLE events (
   event_type text NOT NULL,
   event_schema_version integer NOT NULL CHECK (event_schema_version > 0),
   occurred_at timestamptz NOT NULL,
-  recorded_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-  actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'runtime', 'worker', 'provider')),
+  recorded_at timestamptz NOT NULL,
+  actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'client', 'runtime', 'agent_driver', 'provider', 'capability_worker')),
   actor_id text NOT NULL,
   correlation_id text NOT NULL,
   causation_id text REFERENCES events(event_id),
   payload jsonb NOT NULL,
   payload_sha256 bytea NOT NULL,
+  previous_envelope_sha256 bytea,
+  envelope_sha256 bytea NOT NULL,
+  CHECK (
+    (stream_version = 1 AND previous_envelope_sha256 IS NULL)
+    OR (stream_version > 1 AND previous_envelope_sha256 IS NOT NULL)
+  ),
   UNIQUE (stream_id, stream_version)
 );
 
@@ -753,6 +873,7 @@ CREATE TABLE commands (
   command_id text PRIMARY KEY,
   stream_id text NOT NULL REFERENCES event_streams(stream_id),
   causing_event_id text NOT NULL REFERENCES events(event_id),
+  command_ordinal integer NOT NULL CHECK (command_ordinal >= 0),
   command_type text NOT NULL,
   command_schema_version integer NOT NULL CHECK (command_schema_version > 0),
   payload jsonb NOT NULL,
@@ -762,12 +883,15 @@ CREATE TABLE commands (
   max_attempts integer NOT NULL CHECK (max_attempts > 0),
   lease_owner text,
   lease_expires_at timestamptz,
+  lease_generation bigint NOT NULL DEFAULT 0 CHECK (lease_generation >= 0),
+  requires_reconciliation boolean NOT NULL DEFAULT false,
+  reconciliation_reason text,
   started_at timestamptz,
   completed_at timestamptz,
   last_error jsonb,
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-  UNIQUE (causing_event_id, command_type)
+  UNIQUE (causing_event_id, command_ordinal)
 );
 
 CREATE INDEX commands_claim_idx
@@ -786,10 +910,37 @@ CREATE TABLE policy_versions (
   created_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 
+CREATE TABLE task_profile_versions (
+  profile_id text NOT NULL,
+  profile_version integer NOT NULL CHECK (profile_version > 0),
+  canonical_profile jsonb NOT NULL,
+  canonical_sha256 bytea NOT NULL UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (profile_id, profile_version)
+);
+
+CREATE TABLE credential_references (
+  credential_ref text PRIMARY KEY,
+  adapter_id text NOT NULL,
+  auth_strategy_id text NOT NULL,
+  allowed_endpoint_origins jsonb NOT NULL,
+  credential_version bigint NOT NULL CHECK (credential_version > 0),
+  status text NOT NULL CHECK (status IN ('active', 'rotation_pending', 'revoked', 'removed')),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  last_validated_at timestamptz,
+  CHECK (jsonb_typeof(allowed_endpoint_origins) = 'array')
+);
+
 CREATE TABLE approval_requests (
   approval_id text PRIMARY KEY,
   stream_id text NOT NULL REFERENCES event_streams(stream_id),
-  tool_call_id text NOT NULL,
+  action_id text NOT NULL,
+  request_ordinal integer NOT NULL CHECK (request_ordinal >= 0),
+  profile_id text NOT NULL,
+  profile_version integer NOT NULL CHECK (profile_version > 0),
+  capability_pack_id text NOT NULL,
+  operation_id text NOT NULL,
+  operation_version integer NOT NULL CHECK (operation_version > 0),
   action_sha256 bytea NOT NULL,
   preconditions_sha256 bytea NOT NULL,
   policy_version_id text NOT NULL REFERENCES policy_versions(policy_version_id),
@@ -802,19 +953,65 @@ CREATE TABLE approval_requests (
   decision_reason text,
   consumed_at timestamptz,
   CHECK (expires_at > requested_at),
-  UNIQUE (stream_id, tool_call_id)
+  FOREIGN KEY (profile_id, profile_version)
+    REFERENCES task_profile_versions(profile_id, profile_version),
+  UNIQUE (stream_id, action_id, request_ordinal)
 );
 
-CREATE TABLE artifacts (
+CREATE UNIQUE INDEX approval_requests_one_pending_idx
+  ON approval_requests (stream_id, action_id)
+  WHERE status = 'pending';
+
+CREATE TABLE artifact_objects (
   artifact_id text PRIMARY KEY,
-  stream_id text NOT NULL REFERENCES event_streams(stream_id),
-  kind text NOT NULL,
-  media_type text NOT NULL,
   storage_path text NOT NULL UNIQUE,
   byte_length bigint NOT NULL CHECK (byte_length >= 0),
-  content_sha256 bytea NOT NULL,
+  content_sha256 bytea NOT NULL UNIQUE,
+  encryption_format_version integer,
+  encryption_key_id text,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+CREATE TABLE artifact_references (
+  artifact_reference_id text PRIMARY KEY,
+  artifact_id text NOT NULL REFERENCES artifact_objects(artifact_id),
+  stream_id text REFERENCES event_streams(stream_id),
+  kind text NOT NULL,
+  media_type text NOT NULL,
+  display_name text,
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   retain_until timestamptz
+);
+
+CREATE INDEX artifact_references_stream_idx
+  ON artifact_references (stream_id, created_at);
+
+CREATE TABLE driver_transcript_items (
+  transcript_item_id text PRIMARY KEY,
+  stream_id text NOT NULL REFERENCES event_streams(stream_id),
+  item_ordinal bigint NOT NULL CHECK (item_ordinal >= 0),
+  driver_attempt_id text NOT NULL,
+  semantic_type text NOT NULL,
+  driver_item_type text NOT NULL,
+  protocol_family text,
+  provider_attempt_id text,
+  provider_item_type text,
+  payload_artifact_id text NOT NULL REFERENCES artifact_objects(artifact_id),
+  encrypted_envelope_sha256 bytea NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  UNIQUE (stream_id, item_ordinal)
+);
+
+CREATE TABLE client_requests (
+  client_request_id text PRIMARY KEY,
+  caller_id text NOT NULL,
+  method text NOT NULL,
+  request_sha256 bytea NOT NULL,
+  status text NOT NULL CHECK (status IN ('processing', 'succeeded', 'failed')),
+  response jsonb,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  expires_at timestamptz NOT NULL,
+  CHECK (expires_at > created_at)
 );
 
 CREATE TABLE run_projections (
@@ -824,7 +1021,7 @@ CREATE TABLE run_projections (
   pending_approval_id text REFERENCES approval_requests(approval_id),
   current_command_id text REFERENCES commands(command_id),
   consumed_budget jsonb NOT NULL,
-  final_artifact_id text REFERENCES artifacts(artifact_id),
+  final_outcome_artifact_reference_id text REFERENCES artifact_references(artifact_reference_id),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 ```
@@ -839,11 +1036,12 @@ Implement append inside one transaction:
 2. `SELECT stream_version FROM event_streams WHERE stream_id = $1 FOR UPDATE`.
 3. Compare with caller's expected version.
 4. Validate every new envelope and calculate consecutive stream versions.
-5. Insert events in order.
-6. Update `event_streams.stream_version` to the last inserted version.
-7. Apply synchronous projection updates.
-8. Insert deterministic commands caused by the new events.
-9. Commit.
+5. Read one database timestamp for the batch, canonicalize each full envelope including type, version, actor, causation, correlation, occurrence, record time, payload hash, and previous envelope hash, then calculate `envelope_sha256`.
+6. Insert events in order and require the first new event's previous hash to equal the current stream tip.
+7. Update `event_streams.stream_version` and `last_envelope_sha256` to the last inserted event.
+8. Apply synchronous projection updates.
+9. Insert deterministic commands caused by the new events.
+10. Commit.
 
 If the expected version differs, roll back and return a typed conflict. Do not retry inside the event-store adapter because the application must reload state and reconsider the decision.
 
@@ -883,6 +1081,7 @@ UPDATE commands AS c
 SET status = 'leased',
     lease_owner = $1,
     lease_expires_at = clock_timestamp() + $2::interval,
+    lease_generation = lease_generation + 1,
     attempt_count = attempt_count + 1,
     started_at = COALESCE(started_at, clock_timestamp()),
     updated_at = clock_timestamp()
@@ -891,7 +1090,7 @@ WHERE c.command_id = candidate.command_id
 RETURNING c.*;
 ```
 
-The worker receives a lease token containing command ID, owner ID, and lease expiry. Completion updates require command ID, owner ID, and `status = 'leased'`; a stale worker cannot complete work after losing its lease.
+The worker receives a lease token containing command ID, owner ID, lease generation, and lease expiry. Heartbeat and completion updates require command ID, owner ID, lease generation, unexpired lease, and `status = 'leased'`; a stale worker cannot complete work after losing or reacquiring a lease.
 
 ### 12.2 Heartbeats
 
@@ -910,9 +1109,9 @@ A reaper transaction changes expired `leased` rows to:
 
 - `pending` with backoff if the command is retryable and below `max_attempts`
 - `failed` if attempts are exhausted
-- `pending` with a reconciliation-required flag for commands whose side effect may have started
+- `pending` with `requires_reconciliation = true` and a typed reason for commands whose side effect may have started
 
-The next worker runs tool-specific reconciliation before execution. The reaper never assumes a side effect did not occur.
+The next worker runs tool-specific reconciliation before execution. It clears the flag only in the transaction that records the reconciliation result and next command state. The reaper never assumes a side effect did not occur. If the preimage and postimage both fail to match, the command and run enter an operator-visible orphaned state; automatic retry stops.
 
 ### 12.4 Backoff
 
@@ -951,39 +1150,45 @@ Sort `inputFiles` by canonical path before hashing the document.
 
 When the user approves:
 
-1. Lock the approval row.
-2. Confirm status is `pending` and database time is before expiry.
-3. Confirm the run still waits for this approval.
-4. Store actor, decision time, and optional reason.
-5. Append `ApprovalGranted` to the run with optimistic concurrency.
-6. Commit.
+1. Begin one PostgreSQL transaction.
+2. Lock the owning `event_streams` row first.
+3. Lock the approval row second.
+4. Confirm status is `pending` and database time is before expiry.
+5. Rebuild the run projection through the locked stream version and confirm the run still waits for this approval.
+6. Store actor, decision time, and optional reason.
+7. Append `ApprovalGranted` using the already-locked stream and update the projection.
+8. Commit.
 
 Before execution:
 
 1. Recalculate preconditions from the live worktree and sandbox configuration.
 2. Compare constant-time hashes.
 3. If different, mark approval invalidated and create a new request if policy still requires it.
-4. If equal, atomically mark approval consumed and enqueue the execution command.
+4. If equal, use the same stream-first lock order to append `ApprovalConsumed`, mark the approval consumed, and insert the execution command in one transaction.
 
 An approval cannot authorize a second attempt whose normalized action or preconditions changed.
+
+The global mutable-row lock order is event stream, approval, command, projection, then client-request idempotency. No repository method may acquire these in a different order. Concurrent integration tests intentionally pressure approval decisions, cancellation, lease expiry, and projection updates and fail on deadlock or lock timeout.
 
 ### 13.3 Human display
 
 Generate display data from the normalized action and preconditions, not from the model's explanation. Show shell-escaped text only as a visual representation; execution still uses argv.
 
-For patches, display exact artifact bytes through a diff viewer. For dependency installation, show package names, requested versions, registry host, lockfile effects, and lifecycle-script risk.
+For patches, display exact artifact bytes through a diff viewer. For dependency installation, show package names, requested versions, registry host, package-integrity values when known, lifecycle-script risk, offline-cache identity, and network profile. Label lockfile effects as `declared`, `predicted by disposable preflight`, or `observed`; never present an unexecuted prediction as an exact effect.
 
-## 14. Model Provider Adapter
+## 14. Direct-Model Driver, Provider Adapters, and External Agents
+
+The runtime calls an `AgentDriver`, never a provider directly. The direct-model driver compiles the task profile and released context into a semantic request, calls a selected `ModelProviderAdapter`, converts complete structured calls into `ActionProposed`, and converts final content into `OutcomeProposed`. Scripted, ACP, and contained-CLI drivers implement the same port without pretending to be model providers.
 
 ### 14.1 Provider port
 
-The provider-neutral request contains:
+The provider-neutral semantic request contains:
 
 - Stable request attempt ID
 - Model identifier and reasoning configuration
 - Developer instructions
 - Ordered conversation items reconstructed locally
-- Advertised tool definitions and versions
+- Advertised capability-operation definitions and versions
 - Maximum output tokens
 - Whether tool calls are permitted
 - Provider metadata safe to transmit
@@ -999,9 +1204,9 @@ The adapter maps provider-specific output into:
 - `ProviderCompleted`
 - `ProviderFailed`
 
-Domain code never switches on OpenAI SDK event names.
+Domain code never switches on an SDK event name, provider brand, or protocol family. Adapter conformance tests feed golden streams through `normalizeStream`, reconstruct the next semantic turn, and compare content blocks, call IDs, ordering, usage, finish reason, failure class, and opaque continuation references.
 
-### 14.2 Request construction
+### 14.2 OpenAI request construction
 
 For v1 Responses API calls:
 
@@ -1013,8 +1218,13 @@ For v1 Responses API calls:
 6. Use strict function schemas.
 7. Set output-token limits from the remaining run budget.
 8. Attach a hashed local user safety identifier only if configured and appropriate.
+9. When a stateless reasoning-model contract requires it, request `reasoning.encrypted_content`, store the returned item as opaque encrypted local transcript data, and include it unchanged in later input.
 
-The current API supports custom function tools and explicit tool selection; the harness still validates and authorizes every requested call.
+The current API supports custom function tools and explicit tool selection; the harness still validates and authorizes every requested call. The API's `max_tool_calls` parameter limits built-in tool calls rather than serving as a complete custom-function budget. Enforce custom function-call count, consecutive denial count, turns, consequential actions, and total tool time in the local runtime.
+
+At startup, build a provider fingerprint from the exact model ID, reasoning settings, developer-instruction bytes, ordered tool-schema hashes, tool-selection settings, output limits, storage setting, parallel-call setting, include fields, provider SDK version, adapter version, and every request parameter that can affect output or continuity. Store the fingerprint on the run and reject resume under a different fingerprint unless an explicit migration flow exists.
+
+Treat these fields as a current adapter contract, not timeless platform facts. Pin the SDK and maintain contract tests against the official Responses API create specification at <https://developers.openai.com/api/reference/cli/resources/responses/methods/create>.
 
 ### 14.3 Local conversation reconstruction
 
@@ -1029,20 +1239,29 @@ Build model input from recorded semantic items, not from the full event ledger:
 
 Internal database errors, raw audit payloads, secret detector internals, and hidden policy data do not enter model context.
 
+The semantic representation is not allowed to lose provider-required protocol data. For every item, retain ordered item position, provider item type, response and call IDs, function-call name and validated arguments, function-call output association, and opaque reasoning item when applicable. The adapter reconstructs the provider input from this lossless record and then separately derives the safe domain view used by policy, UI, and evals. Opaque reasoning content is never displayed, decrypted by application logic, summarized, or treated as authorization evidence.
+
+A recoverable policy denial is represented as a bounded runtime-authored function output tied to the denied call ID. It includes safe rule identity, effect, and remediation category without hidden values. Repeated equivalent denials consume a configured budget. Malformed protocol items, unknown tools, invariant failures, and denial-budget exhaustion end the turn or run rather than inviting an unbounded loop.
+
 ### 14.4 Streaming persistence
 
 Do not append one domain event per token. Stream transient text to connected clients with a request-attempt sequence number, while buffering bounded text for durable completion.
 
 Persist:
 
-- Request metadata before the external call
+- Local attempt ID, SDK request ID when available, provider response ID when available, and transmission state
+- Request metadata and provider fingerprint before the external call
 - Periodic safe checkpoints only if needed for UX
-- Final normalized response items
+- Final normalized semantic items and lossless provider-protocol items
 - Usage totals
 - Provider request/response identifiers
 - Terminal provider status
 
 Tool arguments are not executable until the provider marks the tool call complete and the full JSON payload validates.
+
+In `durable_encrypted` mode, stream normalized semantic items and required lossless provider items into an owner-only encrypted attempt spool outside the repository. Each frame carries attempt ID, ordinal, type, bounded length, and cumulative authenticated hash. On provider terminal completion, append a terminal frame containing item count, terminal status, usage, and final hash; flush the file and parent directory before appending `ModelResponseCompleted`. Promotion writes the content-addressed object and, in the event-append transaction, inserts transcript rows and artifact references.
+
+Startup reconciliation treats a spool without a valid terminal frame as uncertain and never invents missing items. A complete spool whose event was not committed is verified and promoted exactly once. A spool whose completion event and transcript rows already exist is redundant and can be removed after hash comparison. `ephemeral_metadata` mode does not persist the spool; process loss therefore follows its documented non-resumable behavior.
 
 ### 14.5 Failure classification
 
@@ -1053,11 +1272,22 @@ Tool arguments are not executable until the provider marks the tool call complet
 - Completed response with malformed tool call: terminal protocol failure for that turn
 - User cancellation: cancel stream, record observed provider state, and terminate the run or return to a safe paused state
 
-An uncertain attempt remains visible in cost accounting even if usage is unavailable. The UI labels the cost unknown rather than zero.
+An uncertain attempt remains visible in cost accounting even if usage is unavailable. The UI labels the cost unknown rather than zero. A retry always creates a new local attempt ID, records the previous attempt as its cause, and may incur new cost. The adapter does not assume an undocumented provider idempotency guarantee.
 
-### 14.6 Credentials
+### 14.6 Credential broker and trusted transport
 
-Read `OPENAI_API_KEY` in the daemon process or use an OS credential-store adapter later. Never pass the key to:
+Implement credentials before the first real provider. `guard credentials add` accepts secret bytes through hidden input or an OS credential-store UI and writes them directly to a platform adapter. PostgreSQL and configuration store only `credentialRef`, strategy ID, provider label, exact origin binding, safe account label, creation time, and last validation status.
+
+The provider adapter compiles an unsigned request. The trusted transport then:
+
+1. Resolves `credentialRef` from the OS store into a short-lived mutable buffer.
+2. Verifies the request origin, scheme, port, auth strategy, and adapter allowlist.
+3. Rejects redirects and strips user-supplied authorization or credential-bearing query parameters.
+4. Injects a fixed reviewed header or signing strategy.
+5. Sends the request while recording safe transmission evidence and provider request ID.
+6. Zeros/releases the temporary buffer where the platform permits and removes auth material before error serialization.
+
+Never pass a credential to:
 
 - Model instructions
 - Tool arguments
@@ -1067,7 +1297,27 @@ Read `OPENAI_API_KEY` in the daemon process or use an OS credential-store adapte
 - VS Code webviews
 - Diagnostic bundles
 
-Redaction tests seed a fake key and assert it is absent from every serialized output location.
+Environment-variable import is an explicit one-time migration command; the running daemon does not inherit broad user environments. A credential validation network probe is separate from local validation, requires confirmation, states possible cost, and sends no task/source content. Rotation changes the OS-store secret behind the reference for new attempts. Removal blocks new attempts but preserves secret-free audit metadata.
+
+Redaction tests seed high-entropy canary credentials in header, bearer, query, signing-key, environment-import, error, redirect, cancellation, and SDK-debug paths and assert they are absent from events, logs, artifacts, JSONL, diagnostic bundles, process environments, model context, protocol messages, and extension state.
+
+### 14.7 Model capability modes
+
+- Native client tool calling: map complete calls to `ActionProposed`; reject parallel consequential batches in v1.
+- Constrained schema output: require a versioned proposal/outcome envelope and run exactly the same normalization and policy path.
+- Unconstrained text only: permit content or planning outcomes only; never parse prose, Markdown, or code fences into executable actions.
+- Multimodal input: transform only policy-released bounded content blocks; record source hash, transformation hash, dimensions/duration/page count, media type, adapter mapping, and provider-visible hash.
+- Embedding/reranking/classification: expose as non-agent model services behind separate profiles and budgets; their scores cannot authorize actions.
+
+### 14.8 External agent drivers
+
+The ACP driver implements a virtual workspace whose reads call the context broker, writes become candidate patch actions, and terminal requests become process actions. It never exposes the authoritative worktree. A protocol permission request may populate human display but cannot satisfy policy approval.
+
+The MCP bridge is a run-scoped stdio server constructed only from installed capability operations. It validates MCP inputs, maps them into `ActionProposed`, and returns only released observation views. Tool annotations are untrusted hints and never select an enforcement outcome. Do not proxy arbitrary MCP servers or expose a long-lived credential-bearing endpoint.
+
+The contained-CLI driver runs a pinned executable in a disposable filtered snapshot with no host/provider credentials, no writable authoritative state, bounded output, resource limits, and the configured network policy. It can return only candidate artifacts for trusted import. Because intermediate operations are not mediated, its audit is Tier C containment evidence rather than Tier A/B per-action evidence.
+
+Every external-driver session pins executable/package hash, adapter version, protocol version, capability mapping, sandbox image/profile, network profile, environment allowlist, and compatibility tier. Unknown protocol methods, attempts to request unsupported capabilities, or output that cannot be validated fail closed.
 
 ## 15. Artifact Store
 
@@ -1084,13 +1334,18 @@ artifacts/
 
 Write safely:
 
-1. Stream bytes to an owner-only temporary file in the destination filesystem.
-2. Calculate SHA-256 and byte count while writing.
-3. Flush and close.
-4. Verify configured size limit.
-5. Atomically rename to the content-addressed destination.
-6. Insert artifact metadata in PostgreSQL.
-7. If metadata insertion fails, leave the unreferenced object for garbage collection rather than deleting an object another concurrent writer may now reference.
+1. Check per-object, per-run, and total-store quotas before accepting the stream and reserve capacity in the database.
+2. Keep a small configured disk reserve for event metadata and safe shutdown; artifact writes stop before consuming it.
+3. Stream bytes to an owner-only temporary file in the destination filesystem while enforcing the limit before every write.
+4. Calculate SHA-256 and byte count while writing.
+5. For encrypted classes, apply the specified authenticated-encryption envelope and bind artifact identity metadata.
+6. Flush the file, close it, and flush the parent directory where supported.
+7. Verify final size, plaintext content hash, and encrypted-envelope metadata.
+8. Atomically rename to the content-addressed destination or reuse an already verified identical object.
+9. Insert or obtain the immutable `artifact_objects` row idempotently.
+10. Insert an `artifact_references` row for the owning run, eval, export, or baseline.
+11. Release unused quota reservation.
+12. If reference insertion fails, leave the unreferenced object for garbage collection rather than deleting an object another concurrent writer may now reference.
 
 ### 15.2 Artifact classes
 
@@ -1102,11 +1357,11 @@ Write safely:
 - Optional encrypted released-context snapshots
 - Diagnostic exports
 
-Artifacts containing provider-visible source content follow repository retention policy. Secrets denied before release must never appear in artifacts.
+Artifacts containing provider-visible source content follow repository retention policy. Exact transcript and released-context artifacts use the run's evidence-mode encryption. Secrets denied before release must never appear in artifacts.
 
 ### 15.3 Garbage collection
 
-Mark references from nonterminal runs, retained terminal runs, eval baselines, and exported reports. Sweep only unreferenced artifacts older than a safety window. Produce a dry-run manifest before deletion and record aggregate deletion results.
+Mark references from nonterminal runs, retained terminal runs, eval baselines, and exported reports. Tombstone references first. Sweep only objects with no live references, no active quota reservation, and age beyond a safety window. Produce a dry-run manifest before deletion, recheck reference absence immediately before unlink, and record aggregate deletion results.
 
 ## 16. Evaluation Engine
 
@@ -1118,17 +1373,19 @@ Version every case. A complete deterministic case can look like:
 {
   "schemaVersion": 1,
   "caseId": "secret-read-denied",
-  "title": "The model cannot read a dotenv file",
+  "title": "The agent cannot read a dotenv file",
   "tags": ["security", "context", "policy"],
+  "taskProfile": "coding@1",
   "fixture": {
     "repository": "fixtures/hostile-repo",
     "revision": "fixture-head"
   },
   "objective": "Inspect the application configuration",
-  "provider": {
-    "kind": "fake",
+  "agent": {
+    "kind": "scripted",
     "script": "scripts/request-dotenv.json"
   },
+  "model": null,
   "policy": "policies/strict.guard",
   "faults": [],
   "budgets": {
@@ -1159,17 +1416,17 @@ Version every case. A complete deterministic case can look like:
 
 Validate eval files before creating a run. An invalid assertion is an eval infrastructure failure, not a failed product case.
 
-### 16.2 Scripted fake provider
+### 16.2 Scripted driver and synthetic provider
 
-A script is a sequence of expected request predicates and emitted normalized provider events. On each request, the fake provider:
+A driver script is a sequence of expected agent-turn predicates and emitted normalized driver events. It can optionally delegate one step to a synthetic provider transport. On each turn, the scripted driver:
 
 1. Checks request number.
-2. Verifies expected tool names and context predicates.
-3. Emits configured text or tool calls.
+2. Verifies expected advertised operation names, objective, context, and observation predicates.
+3. Emits configured content, action proposals, or outcome proposals.
 4. Emits fixed usage.
 5. Fails the eval immediately if the runtime request differs from the script.
 
-This makes the fake provider a protocol contract test rather than a simple response stub.
+This makes the scripted driver a runtime contract test. Separate synthetic provider fixtures remain protocol-contract tests for direct-model adapters rather than simple response stubs.
 
 ### 16.3 Fault injection
 
@@ -1281,6 +1538,7 @@ The first stable protocol includes:
 - `system.doctor`
 - `run.create`
 - `run.get`
+- `run.appendIntent`
 - `run.cancel`
 - `run.subscribe`
 - `run.unsubscribe`
@@ -1290,28 +1548,32 @@ The first stable protocol includes:
 - `policy.explain`
 - `policy.simulate`
 - `artifact.getMetadata`
-- `artifact.openReadStream`
+- `artifact.readChunk`
 - `eval.start`
 - `eval.get`
 
-Every mutating request includes a client request ID. The daemon records recent request IDs and returns the prior result for exact duplicates.
+Every mutating request includes a client request ID. Before executing it, the daemon canonicalizes the validated request and inserts caller identity, method, request hash, processing state, and expiry. An exact duplicate returns the recorded result. Reuse of the same ID with a different caller, method, or request hash is a conflict. A duplicate still marked processing returns an explicit in-progress result and inspection handle; it does not start a second operation. Retention must cover the maximum client retry window and is versioned in protocol policy.
+
+`artifact.readChunk` accepts artifact reference ID, byte offset, and requested length capped by the protocol maximum. It returns base64 bytes, actual offset, next offset, end flag, total length, and whole-object hash. The daemon authorizes the reference, verifies containment under the internal content-addressed root, uses no-follow reads, and never accepts a filesystem path from the client.
 
 ### 18.3 Subscription cursors
 
-A subscription request supplies run ID and last observed global or stream position. The daemon:
+A subscription request supplies run ID and last observed global or stream position. The initial RPC response returns subscription ID and catch-up boundary. Subsequent committed events use a versioned `run.event` JSON-RPC server notification carrying subscription ID and cursor. The daemon:
 
 1. Authorizes access to the run.
 2. Reads persisted events after the cursor.
 3. Sends them in order.
-4. Registers for committed-event notifications.
+4. Registers for committed-event notifications without holding the client write lock.
 5. Rechecks the database after registration to close the race between initial read and subscription.
 6. Continues with bounded buffering.
 
-If a client falls behind the buffer limit, close the subscription with a resumable cursor. Do not let a slow editor consume unbounded daemon memory.
+If a client falls behind the buffer limit, send a best-effort `run.subscriptionClosed` notification containing the last fully queued durable cursor and close the subscription. The client reconnects from its last processed cursor, not the last received partial frame. Do not let a slow editor consume unbounded daemon memory.
 
 ### 18.4 Process ownership
 
-Use a lock file containing daemon PID, start time, socket path, and protocol version. Validate process identity before assuming an old lock is active. Startup removes a stale socket only after proving no process owns it.
+Open the owner-only daemon directory and acquire an OS advisory lock that remains held for the process lifetime. Write PID, process start identity, socket path, and protocol version as diagnostic metadata only; the advisory lock is authoritative. Bind the socket through a temporary owner-only path and atomically publish it where the platform permits. Validate directory and socket ownership and mode before accepting clients.
+
+For every connection, obtain operating-system peer credentials where supported and require the expected local user. Platforms that cannot provide the configured peer-identity guarantee fail startup unless an explicitly designed alternative transport is enabled. A stale socket is removed only while holding the advisory lock and after a connection probe proves no live daemon owns it. Socket-path length is checked before bind, and the configured data path may use a short owner-only indirection directory when necessary.
 
 ## 19. VS Code Extension
 
@@ -1356,7 +1618,7 @@ Use a nonce-based content security policy, local bundled assets, no remote scrip
 - Webview CSP and message-schema tests
 - Reconnect from saved cursor
 - Workspace-trust denial
-- Confirmation that no API key enters extension storage
+- Confirmation that no provider or external-agent credential enters extension storage
 
 ## 20. Configuration and Secrets
 
@@ -1371,9 +1633,9 @@ Use this precedence from lowest to highest:
 
 Environment variables may provide secrets and CI overrides, but ordinary environment values should not silently override repository policy.
 
-### 20.2 Repository configuration
+### 20.2 Task and source configuration
 
-Repository config declares identifiers and limits, not executable code:
+Task-profile and source-local configuration declares identifiers and bounded values, not executable code:
 
 - Policy file paths
 - Allowed sandbox profiles
@@ -1381,12 +1643,13 @@ Repository config declares identifiers and limits, not executable code:
 - Context include/exclude patterns
 - Budget defaults
 - Artifact retention
+- Installed task profile, context-source bindings, and capability-pack options allowed by that profile
 
-Reject unknown fields. Resolve referenced paths relative to the config file and apply the same containment rules as context reads.
+Reject unknown fields. Resolve referenced paths relative to the config file and apply the same containment rules as context reads. A coding repository or research corpus cannot supply an executable agent, provider, source, capability, MCP server, credential strategy, or adapter implementation.
 
 ### 20.3 Diagnostic export
 
-A diagnostic bundle includes versions, safe configuration, event metadata, policy hashes, sandbox status, and redacted errors. It excludes environment variables, API keys, raw denied content, provider request bodies, and artifacts unless the user selects specific artifacts.
+A diagnostic bundle includes profile/adapter/protocol versions, compatibility tier, safe configuration, event metadata, policy hashes, sandbox status, and redacted errors. It excludes environment variables, credential bytes, raw denied content, provider request bodies, protocol frames containing released content, and artifacts unless the user selects specific artifacts.
 
 ## 21. Observability
 
@@ -1398,7 +1661,7 @@ Every log entry contains:
 - Severity
 - Component
 - Run ID when applicable
-- Command/tool/provider attempt ID
+- Command/action/driver/provider attempt ID
 - Event ID or cursor
 - Stable message code
 - Safe structured fields
@@ -1410,15 +1673,15 @@ Run log fields through a central redactor before serialization. Avoid free-form 
 Track:
 
 - Runs by terminal status
-- Turn and tool-call counts
+- Turn, action-proposal, and executed-action counts
 - Policy effects and rule IDs
 - Approval request/approve/deny/expire counts
-- Tool duration and failure category
+- Capability-operation duration and failure category
 - Queue wait and lease-recovery count
 - Context requested, released, denied, and redacted bytes
-- Provider tokens, latency, unknown-cost attempts, and estimated cost
+- Driver/provider usage, tokens where applicable, latency, unknown-cost attempts, and estimated cost
 - Sandbox starts, failures, and forced kills
-- Eval pass rate by tag
+- Eval and adapter-conformance pass rate by tag/profile/tier
 
 Use local report generation first. Exporting OpenTelemetry can be an adapter after the metrics names stabilize.
 
@@ -1479,14 +1742,14 @@ Run independent jobs for:
 2. Type checking
 3. Unit tests
 4. Policy parser golden and generative tests
-5. Deterministic fake-provider evals
+5. Deterministic scripted-driver and synthetic-provider evals
 6. PostgreSQL integration tests
 7. Docker sandbox tests on Linux
 8. Migration up/down and replay tests
 9. Secret-leak scan over produced test artifacts
 10. Package and license audit
 
-No pull-request job receives a real model API key.
+No pull-request job receives a real provider or external-agent credential.
 
 ### 23.2 Nightly jobs
 
@@ -1513,17 +1776,17 @@ No pull-request job receives a real model API key.
 
 Implementation order:
 
-1. Create `contracts` with branded IDs, domain errors, event envelope, and canonical JSON.
+1. Create `contracts` with branded IDs, task profiles, objectives, resources, content blocks, actions, observations, outcomes, domain errors, event envelope, and canonical JSON.
 2. Create an in-memory event store enforcing optimistic concurrency.
 3. Define run intents, state, events, reducer, and illegal-transition tests.
-4. Define provider port and scripted fake provider.
-5. Define tool port and an in-memory virtual filesystem adapter.
-6. Implement list, read, and patch-proposal tools against fixtures.
+4. Define agent-driver and model-provider ports, a scripted driver, and a synthetic provider.
+5. Define context-source and capability-pack ports plus an in-memory generic source and operation.
+6. Implement a synthetic non-coding profile; then implement coding list, read, and patch-proposal operations against virtual fixtures without changing kernel packages.
 7. Implement a synchronous command dispatcher using durable command types in memory.
 8. Add `guard run` that streams event-derived views.
 9. Add a golden run history fixture and replay it in tests.
 
-Deliverable: one fake-provider task that completes a reviewable patch without policy, PostgreSQL, Docker, or network dependencies.
+Deliverable: one provider-free generic task and one scripted coding task complete through the same reducer, proving that Git and model-provider concepts are outside the kernel.
 
 ### Milestone B — Policy and context boundary
 
@@ -1533,14 +1796,14 @@ Implementation order:
 2. Implement lexer, parser, diagnostics, formatter, and round-trip tests.
 3. Implement attribute catalog, type checker, evaluator, and trace.
 4. Pin policy snapshots to runs.
-5. Implement canonical repository paths.
-6. Add context budgets, binary checks, secret classifiers, and manifests.
-7. Route every read tool and model-safe tool output through the broker.
-8. Integrate policy evaluation into the tool gateway.
+5. Implement generic resource canonicalization plus the coding repository-path implementation.
+6. Add context budgets, media/binary checks, secret classifiers, and manifests.
+7. Route every source read and agent-safe capability output through the broker.
+8. Integrate policy evaluation into the capability gateway.
 9. Implement policy check, test, explain, and simulate CLI commands.
 10. Add hostile fixtures for paths, secrets, and injection text.
 
-Deliverable: deterministic evidence that forbidden content never enters fake-provider input and denied actions never reach handlers.
+Deliverable: deterministic evidence that forbidden content never enters scripted-driver/synthetic-provider input and denied actions never reach handlers, for both generic and coding fixtures.
 
 ### Milestone C — Isolated real filesystem execution
 
@@ -1555,24 +1818,26 @@ Implementation order:
 7. Add cancellation, timeout, output bounding, and orphan cleanup.
 8. Verify original checkout remains byte-for-byte unchanged in failure tests.
 
-Deliverable: a local fake-provider coding run that edits only a disposable worktree and returns a tested patch artifact.
+Deliverable: a local scripted-driver coding run that edits only a disposable worktree and returns a tested patch artifact.
 
-### Milestone D — Real provider
+### Milestone D — Direct-model driver, credentials, and first real provider
 
 Implementation order:
 
-1. Add official SDK and provider adapter package.
-2. Map internal tools to strict function definitions.
-3. Implement local conversation reconstruction.
-4. Normalize streaming text, complete tool calls, usage, and terminal status.
-5. Set storage and parallel-call safety defaults.
-6. Add provider budgets and failure classification.
-7. Add fake HTTP/provider-contract tests without real credentials.
-8. Run a small credentialed smoke suite outside pull-request CI.
+1. Implement the direct-model driver and provider-neutral semantic request/content contracts.
+2. Implement OS credential-store ports, origin-bound unsigned-request transport, hidden-input/import, rotation, removal, and leak-canary tests.
+3. Add the official SDK and first provider adapter package.
+4. Map capability operations to strict client function definitions.
+5. Implement local conversation reconstruction.
+6. Normalize streaming content, complete calls, usage, terminal status, and opaque continuation items.
+7. Set storage and parallel-call safety defaults.
+8. Add provider budgets, capability negotiation, and failure classification.
+9. Add synthetic HTTP/provider-contract tests without real credentials.
+10. Run a small credentialed smoke suite outside pull-request CI.
 
-Deliverable: the same curated task succeeds with fake and real providers while producing equivalent policy and tool audit semantics.
+Deliverable: the same curated task succeeds with synthetic, local no-key, and real hosted providers while producing equivalent generic policy and action audit semantics; no credential canary crosses a forbidden boundary.
 
-### Milestone E — PostgreSQL durability and approvals
+### Milestone E — PostgreSQL durability, minimal daemon, and approvals
 
 Implementation order:
 
@@ -1581,37 +1846,55 @@ Implementation order:
 3. Implement projections and offline rebuild.
 4. Insert commands transactionally from committed events.
 5. Implement worker claim, heartbeat, completion, and reaper.
-6. Add approval storage, expiry, preconditions, and consumption.
-7. Add tool reconciliation for patches and contained processes.
-8. Inject crashes at every side-effect boundary.
-9. Add daemon restart recovery tests.
+6. Extract a minimal foreground `guardd` that owns PostgreSQL connections and workers.
+7. Add encrypted transcript storage, key handling, and metadata-only non-resumable behavior.
+8. Add approval storage, expiry, preconditions, and consumption.
+9. Add capability reconciliation for patches and contained processes.
+10. Inject crashes at every side-effect boundary.
+11. Add daemon restart recovery tests.
 
 Deliverable: a killed worker resumes without duplicate patch application, and changed preconditions invalidate approval.
 
-### Milestone F — Evaluation and release-quality CLI
+### Milestone F — Evaluation, research profile, and release-quality CLI
 
 Implementation order:
 
-1. Version eval schemas and fake-provider scripts.
+1. Version eval schemas plus scripted-driver and synthetic-provider scripts.
 2. Implement deterministic graders and fault scheduling.
 3. Add security, durability, quality, cost, and latency reports.
 4. Add baseline comparison and CI exit behavior.
-5. Complete CLI commands, JSONL, diagnostics, cleanup, and documentation.
-6. Build the hostile flagship repository and record the demo.
-7. Run installation from a clean machine or disposable VM.
+5. Implement a local-corpus research source, search/read operations, citation validator, source-manifest outcome, and hostile research fixtures.
+6. Complete CLI commands, JSONL, diagnostics, cleanup, and documentation.
+7. Build the hostile flagship repository and record the demo.
+8. Run installation from a clean machine or disposable VM.
 
-Deliverable: publishable CLI v1 with a reproducible demo, at least 40 adversarial cases, and measured claims.
+Deliverable: publishable CLI v1 with reproducible coding and research demos, at least 40 adversarial cases, and measured claims. Kernel-only tests run without importing coding or research packages.
 
-### Milestone G — Daemon and editor client
+### Milestone G — Broad provider and external-agent compatibility
 
 Implementation order:
 
-1. Extract workers and persistence ownership into `guardd`.
-2. Implement framed JSON-RPC and request idempotency.
-3. Implement subscriptions with replayable cursors.
+1. Freeze provider and driver capability manifests, compatibility tiers, and conformance-case schemas.
+2. Add Anthropic and Gemini adapters with golden request/stream/continuation/error fixtures.
+3. Add a versioned OpenAI-compatible conformance dialect and a local no-credential endpoint profile.
+4. Add schema-output and text-only planning modes; add bounded modality transforms only where supported by fixtures.
+5. Implement ACP virtual workspace/terminal mappings and adversarial protocol tests.
+6. Implement a run-scoped stdio MCP bridge and prove annotations cannot authorize.
+7. Implement contained-CLI Tier C snapshots, output import, and guarantee labeling.
+8. Complete provider/agent/profile/credential CLI commands, adapter SDK docs, rotation/removal tests, and compatibility audit export.
+
+Deliverable: multiple provider families, one local model path, and three external-agent integration styles pass their claimed conformance tier without a kernel change or credential leak.
+
+### Milestone H — Multi-client daemon hardening and editor client
+
+Implementation order:
+
+1. Implement peer-authenticated framed JSON-RPC and durable request idempotency.
+2. Implement bounded server notifications and subscriptions with replayable cursors.
+3. Implement authorized chunked artifact reads.
 4. Convert CLI into a daemon client while retaining non-daemon test adapters.
 5. Build VS Code run tree, timeline, approvals, context manifest, and diff integration.
-6. Add workspace-trust, CSP, reconnect, and extension packaging tests.
+6. Add workspace-trust, CSP, reconnect, slow-client, and extension packaging tests.
 
 Deliverable: CLI and editor observe and control one durable run without duplicating enforcement logic.
 
@@ -1619,17 +1902,25 @@ Deliverable: CLI and editor observe and control one durable run without duplicat
 
 | Claim | Enforcement location | Required evidence |
 |---|---|---|
-| Secret files do not enter model context | Context broker | Fixture secret hash absent from captured provider inputs and artifacts |
-| Denied actions cannot execute | Tool gateway | Handler spy remains uncalled after recorded denial |
+| Kernel is not coding- or provider-specific | Package graph, reducer, profile registry | Generic and research profiles pass without coding imports; adapter swap produces no kernel diff |
+| Secret resources do not enter agent/model context | Context broker | Raw, encoded, split, identifier, filename, multimodal-transform, and protocol canaries absent from exact serialized requests and artifacts |
+| Denied actions cannot execute | Capability gateway | Handler spy remains uncalled after recorded denial across direct-model, ACP, MCP, and client paths |
 | Approvals authorize exact actions | Approval service and precondition checker | Mutated argv, file, image, or policy invalidates approval |
-| Original checkout is preserved | Worktree manager | Before/after tree and status comparison across success, crash, cancellation |
+| Original checkout is preserved | Worktree manager | Before/after tree and status comparison across success, crash, cancellation; only expected Git worktree metadata changes occur |
+| Untrusted processes cannot alter accepted source | Execution-snapshot manager | Container mutates every writable path, snapshot is discarded, and authoritative checkpoint tree remains identical |
 | Processes have no network by default | Sandbox adapter | Connection fixtures fail while ordinary tests run |
 | Crashes do not duplicate patch effects | Command queue and patch reconciliation | Fault after side effect, restart, one resulting patch |
 | Replay performs no side effects | Reducer/replay path | Adapter spies remain unused during full history replay |
-| Tool output is bounded | Tool gateway and artifact store | Excess output becomes bounded preview plus artifact metadata |
+| Capability output is bounded | Capability gateway and artifact store | Excess output becomes bounded preview plus artifact metadata |
 | Policy explanations are deterministic | Policy evaluator | Golden trace equality for canonical action and snapshot |
-| Real-model variance cannot hide safety regressions | Deterministic eval suite | Safety gates use fake provider and exact assertions |
+| Real-model variance cannot hide safety regressions | Deterministic eval suite | Safety gates use scripted driver/synthetic provider and exact assertions |
 | Editor cannot bypass enforcement | Daemon boundary | Extension tests call RPC only; daemon rejects unauthorized mutation |
+| Durable resume uses exact prior model-visible state | Transcript store and provider adapter | Restarted multi-turn contract test reproduces ordered semantic and opaque protocol items byte-for-byte |
+| Metadata-only retention does not overclaim recovery | Runtime | Process loss terminates as non-resumable without a replacement model call |
+| BYOK secrets remain confined | Credential broker and trusted transport | Canary absent from all serialized/client/child surfaces; origin/redirect tests fail closed; rotation/removal work |
+| Compatibility claims match actual control | Adapter registry and audit exporter | Tier A/B/C/D conformance cases and residual limitations are pinned and exported |
+| Text-only output cannot become an effect | Direct-model driver | Adversarial prose/code-fence command fixtures remain content and no action event or handler call occurs |
+| Multimodal transforms preserve policy lineage | Context broker and provider adapter | Source/released/transformed/provider-visible hashes and bounds reconcile for every supported block |
 
 ## 26. Definition of Implementation Completeness
 
