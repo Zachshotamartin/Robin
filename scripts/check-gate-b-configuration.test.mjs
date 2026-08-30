@@ -99,7 +99,11 @@ test("Gate B aggregation runs each bounded suite once and finishes with mutation
   );
   assert.equal(
     scripts["test:gate:b"],
-    "npm run test:repository && npm run test:gate:b:contracts && npm run test:mutation:gate:b",
+    "npm run test:repository && npm run test:gate:b:contracts && npm run test:eval:deterministic && npm run test:mutation:gate:b",
+  );
+  assert.equal(
+    scripts["test:eval:deterministic"],
+    "npm run test --workspace @guard/milestone-b-scenarios",
   );
   assert.equal(
     (scripts["test:mutation:gate:b"].match(/npm run test:mutation:boundaries/gu) ?? []).length,
@@ -128,6 +132,13 @@ test("Gate B aggregation runs each bounded suite once and finishes with mutation
       `${packageName} tests must build their exact package dependency graph first`,
     );
   }
+  const evalWorkspace = manifests.get("@guard/milestone-b-scenarios");
+  assert.ok(evalWorkspace, "Gate B references its missing deterministic-eval workspace");
+  assert.match(
+    evalWorkspace.scripts?.test ?? "",
+    /^npm run build && /u,
+    "deterministic evals must build their exact dependency graph first",
+  );
 });
 
 test("boundary mutation configuration pins critical scope and argv-only isolation", async () => {
@@ -190,21 +201,28 @@ test("boundary mutation configuration pins critical scope and argv-only isolatio
   assert.match(runner, /failed outside its assertion oracle/u);
 });
 
-test("CI makes aggregate mutation a bounded Gate B job after all prerequisite jobs", async () => {
+test("CI runs deterministic evals explicitly before the bounded Gate B mutation job", async () => {
   const workflow = await readFile(
     path.join(repositoryRoot, ".github", "workflows", "ci.yml"),
     "utf8",
   );
+  const evalJob = workflowJob(workflow, "eval-deterministic");
   const gateJob = workflowJob(workflow, "gate-b");
 
-  assert.match(gateJob, /^    needs: \[static, unit, contracts\]$/mu);
+  assert.match(evalJob, /^    needs: \[static, unit, contracts\]$/mu);
+  assert.match(evalJob, /^    timeout-minutes: (?:[1-9]|[1-5]\d|60)$/mu);
+  assert.match(evalJob, /^      - run: npm ci --ignore-scripts$/mu);
+  assert.match(evalJob, /^      - run: npm run test:eval:deterministic$/mu);
+  assert.doesNotMatch(evalJob, /npm run (?:check|test:unit|test:contracts|test:gate:b)\b/u);
+
+  assert.match(gateJob, /^    needs: \[static, unit, contracts, eval-deterministic\]$/mu);
   assert.match(gateJob, /^    timeout-minutes: (?:[1-9]|[1-5]\d|60)$/mu);
   assert.match(gateJob, /^      - run: npm ci --ignore-scripts$/mu);
   assert.match(gateJob, /^      - run: npm run test:mutation:gate:b$/mu);
   assert.doesNotMatch(gateJob, /npm run test:mutation:(?:boundaries|policy)\b/u);
   assert.doesNotMatch(gateJob, /npm run (?:check|test:unit|test:contracts|test:gate:b)\b/u);
 
-  for (const prerequisite of ["static", "unit", "contracts"]) {
+  for (const prerequisite of ["static", "unit", "contracts", "eval-deterministic"]) {
     assert.ok(
       workflow.indexOf(`\n  ${prerequisite}:\n`) <
         workflow.indexOf("\n  gate-b:\n"),
@@ -212,10 +230,15 @@ test("CI makes aggregate mutation a bounded Gate B job after all prerequisite jo
     );
   }
 
-  const actions = [...gateJob.matchAll(/^      - uses: ([^\s#]+)/gmu)]
-    .map((match) => match[1]);
-  assert.equal(actions.length, 2);
-  for (const action of actions) {
-    assert.match(action, /^[^@\s]+@[0-9a-f]{40}$/u);
+  for (const [name, job] of [
+    ["eval-deterministic", evalJob],
+    ["gate-b", gateJob],
+  ]) {
+    const actions = [...job.matchAll(/^      - uses: ([^\s#]+)/gmu)]
+      .map((match) => match[1]);
+    assert.equal(actions.length, 2, `${name} must use exactly two pinned actions`);
+    for (const action of actions) {
+      assert.match(action, /^[^@\s]+@[0-9a-f]{40}$/u);
+    }
   }
 });

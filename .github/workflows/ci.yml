@@ -52,9 +52,23 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run test:contracts
 
+  eval-deterministic:
+    name: Gate B deterministic adversarial evaluation
+    needs: [static, unit, contracts]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:eval:deterministic
+
   gate-b:
     name: Gate B enforcement mutation merge gate
-    needs: [static, unit, contracts]
+    needs: [static, unit, contracts, eval-deterministic]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
