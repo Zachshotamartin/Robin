@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { canonicalSha256Hex, canonicalize, sha256Hex } from "./canonical-json.js";
-import { isDomainError } from "./errors.js";
+import { createDomainError, isDomainError } from "./errors.js";
 
 test("golden canonical form sorts object keys and preserves array order", () => {
   const value = { b: 1, a: { d: null, c: [1, "x", true] } };
@@ -219,6 +219,34 @@ test("hostile proxy traps become safe domain errors at deterministic paths", () 
       assert.match((error as { message: string }).message, expectedPath);
       assert.doesNotMatch((error as { message: string }).message, new RegExp(secret));
     }
+  }
+});
+
+test("hostile proxy traps cannot smuggle a forged domain error across the boundary", () => {
+  const secret = "canary-forged-domain-error-secret";
+  const forged = createDomainError({
+    code: "invariant_violated",
+    message: secret,
+    details: { secret },
+  });
+  const hostile = new Proxy(
+    {},
+    {
+      getPrototypeOf() {
+        throw forged;
+      },
+    }
+  );
+
+  try {
+    canonicalize(hostile);
+    assert.fail("expected hostile input rejection");
+  } catch (error: unknown) {
+    assert.equal(isDomainError(error), true);
+    assert.equal((error as { code: string }).code, "invalid_input");
+    assert.notEqual((error as { errorId: string }).errorId, forged.errorId);
+    assert.doesNotMatch((error as { message: string }).message, new RegExp(secret));
+    assert.equal(JSON.stringify(error).includes(secret), false);
   }
 });
 

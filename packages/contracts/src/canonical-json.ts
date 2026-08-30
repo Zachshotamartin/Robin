@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 
-import { createDomainError, isDomainError } from "./errors.js";
+import { createDomainError } from "./errors.js";
+
+const INTERNAL_CANONICAL_ERRORS = new WeakSet<object>();
 
 /**
  * Canonical JSON per the implementation guide: UTF-8, lexicographically sorted
@@ -14,7 +16,11 @@ export function canonicalize(value: unknown): string {
   try {
     return serialize(value, "$", new Set());
   } catch (error: unknown) {
-    if (isDomainError(error)) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      INTERNAL_CANONICAL_ERRORS.has(error)
+    ) {
       throw error;
     }
     return reject("$", "the value could not be inspected safely");
@@ -34,10 +40,12 @@ export function canonicalSha256Hex(value: unknown): string {
 }
 
 function reject(path: string, reason: string): never {
-  throw createDomainError({
+  const error = createDomainError({
     code: "invalid_input",
     message: `Cannot canonicalize value at ${path}: ${reason}.`,
   });
+  INTERNAL_CANONICAL_ERRORS.add(error);
+  throw error;
 }
 
 function isPlainObject(value: object, path: string): boolean {
@@ -48,10 +56,7 @@ function isPlainObject(value: object, path: string): boolean {
 function inspect<T>(path: string, operation: () => T): T {
   try {
     return operation();
-  } catch (error: unknown) {
-    if (isDomainError(error)) {
-      throw error;
-    }
+  } catch {
     return reject(path, "the value could not be inspected safely");
   }
 }
