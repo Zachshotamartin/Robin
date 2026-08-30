@@ -1,6 +1,5 @@
 policy "deny-secret-repository-actions" priority 1000 {
-  when action.pack == "coding.virtual-repository"
-    and (repo.path matches "**/.env*" or repo.input_paths matches "**/.env*")
+  when action.pack == "coding.virtual-repository" and (repo.path matches "**/.env*" or repo.input_paths matches "**/.env*")
   deny
   reason "Secret-bearing repository paths cannot be operated on"
 }
@@ -12,11 +11,7 @@ policy "approve-dependency-installation" priority 700 {
 }
 
 policy "allow-sandboxed-tests" priority 500 {
-  when action.pack == "process"
-    and action.operation == "run_tests"
-    and action.side_effect == "none"
-    and environment.sandboxed == true
-    and environment.network_profile == "disabled"
+  when action.pack == "process" and action.operation == "run_tests" and action.side_effect == "none" and environment.sandboxed == true and environment.network_profile == "disabled"
   allow
   reason "Pinned test recipes may run inside the selected sandbox profile"
 }
