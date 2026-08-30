@@ -13,6 +13,7 @@ import {
 
 import {
   BASE_POLICY_ATTRIBUTE_CATALOG,
+  BASE_POLICY_ATTRIBUTE_CATALOG_SET,
   InMemoryPolicySnapshotStore,
   compileAnchoredPathGlob,
   compilePolicySnapshot,
@@ -633,7 +634,7 @@ test("checked-in policy-v1 security table contains and passes at least 25 cases"
       defaultEffect: "deny",
     },
     {},
-    CATALOGS,
+    BASE_POLICY_ATTRIBUTE_CATALOG_SET,
   );
   assert.equal(result.ok, true, result.ok ? "" : JSON.stringify(result.diagnostics));
   if (!result.ok) throw new Error("unreachable strict policy compile failure");
