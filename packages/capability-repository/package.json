@@ -1,0 +1,26 @@
+{
+  "name": "@guard/capability-repository",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Virtual in-memory coding fixture pack for bounded listing, reading, and patch proposals.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build --force",
+    "test": "npm run build && node --test dist/*.test.js"
+  },
+  "dependencies": {
+    "@guard/capability-gateway": "0.0.0",
+    "@guard/contracts": "0.0.0"
+  }
+}

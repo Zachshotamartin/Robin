@@ -1,0 +1,27 @@
+{
+  "name": "@guard/capability-synthetic",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Deterministic non-coding capability and profile fixtures for the generic runtime.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build --force",
+    "test": "npm run build && node --test dist/*.test.js"
+  },
+  "dependencies": {
+    "@guard/capability-gateway": "0.0.0",
+    "@guard/context-broker": "0.0.0",
+    "@guard/contracts": "0.0.0"
+  }
+}
