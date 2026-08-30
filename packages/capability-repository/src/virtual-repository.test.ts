@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ActionIdKind, isDomainError } from "@guard/contracts";
+import {
+  ActionIdKind,
+  PolicyVersionIdKind,
+  isDomainError,
+} from "@guard/contracts";
+import type { NormalizedAction } from "@guard/contracts";
 import { CapabilityGateway, CapabilityPackRegistry } from "@guard/capability-gateway";
+import type { PinnedPolicyEvaluator, PolicyDecision } from "@guard/policy-engine";
 
 import {
   VIRTUAL_REPOSITORY_REFERENCES,
@@ -13,6 +19,9 @@ import {
 } from "./index.js";
 
 const HOSTILE_CANARY = "repository-hostile-canary";
+const POLICY_ID = PolicyVersionIdKind.parse(
+  "pol_018f05a0-7b01-7000-8000-000000000090",
+);
 
 const ACTION_IDS = {
   list: ActionIdKind.parse("act_018f05a0-7b01-7000-8000-000000000091"),
@@ -30,6 +39,34 @@ function isSanitizedDomainCode(error: unknown, code: string): boolean {
     error.code === code &&
     !error.message.includes(HOSTILE_CANARY)
   );
+}
+
+function allowEvaluator(): PinnedPolicyEvaluator {
+  return Object.freeze({
+    policyVersionId: POLICY_ID,
+    evaluate(_action: NormalizedAction): PolicyDecision {
+      const winningPolicyName = "repository_fixture_allow";
+      const matchedPolicyNames = Object.freeze([winningPolicyName]);
+      return Object.freeze({
+        policyVersionId: POLICY_ID,
+        effect: "allow",
+        winningPolicyName,
+        reason: "Repository fixture actions are allowed by a pinned evaluator.",
+        matchedPolicyNames,
+        trace: Object.freeze({
+          languageVersion: "1",
+          policyContentHash: "a".repeat(64),
+          attributeCatalogs: Object.freeze([]),
+          combiningAlgorithm: "deny_overrides",
+          defaultEffect: "deny",
+          result: "allow",
+          winningPolicyName,
+          evaluations: Object.freeze([]),
+          matchedPolicyNames,
+        }),
+      });
+    },
+  });
 }
 
 function repository(): VirtualRepository {
@@ -53,7 +90,7 @@ function harness(limits = {}) {
       ...limits,
     }),
   ]);
-  const gateway = new CapabilityGateway(registry);
+  const gateway = new CapabilityGateway(registry, allowEvaluator());
   const advertisement = registry.createAdvertisement(
     Object.values(VIRTUAL_REPOSITORY_REFERENCES),
   );
@@ -79,7 +116,7 @@ async function invoke(
     context(ACTION_IDS[operation]),
     advertisement,
   );
-  const result = await gateway.execute(prepared, {
+  const result = await gateway.execute(gateway.evaluate(prepared), {
     signal: new AbortController().signal,
   });
   return { prepared, result };
@@ -143,7 +180,7 @@ test("reads only a bounded line range and truncates at a valid UTF-8 boundary", 
       maximumPatchBytes: 128,
     }),
   ]);
-  const gateway = new CapabilityGateway(registry);
+  const gateway = new CapabilityGateway(registry, allowEvaluator());
   const advertisement = registry.createAdvertisement([
     VIRTUAL_REPOSITORY_REFERENCES.read,
   ]);
@@ -156,7 +193,7 @@ test("reads only a bounded line range and truncates at a valid UTF-8 boundary", 
     context(ACTION_IDS.read),
     advertisement,
   );
-  const bounded = await gateway.execute(prepared, {
+  const bounded = await gateway.execute(gateway.evaluate(prepared), {
     signal: new AbortController().signal,
   });
   assert.equal(bounded.raw["content"], "éé");
@@ -176,7 +213,7 @@ test("proposes an exact bounded patch without mutating the virtual fixture", asy
     advertisement,
   );
   const before = source.read("src/alpha.ts");
-  const result = await gateway.execute(prepared, {
+  const result = await gateway.execute(gateway.evaluate(prepared), {
     signal: new AbortController().signal,
   });
   const after = source.read("src/alpha.ts");
