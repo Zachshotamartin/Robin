@@ -18,6 +18,8 @@ export interface ActionPrecondition {
 export interface NormalizedAction extends VersionedContract {
   readonly actionId: ActionId;
   readonly capabilityPackId: string;
+  /** Exact installed pack version bound into policy, approval, and action hashes. */
+  readonly capabilityPackVersion: number;
   readonly operationId: string;
   readonly operationVersion: number;
   readonly subject: JsonObject;

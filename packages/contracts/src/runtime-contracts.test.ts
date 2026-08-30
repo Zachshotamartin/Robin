@@ -121,6 +121,7 @@ const ACTION: NormalizedAction = {
   schemaVersion: 1,
   actionId: ActionIdKind.generate(),
   capabilityPackId: "capability:synthetic",
+  capabilityPackVersion: 1,
   operationId: "synthetic.transform",
   operationVersion: 1,
   subject: { kind: "agent_driver", id: "driver:scripted" },
@@ -176,6 +177,7 @@ test("all top-level generic contracts pin the current schema version", () => {
     assert.equal(contract.schemaVersion, CONTRACT_SCHEMA_VERSION);
   }
   assert.doesNotThrow(() => JSON.stringify(result));
+  assert.equal(ACTION.capabilityPackVersion > 0, true);
 });
 
 test("schema-version guard accepts only the exact supported integer", () => {
