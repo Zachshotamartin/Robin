@@ -68,6 +68,8 @@ function request(overrides: Partial<SemanticModelRequest> = {}): SemanticModelRe
     ],
     operations: [
       {
+        capabilityPackId: "capability.documents",
+        capabilityPackVersion: 1,
         operationId: "documents.search",
         operationVersion: 1,
         description: "Search the released document corpus.",
@@ -300,12 +302,129 @@ test("rejects malformed scripts and normalized event sequences at construction",
   }
 });
 
+test("rejects actions when disabled and operations that were not exactly advertised", () => {
+  const eventsFor = (operationId: string): readonly ModelProviderEvent[] => [
+    {
+      type: "action_started",
+      callId: "call-1",
+      capabilityPackId: "capability.documents",
+      capabilityPackVersion: 1,
+      operationId,
+      operationVersion: 1,
+    },
+    {
+      type: "action_completed",
+      callId: "call-1",
+      capabilityPackId: "capability.documents",
+      capabilityPackVersion: 1,
+      operationId,
+      operationVersion: 1,
+      arguments: { query: "policy" },
+    },
+    { type: "response_completed", finishReason: "action_required" },
+  ];
+
+  assert.throws(
+    () =>
+      new SyntheticModelProvider(
+        script(
+          request({ actionMode: "none", operations: [] }),
+          eventsFor("documents.search"),
+        ),
+      ),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+  assert.throws(
+    () =>
+      new SyntheticModelProvider(
+        script(request(), eventsFor("documents.unadvertised")),
+      ),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+});
+
+test("preserves exact pack-qualified operation identity in both directions", () => {
+  const baseRequest = request();
+  const firstOperation = baseRequest.operations[0];
+  assert.notEqual(firstOperation, undefined);
+  const archiveIdentity = {
+    capabilityPackId: "capability.archive-documents",
+    capabilityPackVersion: 3,
+    operationId: firstOperation!.operationId,
+    operationVersion: firstOperation!.operationVersion,
+  };
+  const archiveOperation = {
+    ...firstOperation!,
+    ...archiveIdentity,
+  };
+  const multiPackRequest = request({
+    operations: [firstOperation!, archiveOperation],
+  });
+  const eventsFor = (
+    identity: Pick<
+      typeof archiveOperation,
+      | "capabilityPackId"
+      | "capabilityPackVersion"
+      | "operationId"
+      | "operationVersion"
+    >,
+  ): readonly ModelProviderEvent[] => [
+    { type: "action_started", callId: "call-1", ...identity },
+    {
+      type: "action_completed",
+      callId: "call-1",
+      ...identity,
+      arguments: { query: "policy" },
+    },
+    { type: "response_completed", finishReason: "action_required" },
+  ];
+
+  assert.doesNotThrow(
+    () =>
+      new SyntheticModelProvider(
+        script(multiPackRequest, eventsFor(archiveIdentity)),
+      ),
+  );
+
+  for (const invalidIdentity of [
+    { ...archiveIdentity, capabilityPackId: "capability.unadvertised" },
+    { ...archiveIdentity, capabilityPackVersion: 0 },
+    { ...archiveIdentity, operationVersion: 0 },
+  ]) {
+    assert.throws(
+      () =>
+        new SyntheticModelProvider(
+          script(multiPackRequest, eventsFor(invalidIdentity)),
+        ),
+      (error: unknown) => isDomainCode(error, "invalid_input"),
+    );
+  }
+
+  const missingIdentity = structuredClone(
+    eventsFor(archiveIdentity),
+  ) as unknown as Array<Record<string, unknown>>;
+  delete missingIdentity[0]?.["capabilityPackId"];
+  assert.throws(
+    () =>
+      new SyntheticModelProvider(
+        script(
+          multiPackRequest,
+          missingIdentity as unknown as readonly ModelProviderEvent[],
+        ),
+      ),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+});
+
 test("can emit complete structured action calls and normalized failures", async () => {
   const actionEvents: readonly ModelProviderEvent[] = [
     {
       type: "action_started",
       callId: "call-1",
+      capabilityPackId: "capability.documents",
+      capabilityPackVersion: 1,
       operationId: "documents.search",
+      operationVersion: 1,
     },
     {
       type: "action_arguments_delta",
@@ -315,7 +434,10 @@ test("can emit complete structured action calls and normalized failures", async 
     {
       type: "action_completed",
       callId: "call-1",
+      capabilityPackId: "capability.documents",
+      capabilityPackVersion: 1,
       operationId: "documents.search",
+      operationVersion: 1,
       arguments: { query: "policy" },
     },
     { type: "response_completed", finishReason: "action_required" },

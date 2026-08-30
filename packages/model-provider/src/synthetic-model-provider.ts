@@ -190,7 +190,11 @@ function validateScript(script: SyntheticModelScript): void {
       step.expectedRequest as SemanticModelRequest,
       `script.steps[${index}].expectedRequest`,
     );
-    validateEvents(step.events as readonly ModelProviderEvent[], index);
+    validateEvents(
+      step.events as readonly ModelProviderEvent[],
+      index,
+      step.expectedRequest as SemanticModelRequest,
+    );
   }
 }
 
@@ -245,6 +249,14 @@ function validateRequest(request: SemanticModelRequest, path: string): void {
     if (!isRecord(operation)) {
       invalidInput(`${path}.operations[${index}] must be a plain object.`);
     }
+    nonEmptyString(
+      operation.capabilityPackId,
+      `${path}.operations[${index}].capabilityPackId`,
+    );
+    positiveInteger(
+      operation.capabilityPackVersion,
+      `${path}.operations[${index}].capabilityPackVersion`,
+    );
     nonEmptyString(operation.operationId, `${path}.operations[${index}].operationId`);
     positiveInteger(
       operation.operationVersion,
@@ -254,7 +266,12 @@ function validateRequest(request: SemanticModelRequest, path: string): void {
     if (!isRecord(operation.inputSchema)) {
       invalidInput(`${path}.operations[${index}].inputSchema must be a JSON object.`);
     }
-    const key = `${operation.operationId}@${operation.operationVersion}`;
+    const key = operationKey(
+      operation.capabilityPackId,
+      operation.capabilityPackVersion,
+      operation.operationId,
+      operation.operationVersion,
+    );
     if (operationKeys.has(key)) {
       invalidInput(`${path}.operations contains duplicate operation ${key}.`);
     }
@@ -272,12 +289,26 @@ function validateRequest(request: SemanticModelRequest, path: string): void {
   }
 }
 
-function validateEvents(events: readonly ModelProviderEvent[], stepIndex: number): void {
+function validateEvents(
+  events: readonly ModelProviderEvent[],
+  stepIndex: number,
+  request: SemanticModelRequest,
+): void {
   if (!Array.isArray(events) || events.length === 0) {
     invalidInput(`script.steps[${stepIndex}].events must not be empty.`);
   }
 
   const startedActions = new Map<string, string>();
+  const advertisedOperations = new Set(
+    request.operations.map((operation) =>
+      operationKey(
+        operation.capabilityPackId,
+        operation.capabilityPackVersion,
+        operation.operationId,
+        operation.operationVersion,
+      ),
+    ),
+  );
   let terminalCount = 0;
 
   for (let index = 0; index < events.length; index += 1) {
@@ -299,12 +330,27 @@ function validateEvents(events: readonly ModelProviderEvent[], stepIndex: number
         }
         break;
       case "action_started":
+        if (request.actionMode !== "structured") {
+          invalidInput(`${path} is forbidden when actionMode is none.`);
+        }
         nonEmptyString(event.callId, `${path}.callId`);
+        nonEmptyString(event.capabilityPackId, `${path}.capabilityPackId`);
+        positiveInteger(event.capabilityPackVersion, `${path}.capabilityPackVersion`);
         nonEmptyString(event.operationId, `${path}.operationId`);
+        positiveInteger(event.operationVersion, `${path}.operationVersion`);
         if (startedActions.has(event.callId)) {
           invalidInput(`${path}.callId duplicates an earlier action call.`);
         }
-        startedActions.set(event.callId, event.operationId);
+        const startedOperation = operationKey(
+          event.capabilityPackId,
+          event.capabilityPackVersion,
+          event.operationId,
+          event.operationVersion,
+        );
+        if (!advertisedOperations.has(startedOperation)) {
+          invalidInput(`${path} references an operation that was not exactly advertised.`);
+        }
+        startedActions.set(event.callId, startedOperation);
         break;
       case "action_arguments_delta":
         nonEmptyString(event.callId, `${path}.callId`);
@@ -315,7 +361,10 @@ function validateEvents(events: readonly ModelProviderEvent[], stepIndex: number
         break;
       case "action_completed": {
         nonEmptyString(event.callId, `${path}.callId`);
+        nonEmptyString(event.capabilityPackId, `${path}.capabilityPackId`);
+        positiveInteger(event.capabilityPackVersion, `${path}.capabilityPackVersion`);
         nonEmptyString(event.operationId, `${path}.operationId`);
+        positiveInteger(event.operationVersion, `${path}.operationVersion`);
         if (!isRecord(event.arguments)) {
           invalidInput(`${path}.arguments must be a JSON object.`);
         }
@@ -323,8 +372,16 @@ function validateEvents(events: readonly ModelProviderEvent[], stepIndex: number
         if (startedOperation === undefined) {
           invalidInput(`${path} references an action call that has not started.`);
         }
-        if (startedOperation !== event.operationId) {
-          invalidInput(`${path}.operationId differs from its action_started event.`);
+        if (
+          startedOperation !==
+          operationKey(
+            event.capabilityPackId,
+            event.capabilityPackVersion,
+            event.operationId,
+            event.operationVersion,
+          )
+        ) {
+          invalidInput(`${path} differs from its exact action_started identity.`);
         }
         startedActions.delete(event.callId);
         break;
@@ -358,6 +415,20 @@ function validateEvents(events: readonly ModelProviderEvent[], stepIndex: number
   if (terminalCount !== 1) {
     invalidInput(`script.steps[${stepIndex}].events must contain exactly one terminal event.`);
   }
+}
+
+function operationKey(
+  capabilityPackId: string,
+  capabilityPackVersion: number,
+  operationId: string,
+  operationVersion: number,
+): string {
+  return canonicalize([
+    capabilityPackId,
+    capabilityPackVersion,
+    operationId,
+    operationVersion,
+  ]);
 }
 
 function validateTerminalPosition(index: number, length: number, path: string): void {

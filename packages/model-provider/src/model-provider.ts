@@ -31,6 +31,8 @@ export interface SemanticConversationItem {
  * this semantic shape to their own function/tool dialect.
  */
 export interface SemanticOperationDefinition {
+  readonly capabilityPackId: string;
+  readonly capabilityPackVersion: number;
   readonly operationId: string;
   readonly operationVersion: number;
   readonly description: string;
@@ -93,7 +95,10 @@ export type ModelProviderEvent =
   | {
       readonly type: "action_started";
       readonly callId: string;
+      readonly capabilityPackId: string;
+      readonly capabilityPackVersion: number;
       readonly operationId: string;
+      readonly operationVersion: number;
     }
   | {
       readonly type: "action_arguments_delta";
@@ -103,7 +108,10 @@ export type ModelProviderEvent =
   | {
       readonly type: "action_completed";
       readonly callId: string;
+      readonly capabilityPackId: string;
+      readonly capabilityPackVersion: number;
       readonly operationId: string;
+      readonly operationVersion: number;
       readonly arguments: JsonObject;
     }
   | ModelUsageEvent
