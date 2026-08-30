@@ -6,7 +6,7 @@ The project is CLI-first. A VS Code extension will become a client of the same l
 
 ## Current Status
 
-The repository is at the reviewed design and bootstrap stage. The product blueprint and implementation mechanics are specified, but all guarantees remain unimplemented design targets until their milestone evidence passes. Implementation begins with a deterministic scripted-driver and synthetic-provider vertical slice; a real model or external agent is intentionally deferred until the runtime can be tested without model variance.
+The repository is at the start of Phase 1 (Milestone A). The product blueprint and implementation mechanics are specified, and the first kernel package, `@guard/contracts`, provides branded identifiers, the canonical domain-error taxonomy, and canonical JSON serialization with hashing, all covered by unit tests. All security and durability guarantees remain unimplemented design targets until their milestone evidence passes. Implementation continues with a deterministic scripted-driver and synthetic-provider vertical slice; a real model or external agent is intentionally deferred until the runtime can be tested without model variance.
 
 ## Documentation
 
@@ -19,6 +19,9 @@ The repository is at the reviewed design and bootstrap stage. The product bluepr
 - [Installation, testing, operations, and release plan](docs/OPERATIONS_TEST_PLAN.md)
 - [Product requirements and user flows](docs/PRODUCT_REQUIREMENTS.md)
 - [Threat model](docs/THREAT_MODEL.md)
+- [Glossary](docs/GLOSSARY.md)
+- [Open questions and deferred decisions](docs/OPEN_QUESTIONS.md)
+- [Architecture decision records](docs/decisions/)
 - [Documentation index](docs/README.md)
 
 ## Intended Guarantees
@@ -44,9 +47,10 @@ These are design targets until the corresponding milestone and tests are impleme
 
 ## Repository Check
 
-The bootstrap repository has no runtime dependencies. Validate the documentation foundation with:
+The repository has no runtime dependencies; TypeScript and Node type definitions are the only development dependencies. Validate the documentation and all package tests with:
 
 ```bash
+npm ci
 npm test
 ```
 

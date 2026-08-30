@@ -1,0 +1,24 @@
+# Bootstrap CI per docs/OPERATIONS_TEST_PLAN.md section 10.1.
+# Implementation jobs (static, unit, contracts, postgres, sandbox, evals)
+# are added in the documented order as their packages come into existence.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    name: documentation validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm test

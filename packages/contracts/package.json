@@ -1,0 +1,23 @@
+{
+  "name": "@guard/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Generic branded identifiers, domain errors, and canonical serialization for the Guarded Agent kernel.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc --build --force",
+    "test": "npm run build && node --test dist/*.test.js"
+  }
+}
