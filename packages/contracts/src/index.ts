@@ -47,7 +47,12 @@ export {
 } from "./json-value.js";
 export {
   BoundarySnapshotError,
+  DEFAULT_JSON_BOUNDARY_LIMITS,
   snapshotBoundaryJsonObject,
+} from "./boundary-snapshot.js";
+export type {
+  JsonBoundaryLimitOptions,
+  JsonBoundaryLimits,
 } from "./boundary-snapshot.js";
 export type {
   JsonArray,
@@ -61,6 +66,7 @@ export {
   canonicalize,
   sha256Hex,
 } from "./canonical-json.js";
+export type { CanonicalJsonLimitOptions } from "./canonical-json.js";
 export {
   CONTRACT_SCHEMA_VERSION,
   assertContractSchemaVersion,
