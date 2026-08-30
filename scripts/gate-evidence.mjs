@@ -996,6 +996,15 @@ function assertEvidenceExecutionPlatform() {
   );
 }
 
+export function evidenceTemporaryBaseForPlatform(platform, fallback) {
+  return platform === "darwin" ? "/tmp" : fallback;
+}
+
+async function createEvidenceTemporaryRoot(prefix) {
+  const base = evidenceTemporaryBaseForPlatform(process.platform, os.tmpdir());
+  return realpath(await mkdtemp(path.join(base, prefix)));
+}
+
 function isolatedCommandInvocation(
   executable,
   args,
@@ -1731,8 +1740,8 @@ export async function verifyGateEvidenceManifest({
     manifestPath: relativeManifestPath,
   });
 
-  const verificationRoot = await realpath(
-    await mkdtemp(path.join(os.tmpdir(), "robin-evidence-verify-")),
+  const verificationRoot = await createEvidenceTemporaryRoot(
+    "robin-evidence-verify-",
   );
   try {
     const childEnvironment = await prepareChildEnvironment(verificationRoot);
@@ -1960,8 +1969,8 @@ export async function captureGateEvidence({
     );
   }
 
-  const captureRoot = await realpath(
-    await mkdtemp(path.join(os.tmpdir(), "robin-evidence-capture-")),
+  const captureRoot = await createEvidenceTemporaryRoot(
+    "robin-evidence-capture-",
   );
 
   try {

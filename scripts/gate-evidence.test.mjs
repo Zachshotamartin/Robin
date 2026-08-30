@@ -19,6 +19,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 
 import {
   captureGateEvidence,
+  evidenceTemporaryBaseForPlatform,
   validateCaptureConfig,
   validateGateEvidenceManifest,
   validateResolvedNodeRuntime,
@@ -166,6 +167,17 @@ test("evidence binds the PATH-resolved Node runtime to its controller", () => {
       arch: "mismatched-architecture",
     }),
     /resolved PATH node architecture .* differs from evidence controller/u,
+  );
+  assert.equal(
+    evidenceTemporaryBaseForPlatform(
+      "darwin",
+      "/private/var/folders/a/very-long-temporary-root",
+    ),
+    "/tmp",
+  );
+  assert.equal(
+    evidenceTemporaryBaseForPlatform("linux", "/var/tmp"),
+    "/var/tmp",
   );
 });
 
