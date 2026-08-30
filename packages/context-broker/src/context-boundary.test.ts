@@ -35,6 +35,7 @@ import {
   createContextBrokerIntegration,
   createContextBrokerIntegrationFactory,
   createPinnedContextPolicyAdapter,
+  detectCrossValueSecrets,
   type BrokerContextSource,
   type ContextBrokerOptions,
   type ContextBudgetLimits,
@@ -1382,6 +1383,67 @@ test("uses one random run correlation marker per broker and blocks secrets split
         orderedItemIds: itemIds,
       }),
     (error: unknown) => isCode(error, "policy_denied"),
+  );
+});
+
+test("assembles six ordinary capability envelopes without exhausting cross-item candidates", async () => {
+  const broker = createBroker({ releasePolicy: releasePolicy("allow") });
+  const itemIds: string[] = [];
+  for (let index = 0; index < 6; index += 1) {
+    const result = await broker.releaseCapabilityOutput({
+      turnId: `turn.envelope.${String(index)}`,
+      sourceVersion: 1,
+      resource: capabilityResource({ operationId: `ordinary_${String(index)}` }),
+      policyProjection: genericProjection(),
+      output: {
+        path: `src/ordinary-${String(index)}.ts`,
+        status: "reviewed",
+        fields: ["alpha", "beta", "gamma"],
+        metadata: {
+          schemaVersion: CONTRACT_SCHEMA_VERSION,
+          classification: "internal",
+          sourceId: "coding.repository",
+        },
+      },
+      classification: "internal",
+      reason: "capability.output",
+    });
+    assert.equal(result.status, "released");
+    itemIds.push(result.item.itemId);
+  }
+  const assembly = await broker.assembleAgentContext({
+    turnId: "turn.envelope.assembly",
+    agentRequestId: "agent.envelope.assembly",
+    orderedItemIds: itemIds,
+  });
+  assert.deepEqual(assembly.manifest.orderedItemIds, itemIds);
+  assert.equal(assembly.items.length, 6);
+});
+
+test("cross-value classification is deterministic and honors top-level item order", () => {
+  const split = Math.floor(API_TOKEN_CANARY.length / 2);
+  const left = API_TOKEN_CANARY.slice(0, split);
+  const right = API_TOKEN_CANARY.slice(split);
+  const first = detectCrossValueSecrets([{ left }, { right }]);
+  const repeated = detectCrossValueSecrets([{ left }, { right }]);
+  const reversed = detectCrossValueSecrets([{ right }, { left }]);
+  assert.deepEqual(first, repeated);
+  assert.equal(first.categories.some((item) => item.category === "api_token"), true);
+  assert.deepEqual(reversed.categories, []);
+});
+
+test("fails closed when genuinely unique cross-item fragment candidates exceed the cap", () => {
+  const left = Array.from(
+    { length: 101 },
+    (_value, index) => `left${String(index).padStart(4, "0")}`,
+  );
+  const right = Array.from(
+    { length: 101 },
+    (_value, index) => `right${String(index).padStart(4, "0")}`,
+  );
+  assert.throws(
+    () => detectCrossValueSecrets([left, right]),
+    (error: unknown) => isCode(error, "budget_exceeded"),
   );
 });
 

@@ -270,14 +270,100 @@ export function detectCrossValueSecrets(
   values: readonly JsonValue[],
   customClassifiers: readonly CompiledCustomSecretClassifier[] = [],
 ): CrossValueSecretDetection {
-  const occurrences: string[] = [];
-  for (const value of values) {
-    for (const item of collectStringOccurrences(value)) occurrences.push(item.text);
+  const occurrences: IndexedStringOccurrence[] = [];
+  let combinedLength = 0;
+  for (const [valueIndex, value] of values.entries()) {
+    for (const item of collectStringOccurrences(value)) {
+      if (occurrences.length >= MAXIMUM_STRING_OCCURRENCES) {
+        throw createDomainError({
+          code: "budget_exceeded",
+          message: "Context contains too many string fields for split-secret analysis.",
+        });
+      }
+      combinedLength += item.text.length;
+      if (combinedLength > MAXIMUM_CLASSIFIED_UTF16_LENGTH) {
+        throw createDomainError({
+          code: "budget_exceeded",
+          message: "Combined context strings exceed the bounded classification window.",
+        });
+      }
+      occurrences.push({
+        text: item.text,
+        occurrenceIndex: occurrences.length,
+        valueIndex,
+      });
+    }
   }
-  const detection = detectCrossOccurrenceSecrets(occurrences, customClassifiers);
+
+  const trailing = indexUniqueFragments(occurrences, trailingTokenFragment);
+  const leading = indexUniqueFragments(occurrences, leadingTokenFragment);
+  const classificationCache = new Map<string, ReadonlySet<SecretCategory>>();
+  const involved = new Set<number>();
+  const crossRanges: SecretRange[] = [];
+  const pairCategories = new Set<string>();
+  let examinedPairs = 0;
+
+  for (const [left, leftOccurrences] of trailing) {
+    for (const [right, rightOccurrences] of leading) {
+      const leftParticipants = leftOccurrences.filter((candidate) =>
+        rightOccurrences.some(
+          (other) => candidate.valueIndex < other.valueIndex,
+        ),
+      );
+      if (leftParticipants.length === 0) continue;
+      const rightParticipants = rightOccurrences.filter((candidate) =>
+        leftOccurrences.some(
+          (other) => other.valueIndex < candidate.valueIndex,
+        ),
+      );
+      if (rightParticipants.length === 0 || left.length + right.length > 1_024) {
+        continue;
+      }
+      examinedPairs += 1;
+      if (examinedPairs > MAXIMUM_SPLIT_COMPARISONS) {
+        throw createDomainError({
+          code: "budget_exceeded",
+          message: "Context exceeds the bounded split-secret comparison budget.",
+        });
+      }
+
+      const combinedRanges: SecretRange[] = [];
+      appendCoreMatches(`${left}${right}`, customClassifiers, combinedRanges);
+      appendDerivedEncodingMatches(`${left}${right}`, combinedRanges);
+      const leftCategories = cachedFragmentCategories(
+        left,
+        customClassifiers,
+        classificationCache,
+      );
+      const rightCategories = cachedFragmentCategories(
+        right,
+        customClassifiers,
+        classificationCache,
+      );
+      for (const range of combinedRanges) {
+        if (
+          range.category === "high_entropy_token" ||
+          leftCategories.has(range.category) ||
+          rightCategories.has(range.category) ||
+          range.startUtf16 >= left.length ||
+          range.endUtf16 <= left.length
+        ) {
+          continue;
+        }
+        const pairKey = `${left}\u0000${right}\u0000${range.category}`;
+        if (pairCategories.has(pairKey)) continue;
+        pairCategories.add(pairKey);
+        crossRanges.push(range);
+        for (const occurrence of [...leftParticipants, ...rightParticipants]) {
+          involved.add(occurrence.occurrenceIndex);
+        }
+      }
+    }
+  }
+
   return Object.freeze({
-    categories: detection.categories,
-    occurrenceIndexes: detection.occurrenceIndexes,
+    categories: countSecretCategories(crossRanges),
+    occurrenceIndexes: Object.freeze([...involved].sort((left, right) => left - right)),
   });
 }
 
@@ -435,6 +521,42 @@ function appendDecodedCandidates(
 
 interface StringOccurrence {
   readonly text: string;
+}
+
+interface IndexedStringOccurrence extends StringOccurrence {
+  readonly occurrenceIndex: number;
+  readonly valueIndex: number;
+}
+
+function indexUniqueFragments(
+  occurrences: readonly IndexedStringOccurrence[],
+  fragmentFor: (value: string) => string | null,
+): ReadonlyMap<string, readonly IndexedStringOccurrence[]> {
+  const indexed = new Map<string, IndexedStringOccurrence[]>();
+  for (const occurrence of occurrences) {
+    const fragment = fragmentFor(occurrence.text);
+    if (fragment === null) continue;
+    const prior = indexed.get(fragment);
+    if (prior === undefined) indexed.set(fragment, [occurrence]);
+    else prior.push(occurrence);
+  }
+  return indexed;
+}
+
+function cachedFragmentCategories(
+  fragment: string,
+  customClassifiers: readonly CompiledCustomSecretClassifier[],
+  cache: Map<string, ReadonlySet<SecretCategory>>,
+): ReadonlySet<SecretCategory> {
+  const cached = cache.get(fragment);
+  if (cached !== undefined) return cached;
+  const categories = new Set(
+    classifyText(fragment, customClassifiers).categories.map(
+      (item) => item.category,
+    ),
+  );
+  cache.set(fragment, categories);
+  return categories;
 }
 
 interface InternalCrossDetection extends CrossValueSecretDetection {
