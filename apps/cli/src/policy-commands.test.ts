@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -286,10 +286,16 @@ test("simulation classifies changes and emits a resumable bound cursor", async (
   assert.equal(first.exitCode, 0);
   const firstPayload = JSON.parse(first.stdout) as {
     readonly entries: readonly { readonly actionId: string; readonly category: string }[];
+    readonly counts: Readonly<Record<string, number>>;
+    readonly pageCounts: Readonly<Record<string, number>>;
+    readonly totalActions: number;
     readonly nextCursor: string | null;
   };
   assert.equal(firstPayload.entries[0]?.actionId, ACTION.actionId);
   assert.equal(firstPayload.entries[0]?.category, "newly_denied");
+  assert.equal(firstPayload.pageCounts["newly_denied"], 1);
+  assert.equal(firstPayload.counts["newly_denied"], 2);
+  assert.equal(firstPayload.totalActions, 2);
   assert.notEqual(firstPayload.nextCursor, null);
 
   const secondPage = await executePolicyCommand(
@@ -311,9 +317,15 @@ test("simulation classifies changes and emits a resumable bound cursor", async (
   );
   const secondPayload = JSON.parse(secondPage.stdout) as {
     readonly entries: readonly { readonly actionId: string }[];
+    readonly counts: Readonly<Record<string, number>>;
+    readonly pageCounts: Readonly<Record<string, number>>;
+    readonly totalActions: number;
     readonly nextCursor: string | null;
   };
   assert.equal(secondPayload.entries[0]?.actionId, second.actionId);
+  assert.equal(secondPayload.pageCounts["newly_denied"], 1);
+  assert.equal(secondPayload.counts["newly_denied"], 2);
+  assert.equal(secondPayload.totalActions, 2);
   assert.equal(secondPayload.nextCursor, null);
 });
 
@@ -430,6 +442,62 @@ test("default file reader accepts the exact source limit and rejects one byte mo
   });
   assert.equal(oversized.exitCode, 2);
   assert.match(oversized.stderr, /bounded regular file/u);
+});
+
+test("default file reader rejects invalid UTF-8 and symbolic-link inputs", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "guard-policy-file-kind-"));
+  const invalidUtf8Path = join(directory, "invalid.guard");
+  const policyPath = join(directory, "policy.guard");
+  const symbolicPath = join(directory, "policy-link.guard");
+  await writeFile(invalidUtf8Path, Buffer.from([0xc3, 0x28]));
+  await writeFile(policyPath, POLICY, "utf8");
+  await symlink(policyPath, symbolicPath);
+
+  const invalidUtf8 = await executePolicyCommand({
+    kind: "policy-format",
+    policyPath: invalidUtf8Path,
+    format: "human",
+  });
+  assert.equal(invalidUtf8.exitCode, 2);
+  assert.match(invalidUtf8.stderr, /valid UTF-8/u);
+
+  const symbolic = await executePolicyCommand({
+    kind: "policy-format",
+    policyPath: symbolicPath,
+    format: "human",
+  });
+  assert.equal(symbolic.exitCode, 2);
+  assert.match(symbolic.stderr, /could not be read/u);
+});
+
+test("all JSON-mode input failures use a versioned machine-readable envelope", async () => {
+  const secret = "hostile-reader-message-that-must-not-render";
+  const result = await executePolicyCommand(
+    {
+      kind: "policy-check",
+      policyPath: "missing.guard",
+      defaultEffect: "deny",
+      catalogPaths: [],
+      format: "json",
+    },
+    Object.freeze({
+      readBoundedUtf8File: async () => {
+        throw new Error(secret);
+      },
+      createSecretCorrelationToken: () => "valid-correlation-token-0001",
+    }),
+  );
+  assert.equal(result.exitCode, 2);
+  assert.equal(result.stdout, "");
+  const payload = JSON.parse(result.stderr) as {
+    readonly schemaVersion: number;
+    readonly ok: boolean;
+    readonly error: { readonly code: string; readonly message: string };
+  };
+  assert.equal(payload.schemaVersion, 1);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.error.code, "invalid_configuration");
+  assert.doesNotMatch(payload.error.message, new RegExp(secret, "u"));
 });
 
 test("file and correlation boundaries fail without echoing hostile input", async () => {

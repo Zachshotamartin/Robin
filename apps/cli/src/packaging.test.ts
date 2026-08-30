@@ -92,26 +92,94 @@ test("the actual tarball installs with its local workspace closure and runs offl
   assert.equal(result.stdout, "0.0.0\n");
   assert.equal(result.stderr, "");
 
-  const policyResult = await execFile(
-    process.execPath,
-    [
-      join(installRoot, "node_modules", "@guard", "cli", "dist", "bin.js"),
-      "policy",
-      "check",
-      join(
-        installRoot,
-        "node_modules",
-        "@guard",
-        "cli",
-        "testdata",
-        "strict.guard",
-      ),
-      "--json",
-    ],
-    { cwd: installRoot, encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024 },
+  const installedBin = join(
+    installRoot,
+    "node_modules",
+    "@guard",
+    "cli",
+    "dist",
+    "bin.js",
   );
+  const testdata = join(
+    installRoot,
+    "node_modules",
+    "@guard",
+    "cli",
+    "testdata",
+  );
+  const runPolicy = async (args: readonly string[]) =>
+    execFile(process.execPath, [installedBin, "policy", ...args], {
+      cwd: installRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+
+  const policyResult = await runPolicy([
+    "check",
+    join(testdata, "strict.guard"),
+    "--json",
+  ]);
   assert.equal(policyResult.stderr, "");
   assert.equal((JSON.parse(policyResult.stdout) as { readonly ok: boolean }).ok, true);
+
+  const formatResult = await runPolicy([
+    "format",
+    join(testdata, "strict.guard"),
+    "--json",
+  ]);
+  assert.equal(formatResult.stderr, "");
+  assert.match(
+    (JSON.parse(formatResult.stdout) as { readonly canonicalText: string })
+      .canonicalText,
+    /policy /u,
+  );
+
+  const testResult = await runPolicy([
+    "test",
+    join(testdata, "strict.guard"),
+    "--cases",
+    join(testdata, "policy-cases-v1.json"),
+    "--json",
+  ]);
+  assert.equal(testResult.stderr, "");
+  const testPayload = JSON.parse(testResult.stdout) as {
+    readonly failed: number;
+    readonly passed: number;
+  };
+  assert.equal(testPayload.failed, 0);
+  assert.ok(testPayload.passed >= 25);
+
+  const explainResult = await runPolicy([
+    "explain",
+    join(testdata, "strict.guard"),
+    "--action",
+    join(testdata, "policy-action.json"),
+    "--json",
+  ]);
+  assert.equal(explainResult.stderr, "");
+  assert.equal(
+    typeof (JSON.parse(explainResult.stdout) as { readonly effect: unknown }).effect,
+    "string",
+  );
+
+  const simulationResult = await runPolicy([
+    "simulate",
+    "--from",
+    join(testdata, "allow-pure.guard"),
+    "--to",
+    join(testdata, "deny-pure.guard"),
+    "--actions",
+    join(testdata, "policy-actions-v1.json"),
+    "--json",
+  ]);
+  assert.equal(simulationResult.stderr, "");
+  const simulationPayload = JSON.parse(simulationResult.stdout) as {
+    readonly totalActions: number;
+    readonly counts: Readonly<Record<string, number>>;
+  };
+  assert.ok(simulationPayload.totalActions >= 1);
+  assert.ok((simulationPayload.counts["newly_denied"] ?? 0) >= 1);
 });
 
 async function npmPack(extra: readonly string[]): Promise<PackResult> {

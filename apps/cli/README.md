@@ -21,7 +21,9 @@ versioned table corpus to the exact policy content hash. `explain` evaluates one
 full normalized action and emits its deny-overrides trace without running an
 operation. `simulate` evaluates stable pages of recorded normalized actions
 against old and candidate snapshots; its opaque cursor is bound to both
-snapshot hashes and the sorted action corpus.
+snapshot hashes and the sorted action corpus. Every page reports both its page
+counts and exact whole-corpus totals, so review does not depend on which page
+happened to be displayed.
 
 The domain-neutral `guard.base` attribute catalog is always present. A
 repeatable `--catalog <catalog.json>` adds reviewed, versioned pack/source
@@ -57,11 +59,15 @@ canonical policy hash. Explanations replace secret-classified values with
 category/count metadata and redact random per-run correlation tokens from
 portable output.
 
-All policy inputs are bounded regular UTF-8 files. The parser supports an
-end-of-options `--` terminator and rejects unknown, duplicated, ambiguous,
-sparse, accessor-backed, proxied, or oversized argument arrays before any file
-read. Policy commands buffer validated output and never execute capability
-effects.
+All policy inputs are bounded, non-symbolic-link regular UTF-8 files. Reads
+must match the pre-read identity and byte length, reach exact EOF, and retain
+the same identity and metadata after the read; invalid UTF-8 and files that
+change during a read fail closed. The parser supports an end-of-options `--`
+terminator and rejects unknown, duplicated, ambiguous, sparse,
+accessor-backed, proxied, or oversized argument arrays before any file read.
+Policy commands buffer validated output and never execute capability effects.
+With `--json`, successful results, compiler diagnostics, and all other
+input/configuration failures are versioned JSON envelopes.
 
 The `run` command still accepts only the built-in scripted scenarios. It does
 not accept API keys, provider credentials, agent selection, filesystem

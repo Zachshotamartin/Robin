@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 
 import {
@@ -82,7 +83,7 @@ export async function executePolicyCommand(
         return await simulatePolicy(request, dependencies);
     }
   } catch (error: unknown) {
-    return invalidResult(safeFailureMessage(error));
+    return invalidResult(safeFailureMessage(error), request.format);
   }
 }
 
@@ -288,24 +289,75 @@ async function simulatePolicy(
     return compileFailure(diagnostics, request.format);
   }
   const actions = parseActionCorpus(parseJson(corpusText, "simulation action corpus"));
+  const secretCorrelationToken = correlationToken(dependencies);
   const page = simulatePolicyPage({
     from: from.snapshot,
     to: to.snapshot,
     actions,
-    secretCorrelationToken: correlationToken(dependencies),
+    secretCorrelationToken,
     cursor: request.cursor,
     pageSize: request.pageSize,
   });
+  const totalCounts = simulatePolicyTotals(
+    from.snapshot,
+    to.snapshot,
+    actions,
+    secretCorrelationToken,
+  );
   const payload = {
     schemaVersion: 1,
     fromPolicyContentHash: from.snapshot.contentHash,
     toPolicyContentHash: to.snapshot.contentHash,
-    ...page,
+    entries: page.entries,
+    counts: totalCounts,
+    pageCounts: page.counts,
+    totalActions: actions.length,
+    nextCursor: page.nextCursor,
   } as const;
   const output = request.format === "json"
     ? renderJson(payload)
     : renderSimulationHuman(payload);
   return successResult(output);
+}
+
+function simulatePolicyTotals(
+  from: PolicySnapshot,
+  to: PolicySnapshot,
+  actions: readonly NormalizedAction[],
+  secretCorrelationToken: string,
+): Readonly<Record<string, number>> {
+  let cursor: string | null = null;
+  let processed = 0;
+  const totals: Record<string, number> = Object.create(null) as Record<
+    string,
+    number
+  >;
+  do {
+    const page = simulatePolicyPage({
+      from,
+      to,
+      actions,
+      secretCorrelationToken,
+      cursor,
+      pageSize: 1_000,
+    });
+    for (const [category, count] of Object.entries(page.counts)) {
+      totals[category] = (totals[category] ?? 0) + count;
+    }
+    processed += page.entries.length;
+    cursor = page.nextCursor;
+    if (page.entries.length === 0 && cursor !== null) {
+      throw new PolicyCommandInputError(
+        "Policy simulation did not make progress while computing totals.",
+      );
+    }
+  } while (cursor !== null);
+  if (processed !== actions.length) {
+    throw new PolicyCommandInputError(
+      "Policy simulation totals do not cover the complete action corpus.",
+    );
+  }
+  return Object.freeze({ ...totals });
 }
 
 async function loadCatalogs(
@@ -497,9 +549,14 @@ function renderSimulationHuman(payload: {
     readonly errorCode: string | null;
   }[];
   readonly counts: Readonly<Record<string, number>>;
+  readonly pageCounts: Readonly<Record<string, number>>;
+  readonly totalActions: number;
   readonly nextCursor: string | null;
 }): string {
   const counts = Object.entries(payload.counts)
+    .map(([category, count]) => `${category}: ${String(count)}`)
+    .join("\n");
+  const pageCounts = Object.entries(payload.pageCounts)
     .map(([category, count]) => `${category}: ${String(count)}`)
     .join("\n");
   const entries = payload.entries.map(
@@ -514,7 +571,11 @@ function renderSimulationHuman(payload: {
     [
       `From: ${payload.fromPolicyContentHash}`,
       `To: ${payload.toPolicyContentHash}`,
+      `Total actions: ${String(payload.totalActions)}`,
+      "Total counts:",
       counts,
+      "Page counts:",
+      pageCounts,
       ...entries,
       `Next cursor: ${payload.nextCursor ?? "<end>"}`,
       "",
@@ -543,11 +604,24 @@ function successResult(stdout: string): PolicyCommandResult {
   });
 }
 
-function invalidResult(message: string): PolicyCommandResult {
+function invalidResult(
+  message: string,
+  format: PolicyOutputFormat,
+): PolicyCommandResult {
   return Object.freeze({
     exitCode: POLICY_COMMAND_EXIT_CODES.invalidConfiguration,
     stdout: "",
-    stderr: boundedOutput(`guard policy: ${message}\n`),
+    stderr:
+      format === "json"
+        ? renderJson({
+            schemaVersion: 1,
+            ok: false,
+            error: {
+              code: "invalid_configuration",
+              message,
+            },
+          })
+        : boundedOutput(`guard policy: ${message}\n`),
   });
 }
 
@@ -576,7 +650,7 @@ async function readBoundedUtf8File(
   ) {
     throw new PolicyCommandInputError("A policy input path or byte limit is invalid.");
   }
-  const handle = await open(path, "r");
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const metadata = await handle.stat({ bigint: true });
     if (!metadata.isFile() || metadata.size > BigInt(maximumBytes)) {
@@ -592,9 +666,28 @@ async function readBoundedUtf8File(
       if (result.bytesRead === 0) break;
       offset += result.bytesRead;
     }
+    if (offset !== expectedBytes) {
+      throw new PolicyCommandInputError(
+        "A policy input changed while it was being read.",
+      );
+    }
     const extra = Buffer.alloc(1);
     const growth = await handle.read(extra, 0, 1, null);
     if (growth.bytesRead !== 0) {
+      throw new PolicyCommandInputError(
+        "A policy input changed while it was being read.",
+      );
+    }
+    const observed = await handle.stat({ bigint: true });
+    if (
+      !observed.isFile() ||
+      observed.dev !== metadata.dev ||
+      observed.ino !== metadata.ino ||
+      observed.mode !== metadata.mode ||
+      observed.size !== metadata.size ||
+      observed.mtimeNs !== metadata.mtimeNs ||
+      observed.ctimeNs !== metadata.ctimeNs
+    ) {
       throw new PolicyCommandInputError(
         "A policy input changed while it was being read.",
       );
