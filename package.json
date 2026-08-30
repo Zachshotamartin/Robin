@@ -15,8 +15,13 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "check": "npm run typecheck && npm test",
-    "test": "node --test scripts/check-docs.test.mjs && npm run test --workspaces --if-present",
+    "check": "npm run static && npm run test:unit",
+    "static": "npm run typecheck && npm run test:repository",
+    "test": "npm run test:repository && npm run test:unit",
+    "test:repository": "node --test scripts/check-docs.test.mjs scripts/check-architecture.test.mjs scripts/check-repository-policy.test.mjs",
+    "test:unit": "npm run test --workspaces --if-present",
+    "test:contracts": "npm run test --workspace @guard/contracts --workspace @guard/schema-validation --workspace @guard/profile-registry --workspace @guard/event-store --workspace @guard/agent-driver --workspace @guard/model-provider --workspace @guard/context-broker --workspace @guard/capability-gateway --workspace @guard/capability-synthetic --workspace @guard/capability-repository --workspace @guard/runtime --workspace @guard/runtime-host --workspace @guard/milestone-a-scenarios --workspace @guard/cli",
+    "test:gate:a": "npm run test:repository && npm run test:contracts",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
