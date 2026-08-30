@@ -6,6 +6,9 @@
   },
   "include": ["src"],
   "references": [
-    { "path": "../../packages/milestone-a-scenarios" }
+    { "path": "../../packages/contracts" },
+    { "path": "../../packages/milestone-a-scenarios" },
+    { "path": "../../packages/policy-engine" },
+    { "path": "../../packages/policy-language" }
   ]
 }

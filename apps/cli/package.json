@@ -2,7 +2,7 @@
   "name": "@guard/cli",
   "version": "0.0.0",
   "private": true,
-  "description": "Command-line interface for deterministic Guarded Agent Milestone A runs.",
+  "description": "Command-line interface for deterministic Guarded Agent runs and policy debugging.",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -26,6 +26,9 @@
     "test": "npm run build && node --test dist/*.test.js"
   },
   "dependencies": {
-    "@guard/milestone-a-scenarios": "0.0.0"
+    "@guard/contracts": "0.0.0",
+    "@guard/milestone-a-scenarios": "0.0.0",
+    "@guard/policy-engine": "0.0.0",
+    "@guard/policy-language": "0.0.0"
   }
 }

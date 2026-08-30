@@ -1,0 +1,5 @@
+policy "allow-pure" priority 50 {
+  when action.side_effect == "none"
+  allow
+  reason "Pure actions are allowed."
+}

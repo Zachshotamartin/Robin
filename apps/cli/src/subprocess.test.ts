@@ -12,6 +12,24 @@ const SYNTHETIC_OBJECTIVE = fileURLToPath(
 const CODING_OBJECTIVE = fileURLToPath(
   new URL("../testdata/coding-objective.json", import.meta.url),
 );
+const STRICT_POLICY = fileURLToPath(
+  new URL("../testdata/strict.guard", import.meta.url),
+);
+const POLICY_CASES = fileURLToPath(
+  new URL("../testdata/policy-cases-v1.json", import.meta.url),
+);
+const ALLOW_POLICY = fileURLToPath(
+  new URL("../testdata/allow-pure.guard", import.meta.url),
+);
+const DENY_POLICY = fileURLToPath(
+  new URL("../testdata/deny-pure.guard", import.meta.url),
+);
+const POLICY_ACTION = fileURLToPath(
+  new URL("../testdata/policy-action.json", import.meta.url),
+);
+const POLICY_ACTIONS = fileURLToPath(
+  new URL("../testdata/policy-actions-v1.json", import.meta.url),
+);
 
 test("source-installed bin runs the synthetic human profile", async () => {
   const result = await execute([
@@ -88,6 +106,67 @@ test("source-installed bin rejects API-key flags without leaking the value", asy
   assert.equal(result.stdout, "");
   assert.match(result.stderr, /Unknown option: --api-key/u);
   assert.doesNotMatch(result.stderr, new RegExp(secret, "u"));
+});
+
+test("source-installed bin checks, formats, and tests policies", async () => {
+  const checked = await execute(["policy", "check", STRICT_POLICY, "--json"]);
+  assert.equal(checked.code, 0);
+  assert.equal(checked.stderr, "");
+  const checkedPayload = JSON.parse(checked.stdout) as Record<string, unknown>;
+  assert.equal(checkedPayload["ok"], true);
+
+  const formatted = await execute(["policy", "format", ALLOW_POLICY]);
+  assert.equal(formatted.code, 0);
+  assert.equal(formatted.stderr, "");
+  assert.match(formatted.stdout, /^policy "allow-pure" priority 50/u);
+
+  const tested = await execute([
+    "policy",
+    "test",
+    STRICT_POLICY,
+    "--cases",
+    POLICY_CASES,
+    "--json",
+  ]);
+  assert.equal(tested.code, 0);
+  assert.equal(tested.stderr, "");
+  const testedPayload = JSON.parse(tested.stdout) as Record<string, unknown>;
+  assert.equal(testedPayload["passed"], 30);
+  assert.equal(testedPayload["failed"], 0);
+});
+
+test("source-installed bin explains and simulates without effects", async () => {
+  const explained = await execute([
+    "policy",
+    "explain",
+    ALLOW_POLICY,
+    "--action",
+    POLICY_ACTION,
+    "--json",
+  ]);
+  assert.equal(explained.code, 0);
+  assert.equal(explained.stderr, "");
+  const explainedPayload = JSON.parse(explained.stdout) as Record<string, unknown>;
+  assert.equal(explainedPayload["effect"], "allow");
+  assert.equal(explainedPayload["winningPolicyName"], "allow-pure");
+
+  const simulated = await execute([
+    "policy",
+    "simulate",
+    "--from",
+    ALLOW_POLICY,
+    "--to",
+    DENY_POLICY,
+    "--actions",
+    POLICY_ACTIONS,
+    "--json",
+  ]);
+  assert.equal(simulated.code, 0);
+  assert.equal(simulated.stderr, "");
+  const simulatedPayload = JSON.parse(simulated.stdout) as {
+    readonly entries: readonly { readonly category: string }[];
+  };
+  assert.equal(simulatedPayload.entries[0]?.category, "newly_denied");
 });
 
 async function execute(argv: readonly string[]): Promise<{

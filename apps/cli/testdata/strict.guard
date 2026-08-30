@@ -1,0 +1,29 @@
+policy "deny-classified-context" priority 1000 {
+  when resource.classification != "public"
+  deny
+  reason "Strict mode releases only content classified as public"
+}
+
+policy "deny-networked-actions" priority 900 {
+  when environment.network_profile != "disabled"
+  deny
+  reason "Strict mode requires a network-disabled execution profile"
+}
+
+policy "deny-external-side-effects" priority 800 {
+  when action.side_effect == "external"
+  deny
+  reason "Strict mode forbids external side effects"
+}
+
+policy "approve-local-mutation" priority 700 {
+  when action.side_effect in ["local_reversible", "local_irreversible"]
+  require_approval
+  reason "Strict mode requires review before local mutation"
+}
+
+policy "allow-read-only-sandboxed-actions" priority 600 {
+  when action.side_effect == "none" and environment.sandboxed == true
+  allow
+  reason "Read-only work may proceed inside the selected sandbox profile"
+}

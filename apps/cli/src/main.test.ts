@@ -78,6 +78,7 @@ test("a rendering canary fails without partial stdout", async () => {
     runCoding: async () => ({
       execution: { history, state: { result: COMPLETED_RESULT } },
     }),
+    executePolicy: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
   };
   const code = await runCli(
     ["run", "--profile", "synthetic-demo", "--format", "jsonl"],
@@ -128,6 +129,59 @@ test("a revoked thrown proxy is contained as infrastructure failure", async () =
   assert.equal(stdout.value, "");
 });
 
+test("policy commands are dispatched without starting a run", async () => {
+  const stdout = writer();
+  const stderr = writer();
+  let runCalls = 0;
+  let policyCalls = 0;
+  const base = successfulDependencies(() => {
+    runCalls += 1;
+  });
+  const dependencies: CliDependencies = {
+    ...base,
+    executePolicy: async (request) => {
+      policyCalls += 1;
+      assert.equal(request.kind, "policy-check");
+      return {
+        exitCode: 2,
+        stdout: "",
+        stderr: "policy diagnostics\n",
+      };
+    },
+  };
+  const code = await runCli(
+    ["policy", "check", "default.guard"],
+    stdout,
+    stderr,
+    dependencies,
+  );
+  assert.equal(code, 2);
+  assert.equal(policyCalls, 1);
+  assert.equal(runCalls, 0);
+  assert.equal(stdout.value, "");
+  assert.equal(stderr.value, "policy diagnostics\n");
+});
+
+test("root and policy help list every debugger command", async () => {
+  const dependencies = successfulDependencies();
+  for (const [argv, pattern] of [
+    [["--help"], /policy/u],
+    [["policy", "--help"], /simulate/u],
+    [["policy", "check", "--help"], /--catalog/u],
+    [["policy", "format", "--help"], /canonicalText/u],
+    [["policy", "test", "--help"], /--cases/u],
+    [["policy", "explain", "--help"], /correlation tokens/u],
+    [["policy", "simulate", "--help"], /--cursor/u],
+  ] as const) {
+    const stdout = writer();
+    const stderr = writer();
+    const code = await runCli(argv, stdout, stderr, dependencies);
+    assert.equal(code, 0);
+    assert.match(stdout.value, pattern);
+    assert.equal(stderr.value, "");
+  }
+});
+
 const RUN_ID = "run_018f0001-0000-7000-8000-010000000001";
 const OUTCOME = Object.freeze({
   schemaVersion: 1,
@@ -163,6 +217,7 @@ function successfulDependencies(onRun: () => void = () => undefined): CliDepende
     readObjectiveFile: async () => ({ recordId: "greeting", mode: "uppercase" }),
     runSynthetic: run,
     runCoding: run,
+    executePolicy: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
   };
 }
 

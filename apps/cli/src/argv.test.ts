@@ -200,3 +200,209 @@ test("does not echo an option value in usage errors", () => {
       error instanceof CliUsageError && !error.message.includes(secret),
   );
 });
+
+test("parses every policy help surface", () => {
+  assert.deepEqual(parseArgv(["policy", "--help"]), {
+    kind: "help",
+    command: "policy",
+  });
+  for (const command of ["check", "format", "test", "explain", "simulate"] as const) {
+    assert.deepEqual(parseArgv(["policy", command, "--help"]), {
+      kind: "help",
+      command: `policy-${command}`,
+    });
+  }
+});
+
+test("parses check and format policy requests", () => {
+  assert.deepEqual(
+    parseArgv([
+      "policy",
+      "check",
+      "default.guard",
+      "--catalog",
+      "repository.json",
+      "--catalog",
+      "process.json",
+      "--default-effect",
+      "require_approval",
+      "--json",
+    ]),
+    {
+      kind: "policy-check",
+      policyPath: "default.guard",
+      defaultEffect: "require_approval",
+      catalogPaths: ["repository.json", "process.json"],
+      format: "json",
+    },
+  );
+  assert.deepEqual(parseArgv(["policy", "format", "default.guard"]), {
+    kind: "policy-format",
+    policyPath: "default.guard",
+    format: "human",
+  });
+});
+
+test("parses test and explain policy requests", () => {
+  assert.deepEqual(
+    parseArgv([
+      "policy",
+      "test",
+      "strict.guard",
+      "--cases",
+      "cases.json",
+    ]),
+    {
+      kind: "policy-test",
+      policyPath: "strict.guard",
+      casePath: "cases.json",
+      defaultEffect: "deny",
+      catalogPaths: [],
+      format: "human",
+    },
+  );
+  assert.deepEqual(
+    parseArgv([
+      "policy",
+      "explain",
+      "strict.guard",
+      "--action",
+      "action.json",
+      "--json",
+    ]),
+    {
+      kind: "policy-explain",
+      policyPath: "strict.guard",
+      actionPath: "action.json",
+      defaultEffect: "deny",
+      catalogPaths: [],
+      format: "json",
+    },
+  );
+});
+
+test("parses a resumable policy simulation request", () => {
+  assert.deepEqual(
+    parseArgv([
+      "policy",
+      "simulate",
+      "--from",
+      "old.guard",
+      "--to",
+      "new.guard",
+      "--actions",
+      "actions.json",
+      "--from-default-effect",
+      "allow",
+      "--to-default-effect",
+      "deny",
+      "--from-catalog",
+      "from-catalog.json",
+      "--to-catalog",
+      "to-catalog.json",
+      "--page-size",
+      "250",
+      "--cursor",
+      "cursor-token",
+      "--json",
+    ]),
+    {
+      kind: "policy-simulate",
+      fromPolicyPath: "old.guard",
+      toPolicyPath: "new.guard",
+      actionCorpusPath: "actions.json",
+      fromDefaultEffect: "allow",
+      toDefaultEffect: "deny",
+      catalogPaths: [],
+      fromCatalogPaths: ["from-catalog.json"],
+      toCatalogPaths: ["to-catalog.json"],
+      pageSize: 250,
+      cursor: "cursor-token",
+      format: "json",
+    },
+  );
+});
+
+test("rejects malformed, ambiguous, and unbounded policy argv", () => {
+  const invalid = [
+    ["policy"],
+    ["policy", "unknown"],
+    ["policy", "check"],
+    ["policy", "check", "one.guard", "two.guard"],
+    ["policy", "format", "one.guard", "--catalog", "catalog.json"],
+    ["policy", "test", "one.guard"],
+    ["policy", "test", "one.guard", "--cases", "one.json", "--cases", "two.json"],
+    ["policy", "explain", "one.guard", "--action"],
+    ["policy", "simulate", "--from", "one.guard", "--to", "two.guard"],
+    [
+      "policy",
+      "simulate",
+      "--from",
+      "one.guard",
+      "--to",
+      "two.guard",
+      "--actions",
+      "actions.json",
+      "--page-size",
+      "0",
+    ],
+    ["policy", "check", "line\nbreak.guard"],
+  ];
+  for (const argv of invalid) {
+    assert.throws(() => parseArgv(argv), CliUsageError);
+  }
+  const catalogs = Array.from({ length: 17 }, (_, index) => [
+    "--catalog",
+    `catalog-${String(index)}.json`,
+  ]).flat();
+  assert.throws(
+    () => parseArgv(["policy", "check", "one.guard", ...catalogs]),
+    /At most 16 catalog/u,
+  );
+});
+
+test("policy parsing honors the end-of-options terminator", () => {
+  assert.deepEqual(parseArgv(["policy", "check", "--", "-policy.guard"]), {
+    kind: "policy-check",
+    policyPath: "-policy.guard",
+    defaultEffect: "deny",
+    catalogPaths: [],
+    format: "human",
+  });
+  assert.throws(
+    () => parseArgv(["policy", "simulate", "--", "unexpected"]),
+    /accepts no positional/u,
+  );
+});
+
+test("rejects proxy, sparse, accessor, and oversized argv before parsing", () => {
+  const proxied = new Proxy(["--help"], {
+    ownKeys() {
+      throw new Error("argv proxy trap must not run");
+    },
+  });
+  assert.throws(() => parseArgv(proxied), CliUsageError);
+
+  const sparse = new Array<string>(2);
+  sparse[0] = "--help";
+  assert.throws(() => parseArgv(sparse), CliUsageError);
+
+  const accessor = ["--help"];
+  Object.defineProperty(accessor, "0", {
+    enumerable: true,
+    get() {
+      throw new Error("argv getter must not run");
+    },
+  });
+  assert.throws(() => parseArgv(accessor), CliUsageError);
+
+  assert.throws(
+    () => parseArgv(["policy", "check", "x".repeat(4_097)]),
+    CliUsageError,
+  );
+  assert.equal(
+    (parseArgv(["policy", "check", "x".repeat(4_096)]) as { policyPath: string })
+      .policyPath.length,
+    4_096,
+  );
+});

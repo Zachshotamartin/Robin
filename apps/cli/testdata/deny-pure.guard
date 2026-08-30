@@ -1,0 +1,5 @@
+policy "deny-pure" priority 100 {
+  when action.side_effect == "none"
+  deny
+  reason "Pure actions are denied by the candidate policy."
+}

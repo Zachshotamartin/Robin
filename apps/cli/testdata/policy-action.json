@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "actionId": "act_018f05a0-7b01-7000-8000-00000000b021",
+  "capabilityPackId": "fixture",
+  "capabilityPackVersion": 1,
+  "operationId": "read",
+  "operationVersion": 1,
+  "subject": {
+    "kind": "agent"
+  },
+  "resource": {
+    "scheme": "memory",
+    "sourceId": "fixture.source",
+    "classification": "internal"
+  },
+  "environment": {
+    "sandboxed": true,
+    "networkProfile": "disabled",
+    "trustLevel": "fixture"
+  },
+  "request": {
+    "intent": "inspect"
+  },
+  "normalizedInput": {},
+  "sideEffectClass": "none",
+  "preconditions": []
+}

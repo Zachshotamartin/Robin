@@ -6,7 +6,10 @@ import {
 import {
   CliUsageError,
   parseArgv,
+  type CliHelpCommand,
   type CliProfile,
+  type CliRequest,
+  type PolicyCliRequest,
 } from "./argv.js";
 import {
   parseObjectiveJson,
@@ -14,6 +17,10 @@ import {
   validateFixtureObjective,
 } from "./objectives.js";
 import { renderRun, type RenderableEvent } from "./render.js";
+import {
+  executePolicyCommand,
+  type PolicyCommandResult,
+} from "./policy-commands.js";
 
 export const CLI_VERSION = "0.0.0";
 
@@ -45,12 +52,14 @@ export interface CliDependencies {
   readonly readObjectiveFile: (path: string) => Promise<unknown>;
   readonly runSynthetic: () => Promise<ScenarioExecutionView>;
   readonly runCoding: () => Promise<ScenarioExecutionView>;
+  readonly executePolicy: (request: PolicyCliRequest) => Promise<PolicyCommandResult>;
 }
 
 const DEFAULT_DEPENDENCIES: CliDependencies = Object.freeze({
   readObjectiveFile,
   runSynthetic: runSyntheticTransformScenario,
   runCoding: runCodingVirtualRepositoryScenario,
+  executePolicy: executePolicyCommand,
 });
 
 export async function runCli(
@@ -62,12 +71,19 @@ export async function runCli(
   try {
     const request = parseArgv(argv);
     if (request.kind === "help") {
-      stdout.write(request.command === "run" ? RUN_HELP : ROOT_HELP);
+      stdout.write(helpFor(request.command));
       return EXIT_CODES.success;
     }
     if (request.kind === "version") {
       stdout.write(`${CLI_VERSION}\n`);
       return EXIT_CODES.success;
+    }
+
+    if (isPolicyRequest(request)) {
+      const result = await dependencies.executePolicy(request);
+      if (result.stdout.length > 0) stdout.write(result.stdout);
+      if (result.stderr.length > 0) stderr.write(result.stderr);
+      return result.exitCode;
     }
 
     if (request.objective.kind !== "builtin") {
@@ -88,7 +104,7 @@ export async function runCli(
     return exitCode;
   } catch (error) {
     if (isCliUsageError(error)) {
-      stderr.write(`guard: ${error.message}\nTry 'guard run --help'.\n`);
+      stderr.write(`guard: ${error.message}\nTry 'guard --help'.\n`);
       return EXIT_CODES.invalidConfiguration;
     }
     const code = domainErrorCode(error);
@@ -100,6 +116,16 @@ export async function runCli(
     );
     return exitCode;
   }
+}
+
+function isPolicyRequest(request: CliRequest): request is PolicyCliRequest {
+  return (
+    request.kind === "policy-check" ||
+    request.kind === "policy-format" ||
+    request.kind === "policy-test" ||
+    request.kind === "policy-explain" ||
+    request.kind === "policy-simulate"
+  );
 }
 
 function isCliUsageError(value: unknown): value is CliUsageError {
@@ -192,13 +218,14 @@ function recordValue(value: unknown, key: string): unknown {
 const ROOT_HELP = `Usage: guard <command> [options]
 
 Commands:
-  run       Execute a deterministic Milestone A scenario
+  run       Execute a deterministic scenario
+  policy    Check, format, test, explain, or simulate .guard policy
 
 Global options:
   --help    Show this help
   --version Show the CLI version
 
-Run 'guard run --help' for run options.
+Run 'guard run --help' or 'guard policy --help' for command options.
 `;
 
 const RUN_HELP = `Usage: guard run --profile <name> [options]
@@ -224,3 +251,89 @@ Exit codes: 0 success, 2 invalid input/configuration, 3 policy denial,
 4 approval pending, 5 budget exhaustion, 6 task failure,
 7 infrastructure failure, 8 cancellation.
 `;
+
+const POLICY_HELP = `Usage: guard policy <subcommand> [options]
+
+Subcommands:
+  check       Parse and type-check one policy snapshot
+  format      Print the canonical policy representation
+  test        Run a versioned table-case corpus
+  explain     Evaluate one normalized action with a full safe trace
+  simulate    Compare two policies over recorded normalized actions
+
+Run 'guard policy <subcommand> --help' for exact arguments.
+`;
+
+const POLICY_CHECK_HELP = `Usage: guard policy check <policy.guard> [options]
+
+Options:
+  --catalog <catalog.json>  Add one versioned attribute catalog; repeatable
+  --default-effect <effect> allow, deny (default), or require_approval
+  --json                    Emit canonical JSON
+  --help                    Show this help
+`;
+
+const POLICY_FORMAT_HELP = `Usage: guard policy format <policy.guard> [options]
+
+Options:
+  --json  Emit canonical JSON containing canonicalText
+  --help  Show this help
+`;
+
+const POLICY_TEST_HELP = `Usage: guard policy test <policy.guard> --cases <cases.json> [options]
+
+Options:
+  --catalog <catalog.json>  Add one versioned attribute catalog; repeatable
+  --default-effect <effect> allow, deny (default), or require_approval
+  --json                    Emit canonical JSON
+  --help                    Show this help
+`;
+
+const POLICY_EXPLAIN_HELP = `Usage: guard policy explain <policy.guard> --action <action.json> [options]
+
+Options:
+  --catalog <catalog.json>  Add one versioned attribute catalog; repeatable
+  --default-effect <effect> allow, deny (default), or require_approval
+  --json                    Emit canonical JSON with the evaluated trace
+  --help                    Show this help
+
+Secret-classified values are represented by category and count. Per-run
+correlation tokens are redacted from portable command output.
+`;
+
+const POLICY_SIMULATE_HELP = `Usage: guard policy simulate --from <old.guard> --to <new.guard> --actions <actions.json> [options]
+
+Options:
+  --catalog <catalog.json>       Add one versioned attribute catalog; repeatable
+  --from-catalog <catalog.json> Add a catalog only to the old snapshot
+  --to-catalog <catalog.json>   Add a catalog only to the candidate snapshot
+  --from-default-effect <effect> Old snapshot default; deny when omitted
+  --to-default-effect <effect>   New snapshot default; deny when omitted
+  --page-size <1..1000>          Stable action page size; default 100
+  --cursor <token>               Resume a matching prior simulation page
+  --json                         Emit canonical JSON
+  --help                         Show this help
+`;
+
+function helpFor(command: CliHelpCommand): string {
+  switch (command) {
+    case "root":
+      return ROOT_HELP;
+    case "run":
+      return RUN_HELP;
+    case "policy":
+      return POLICY_HELP;
+    case "policy-check":
+      return POLICY_CHECK_HELP;
+    case "policy-format":
+      return POLICY_FORMAT_HELP;
+    case "policy-test":
+      return POLICY_TEST_HELP;
+    case "policy-explain":
+      return POLICY_EXPLAIN_HELP;
+    case "policy-simulate":
+      return POLICY_SIMULATE_HELP;
+    default:
+      return ROOT_HELP;
+  }
+}

@@ -30,6 +30,10 @@ test("npm pack dry-run includes the bin and bounded objective testdata", async (
   assert.equal(paths.has("package.json"), true);
   assert.equal(paths.has("testdata/synthetic-payload.json"), true);
   assert.equal(paths.has("testdata/coding-objective.json"), true);
+  assert.equal(paths.has("testdata/strict.guard"), true);
+  assert.equal(paths.has("testdata/policy-cases-v1.json"), true);
+  assert.equal(paths.has("testdata/policy-action.json"), true);
+  assert.equal(paths.has("testdata/policy-actions-v1.json"), true);
 });
 
 test("the actual tarball installs with its local workspace closure and runs offline", async () => {
@@ -87,6 +91,27 @@ test("the actual tarball installs with its local workspace closure and runs offl
   );
   assert.equal(result.stdout, "0.0.0\n");
   assert.equal(result.stderr, "");
+
+  const policyResult = await execFile(
+    process.execPath,
+    [
+      join(installRoot, "node_modules", "@guard", "cli", "dist", "bin.js"),
+      "policy",
+      "check",
+      join(
+        installRoot,
+        "node_modules",
+        "@guard",
+        "cli",
+        "testdata",
+        "strict.guard",
+      ),
+      "--json",
+    ],
+    { cwd: installRoot, encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024 },
+  );
+  assert.equal(policyResult.stderr, "");
+  assert.equal((JSON.parse(policyResult.stdout) as { readonly ok: boolean }).ok, true);
 });
 
 async function npmPack(extra: readonly string[]): Promise<PackResult> {
@@ -114,6 +139,8 @@ function localDependencyPaths(): readonly string[] {
     "context-broker",
     "contracts",
     "event-store",
+    "policy-engine",
+    "policy-language",
     "profile-registry",
     "runtime-host",
     "runtime",

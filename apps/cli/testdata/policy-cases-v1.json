@@ -1,0 +1,1086 @@
+{
+  "schemaVersion": 1,
+  "policyContentHash": "e7f43be0fec5502f6005a801395e6f5cd2d6893cd70e4f3bad4f70b3abad7572",
+  "cases": [
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-public-pure",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000001",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "transform",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "transform"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-read-only-sandboxed-actions"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-public-read",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000002",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "read_file",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "read_file"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-read-only-sandboxed-actions"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-public-list",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000003",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "list_files",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "list_files"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-read-only-sandboxed-actions"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-public-search",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000004",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "search_text",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "search_text"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-read-only-sandboxed-actions"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-public-inspect",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000005",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "inspect_manifest",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "inspect_manifest"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-read-only-sandboxed-actions"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-internal",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000006",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "transform",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "internal"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "transform"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-classified-context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-secret",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000007",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "transform",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "secret"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "transform"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-classified-context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-restricted",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000008",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "transform",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "restricted"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "transform"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-classified-context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-public-case-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000009",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "transform",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "Public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "transform"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-classified-context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-empty-classification",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000000a",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "transform",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": ""
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "transform"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-classified-context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-outbound-network",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000000b",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "transform",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "outbound",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "transform"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-networked-actions"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-full-network",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000000c",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "transform",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "full",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "transform"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-networked-actions"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-network-case-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000000d",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "transform",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "Disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "transform"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-networked-actions"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-external",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000000e",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "publish",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "publish"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "external",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-external-side-effects"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-external-network",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000000f",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "publish",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "outbound",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "publish"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "external",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-networked-actions"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-external-secret",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000010",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "publish",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "secret"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "publish"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "external",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-classified-context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "approve-reversible",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000011",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "write",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "write"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "local_reversible",
+        "preconditions": []
+      },
+      "expectedEffect": "require_approval",
+      "expectedWinningPolicyName": "approve-local-mutation"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "approve-irreversible",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000012",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "delete",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "delete"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "local_irreversible",
+        "preconditions": []
+      },
+      "expectedEffect": "require_approval",
+      "expectedWinningPolicyName": "approve-local-mutation"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "approve-reversible-unsandboxed",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000013",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "write",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": false,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "write"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "local_reversible",
+        "preconditions": []
+      },
+      "expectedEffect": "require_approval",
+      "expectedWinningPolicyName": "approve-local-mutation"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-reversible-secret",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000014",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "write",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "secret"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "write"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "local_reversible",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-classified-context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-reversible-network",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000015",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "write",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "outbound",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "write"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "local_reversible",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-networked-actions"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-irreversible-secret-network",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000016",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "delete",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "secret"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "outbound",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "delete"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "local_irreversible",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-classified-context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "default-deny-unsandboxed-transform",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000017",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "transform",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": false,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "transform"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "default-deny-unsandboxed-read",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000018",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "read_file",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": false,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "read_file"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "default-deny-unsandboxed-search",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000019",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "search_text",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": false,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "search_text"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-public-noop",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000001a",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "noop",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "noop"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-read-only-sandboxed-actions"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-public-unknown-pure-operation",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000001b",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "domain_specific_read",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "domain_specific_read"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-read-only-sandboxed-actions"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-domain-read-internal",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000001c",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "domain_specific_read",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "internal"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "domain_specific_read"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-classified-context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "approve-domain-local",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000001d",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "domain_specific_write",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "domain_specific_write"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "local_reversible",
+        "preconditions": []
+      },
+      "expectedEffect": "require_approval",
+      "expectedWinningPolicyName": "approve-local-mutation"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-domain-external",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000001e",
+        "capabilityPackId": "fixture.coding",
+        "capabilityPackVersion": 1,
+        "operationId": "domain_specific_external",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "public"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "domain_specific_external"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "external",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-external-side-effects"
+    }
+  ]
+}
