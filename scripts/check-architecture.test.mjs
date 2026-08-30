@@ -252,6 +252,28 @@ test("generic runtime source contains no task, provider, protocol, or operation 
   }
 });
 
+test("the generic context broker contains no coding-source vocabulary or dependencies", async () => {
+  const sourceFiles = await collectFiles(
+    path.join(packagesRoot, "context-broker", "src"),
+    (name) => name.endsWith(".ts") && !name.endsWith(".test.ts")
+  );
+  for (const sourceFile of sourceFiles) {
+    const source = await readFile(sourceFile, "utf8");
+    for (const specifier of importedSpecifiers(source)) {
+      assert.doesNotMatch(
+        specifier,
+        /^@guard\/capability-/,
+        `${path.relative(repositoryRoot, sourceFile)} imports a coding capability package`
+      );
+    }
+    assert.doesNotMatch(
+      source,
+      /\b(?:repo|repository|git|worktree|branch|path|patch|diff)\b/iu,
+      `${path.relative(repositoryRoot, sourceFile)} contains coding-source vocabulary`
+    );
+  }
+});
+
 test("the CLI remains an event client rather than an enforcement boundary", async () => {
   const cliSourceRoot = path.join(repositoryRoot, "apps", "cli", "src");
   const sourceFiles = await collectFiles(

@@ -3,7 +3,7 @@ import {
   createDomainError,
   snapshotBoundaryJsonObject,
 } from "@guard/contracts";
-import type { JsonObject } from "@guard/contracts";
+import type { JsonBoundaryLimitOptions, JsonObject } from "@guard/contracts";
 
 export function snapshot<T>(value: T): T {
   const detached = JSON.parse(canonicalize(value)) as T;
@@ -13,9 +13,10 @@ export function snapshot<T>(value: T): T {
 export function snapshotBoundaryObject(
   value: unknown,
   label: string,
+  limits?: JsonBoundaryLimitOptions,
 ): JsonObject {
   try {
-    return snapshotBoundaryJsonObject(value);
+    return snapshotBoundaryJsonObject(value, limits);
   } catch {
     throw createDomainError({
       code: "invalid_input",

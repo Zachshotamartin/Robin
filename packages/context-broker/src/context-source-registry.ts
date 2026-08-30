@@ -48,7 +48,11 @@ export class ContextSourceRegistry {
 
     descriptors.sort(
       (left, right) =>
-        left.sourceId.localeCompare(right.sourceId) ||
+        (left.sourceId < right.sourceId
+          ? -1
+          : left.sourceId > right.sourceId
+            ? 1
+            : 0) ||
         left.sourceVersion - right.sourceVersion,
     );
     this.#sources = registered;
