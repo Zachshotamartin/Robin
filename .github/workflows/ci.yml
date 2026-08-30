@@ -53,7 +53,7 @@ jobs:
       - run: npm run test:contracts
 
   gate-b:
-    name: Gate B policy mutation merge gate
+    name: Gate B enforcement mutation merge gate
     needs: [static, unit, contracts]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -64,4 +64,4 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci --ignore-scripts
-      - run: npm run test:mutation:policy
+      - run: npm run test:mutation:gate:b

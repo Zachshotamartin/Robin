@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "minimumScorePercent": 100,
+  "requireZeroCriticalSurvivors": true,
+  "buildTimeoutMs": 180000,
+  "perExerciseTimeoutMs": 15000,
+  "scope": [
+    "packages/capability-repository/dist/repository-path.js",
+    "packages/capability-gateway/dist/capability-gateway.js",
+    "packages/runtime/dist/kernel.js"
+  ],
+  "requiredCriticalMutationIds": [
+    "repository-allow-dot-segment",
+    "repository-allow-traversal-segment",
+    "repository-allow-backslash-separator",
+    "repository-allow-percent-encoding",
+    "repository-skip-unicode-nfc",
+    "repository-allow-windows-reserved",
+    "gateway-skip-input-schema",
+    "gateway-skip-output-schema",
+    "gateway-wrong-action-hash",
+    "gateway-policy-action-clone",
+    "gateway-handler-action-clone",
+    "gateway-release-action-clone",
+    "gateway-skip-prepared-identity-guard",
+    "runtime-skip-event-transition-guard"
+  ],
+  "equivalentMutants": []
+}

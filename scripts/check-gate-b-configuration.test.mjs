@@ -28,6 +28,23 @@ const requiredContractPackages = Object.freeze([
   "@guard/cli",
 ]);
 
+const requiredBoundaryMutationIds = Object.freeze([
+  "repository-allow-dot-segment",
+  "repository-allow-traversal-segment",
+  "repository-allow-backslash-separator",
+  "repository-allow-percent-encoding",
+  "repository-skip-unicode-nfc",
+  "repository-allow-windows-reserved",
+  "gateway-skip-input-schema",
+  "gateway-skip-output-schema",
+  "gateway-wrong-action-hash",
+  "gateway-policy-action-clone",
+  "gateway-handler-action-clone",
+  "gateway-release-action-clone",
+  "gateway-skip-prepared-identity-guard",
+  "runtime-skip-event-transition-guard",
+]);
+
 async function rootManifest() {
   return JSON.parse(
     await readFile(path.join(repositoryRoot, "package.json"), "utf8"),
@@ -73,8 +90,24 @@ test("Gate B aggregation runs each bounded suite once and finishes with mutation
   const scripts = manifest.scripts ?? {};
   assert.equal(scripts["test:contracts"], "npm run test:gate:b:contracts");
   assert.equal(
+    scripts["test:mutation:boundaries"],
+    "node scripts/run-boundary-mutation-tests.mjs",
+  );
+  assert.equal(
+    scripts["test:mutation:gate:b"],
+    "npm run test:mutation:boundaries && npm run test:mutation:policy",
+  );
+  assert.equal(
     scripts["test:gate:b"],
-    "npm run test:repository && npm run test:gate:b:contracts && npm run test:mutation:policy",
+    "npm run test:repository && npm run test:gate:b:contracts && npm run test:mutation:gate:b",
+  );
+  assert.equal(
+    (scripts["test:mutation:gate:b"].match(/npm run test:mutation:boundaries/gu) ?? []).length,
+    1,
+  );
+  assert.equal(
+    (scripts["test:mutation:gate:b"].match(/npm run test:mutation:policy/gu) ?? []).length,
+    1,
   );
 
   const contractCommand = scripts["test:gate:b:contracts"];
@@ -97,7 +130,67 @@ test("Gate B aggregation runs each bounded suite once and finishes with mutation
   }
 });
 
-test("CI makes policy mutation a bounded Gate B job after all prerequisite jobs", async () => {
+test("boundary mutation configuration pins critical scope and argv-only isolation", async () => {
+  const config = JSON.parse(
+    await readFile(
+      path.join(repositoryRoot, "scripts", "boundary-mutation.config.json"),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(Object.keys(config).sort(), [
+    "buildTimeoutMs",
+    "equivalentMutants",
+    "minimumScorePercent",
+    "perExerciseTimeoutMs",
+    "requireZeroCriticalSurvivors",
+    "requiredCriticalMutationIds",
+    "schemaVersion",
+    "scope",
+  ]);
+  assert.equal(config.schemaVersion, 1);
+  assert.equal(config.minimumScorePercent, 100);
+  assert.equal(config.requireZeroCriticalSurvivors, true);
+  assert.deepEqual(config.equivalentMutants, []);
+  assert.ok(Number.isSafeInteger(config.buildTimeoutMs));
+  assert.ok(config.buildTimeoutMs > 0 && config.buildTimeoutMs <= 300_000);
+  assert.ok(Number.isSafeInteger(config.perExerciseTimeoutMs));
+  assert.ok(config.perExerciseTimeoutMs > 0 && config.perExerciseTimeoutMs <= 30_000);
+  assert.deepEqual(config.requiredCriticalMutationIds, requiredBoundaryMutationIds);
+  assert.deepEqual(config.scope, [
+    "packages/capability-repository/dist/repository-path.js",
+    "packages/capability-gateway/dist/capability-gateway.js",
+    "packages/runtime/dist/kernel.js",
+  ]);
+
+  const runner = await readFile(
+    path.join(repositoryRoot, "scripts", "run-boundary-mutation-tests.mjs"),
+    "utf8",
+  );
+  assert.match(runner, /spawn\(/u);
+  assert.match(runner, /shell:\s*false/u);
+  assert.doesNotMatch(runner, /\bexec(?:File|Sync)?\s*\(/u);
+  assert.doesNotMatch(runner, /env:\s*\{\s*\.\.\.process\.env/u);
+  assert.match(runner, /const inheritedAllowlist = \[/u);
+  assert.match(runner, /"typescript", "bin", "tsc"/u);
+  assert.match(runner, /GUARD_MUTATION_ENV_CANARY/u);
+  assert.match(runner, /process\.kill\(-child\.pid, "SIGKILL"\)/u);
+  assert.match(runner, /mkdtemp\(/u);
+  assert.match(runner, /await rm\(temporaryRoot, \{ recursive: true, force: true \}\)/u);
+  for (const mutationId of requiredBoundaryMutationIds) {
+    assert.match(runner, new RegExp(`\\b${mutationId}\\b`, "u"));
+  }
+
+  const probe = await readFile(
+    path.join(repositoryRoot, "scripts", "exercise-boundary-mutant.mjs"),
+    "utf8",
+  );
+  assert.match(probe, /process\.env\.GUARD_MUTATION_ENV_CANARY/u);
+  assert.match(probe, /inherited forbidden environment field/u);
+  assert.match(probe, /GUARD_BOUNDARY_MUTATION_KILLED/u);
+  assert.match(runner, /failed outside its assertion oracle/u);
+});
+
+test("CI makes aggregate mutation a bounded Gate B job after all prerequisite jobs", async () => {
   const workflow = await readFile(
     path.join(repositoryRoot, ".github", "workflows", "ci.yml"),
     "utf8",
@@ -107,7 +200,8 @@ test("CI makes policy mutation a bounded Gate B job after all prerequisite jobs"
   assert.match(gateJob, /^    needs: \[static, unit, contracts\]$/mu);
   assert.match(gateJob, /^    timeout-minutes: (?:[1-9]|[1-5]\d|60)$/mu);
   assert.match(gateJob, /^      - run: npm ci --ignore-scripts$/mu);
-  assert.match(gateJob, /^      - run: npm run test:mutation:policy$/mu);
+  assert.match(gateJob, /^      - run: npm run test:mutation:gate:b$/mu);
+  assert.doesNotMatch(gateJob, /npm run test:mutation:(?:boundaries|policy)\b/u);
   assert.doesNotMatch(gateJob, /npm run (?:check|test:unit|test:contracts|test:gate:b)\b/u);
 
   for (const prerequisite of ["static", "unit", "contracts"]) {
