@@ -202,6 +202,7 @@ guarded-agent/
   packages/
     contracts/          # generic IDs, content, actions, outcomes, schemas
     event-store/        # append, subscribe, projections, migrations
+    artifact-store/     # content-addressed objects, references, retention
     runtime/            # run state machine and orchestration
     profile-registry/   # immutable task-profile validation and loading
     agent-driver/       # generic planning-driver interface and events
@@ -235,11 +236,11 @@ guarded-agent/
     research-corpus/
   migrations/
   docs/
-    architecture.md
-    threat-model.md
-    policy-language.md
-    event-model.md
-    demo-script.md
+    BUILD_PLAN.md and companion planning documents   # already present
+    policy-language.md  # user reference, written with Phase 2
+    event-model.md      # user reference, written with Phase 1
+    demo-script.md      # written with Phase 8
+    decisions/          # architecture decision records
   package.json
   tsconfig.base.json
 ```
@@ -548,7 +549,7 @@ RunOrphaned
 RunCompleted
 ```
 
-The authoritative event union also includes `CancellationRequested`, `RunPaused`, `RunResumed`, `RecoveryStarted`, `RecoveryCompleted`, `ApprovalExpired`, `ApprovalInvalidated`, and `ApprovalConsumed`. Driver- or capability-specific facts use namespaced typed payloads, such as `provider.ModelRequestStarted`, `provider.ModelResponseCompleted`, `provider.ModelRequestUncertain`, `coding.WorkspaceCheckpointCreated`, and `coding.PatchProduced`. They may extend the ledger but cannot replace the generic facts required by the reducer. Lease claims and heartbeats remain command-table mechanics and operational telemetry unless they change business-visible run state.
+The authoritative event union also includes `CancellationRequested`, `RunPaused`, `RunResumed`, `RecoveryStarted`, `RecoveryCompleted`, `AgentAttemptFailed`, `ApprovalExpired`, `ApprovalInvalidated`, and `ApprovalConsumed`. Driver- or capability-specific facts use namespaced typed payloads, such as `provider.ModelRequestStarted`, `provider.ModelResponseCompleted`, `provider.ModelRequestUncertain`, `coding.WorkspaceCheckpointCreated`, and `coding.PatchProduced`. They may extend the ledger but cannot replace the generic facts required by the reducer. Lease claims and heartbeats remain command-table mechanics and operational telemetry unless they change business-visible run state.
 
 Each event includes stream ID, sequence number, event ID, timestamp, causation ID, correlation ID, actor, schema version, and payload.
 
@@ -618,6 +619,7 @@ guard init
 guard doctor
 guard profiles list
 guard profiles inspect <profile-id>
+guard profiles validate <profile-id>
 guard credentials add|list|validate|rotate|remove ...
 guard providers add|list|doctor ...
 guard agents register|list|doctor ...
@@ -625,6 +627,8 @@ guard run --profile coding-local --provider <provider-profile> --objective-file 
 guard run --profile research-local-corpus --provider <provider-profile> --objective-file <file>
 guard run --profile <profile> --agent <agent-profile> --objective-file <file>
 guard run --profile synthetic-demo --objective-file <file>
+guard run message <run-id> "<follow-up intent>"
+guard daemon start --foreground
 guard status <run-id>
 guard inspect <run-id>
 guard approve <approval-id>
@@ -640,14 +644,14 @@ guard eval run evals/security.json
 guard eval compare <baseline> <candidate>
 ```
 
-The profile decides whether `--provider`, `--agent`, or neither is legal. Secret bytes are accepted only by credential commands through hidden input, stdin, or a deliberate one-time environment import; they are never accepted by `guard run`, profile files, provider files, or agent registration arguments.
+The profile decides whether `--provider`, `--agent`, or neither is legal. `guard run "<objective text>"` is accepted shorthand for an inline objective payload validated against the selected profile's objective schema; `--objective-file` remains the canonical form for structured objectives. `guard daemon start` arrives with the Phase 6 minimal daemon, and `guard run message` implements `FR-CLI-005`. Secret bytes are accepted only by credential commands through hidden input, stdin, or a deliberate one-time environment import; they are never accepted by `guard run`, profile files, provider files, or agent registration arguments.
 
 ### Output modes
 
 - Human-readable streaming terminal output
 - `--jsonl` stable event stream for automation
 - `--quiet` final result only
-- Predictable exit codes for success, policy denial, approval required, budget exceeded, task failure, and infrastructure failure
+- Predictable exit codes for success, invalid input, policy denial, approval required, budget exceeded, task failure, infrastructure failure, and cancellation
 
 The CLI renderer consumes domain events. It must not contain enforcement logic.
 
@@ -920,7 +924,9 @@ Build:
 
 - Direct-model `AgentDriver` using the generic driver protocol
 - Credential metadata store, OS credential-store references, origin-bound transport, and redacted diagnostics
+- `guard credentials add|list|validate|rotate|remove` commands with hidden-input and one-time environment import
 - Official SDK-backed OpenAI Responses provider adapter
+- Local no-credential provider adapter behind the same provider port, satisfying the portfolio-release local no-key path
 - Streaming event normalization and request/response recording
 - Custom function-tool translation
 - Conversation/context reconstruction
@@ -935,7 +941,7 @@ Exit criteria:
 - Malformed or unsupported tool calls fail safely.
 - Ambiguous model-call failures become recorded new attempts rather than invisible retries.
 - Credential bytes never appear in logs, events, sandboxes, agent/model context, clients, or extension state.
-- The same scripted run works against a no-key local synthetic adapter and the real provider without changing runtime code.
+- The same scripted run works against the synthetic provider, the local no-credential adapter, and the real provider without changing runtime code.
 
 ### Phase 6 — PostgreSQL, minimal daemon, approvals, and recovery (5–7 weeks)
 
@@ -1000,8 +1006,8 @@ Exit criteria:
 
 Build:
 
-- Provider/profile management and `guard credentials`, `guard providers`, `guard agents`, and `guard profiles` commands
-- Anthropic, Gemini, conformant OpenAI-compatible, and local no-credential provider adapters
+- Completed management surfaces for `guard providers`, `guard agents`, and `guard profiles`, extending the `guard credentials` commands shipped in Phase 5
+- Anthropic, Gemini, and conformant OpenAI-compatible provider adapters, plus full conformance coverage for the Phase 5 local no-credential path
 - Tool-calling, constrained-schema, text-only planning, and supported multimodal content paths
 - Provider conformance corpus, golden transcript fixtures, capability negotiation, cost metadata, and failure classification
 - ACP agent driver with every filesystem and terminal operation mapped through guarded capabilities
@@ -1048,8 +1054,8 @@ Do not start more than one expansion track before the core portfolio release is 
 
 ## 22. First 20 Implementation Tickets
 
-1. Write `docs/product.md` with v1 non-goals.
-2. Write `docs/threat-model.md` with a data-flow diagram.
+1. Keep `docs/PRODUCT_REQUIREMENTS.md` current with v1 non-goals (initial version complete; revisit at each phase boundary).
+2. Keep `docs/THREAT_MODEL.md` current, including data flows and trust boundaries (initial version complete; review on its stated cadence).
 3. Define branded ID types and canonical error categories.
 4. Define versioned event envelopes and the initial event union.
 5. Implement the in-memory optimistic-concurrency event store.

@@ -12,6 +12,12 @@
 - [Product requirements](PRODUCT_REQUIREMENTS.md): users, functional requirements, flows, error behavior, and non-functional requirements
 - [Threat model](THREAT_MODEL.md): assets, actors, boundaries, abuse cases, controls, evidence, and residual risk
 
+## Supporting References
+
+- [Glossary](GLOSSARY.md): canonical definitions for the controlled vocabulary; conflicts are fixed, not locally redefined
+- [Open questions](OPEN_QUESTIONS.md): deferred decisions, their fail-closed positions, and reopen triggers
+- [Decision records](decisions/): accepted ADRs and the [template](decisions/TEMPLATE.md) for new ones
+
 ## Documentation Rules
 
 - Planned behavior must be labeled as planned until tests demonstrate it.

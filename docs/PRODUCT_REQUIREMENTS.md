@@ -353,10 +353,10 @@ Success: the same reducer, event store, policy, approvals, evidence, budgets, an
 
 ### 6.9 Bring-your-own provider credential
 
-1. User runs `guard credentials add <name> --strategy <reviewed-strategy>` and enters the secret through hidden terminal input or OS credential-store UI.
+1. User runs `guard credentials add <name> --adapter <adapter-id>` and enters the secret through hidden terminal input or OS credential-store UI; the adapter fixes the reviewed authentication strategy.
 2. CLI stores secret bytes only in the OS credential store and records an opaque reference plus safe origin/account metadata.
 3. User creates a provider profile that pins adapter, exact endpoint origin, model, capability manifest, retention, and credential reference.
-4. `guard providers validate` performs offline schema/capability checks; an optional confirmed network probe discloses possible cost and sends no source content.
+4. `guard providers doctor` performs offline schema/capability checks; an optional confirmed network probe discloses possible cost and sends no source content.
 5. A run resolves the credential inside the trusted transport immediately before the request, rejects redirects, and scrubs authentication from all diagnostics.
 6. Rotation atomically changes the secret behind the reference for future attempts; removal prevents new attempts without altering historical secret-free evidence.
 

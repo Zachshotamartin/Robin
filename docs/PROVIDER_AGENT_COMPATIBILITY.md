@@ -312,9 +312,10 @@ guard agents register review-agent \
 
 guard agents doctor review-agent
 
-guard run "add rate limiting" \
-  --agent review-agent \
-  --policy strict-local
+guard run \
+  --profile coding-external-agent \
+  --objective-file examples/objectives/add-rate-limiting.json \
+  --agent review-agent
 ```
 
 Registration resolves the executable without shell lookup ambiguity, records its hash, version output, adapter version, requested capabilities, environment allowlist, network profile, and credential reference if the agent owns its model connection. A changed executable invalidates the registration until reviewed.

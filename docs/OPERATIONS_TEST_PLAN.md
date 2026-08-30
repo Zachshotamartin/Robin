@@ -63,7 +63,7 @@ Store the record in the release artifact and `docs/compatibility/<version>.md`.
 ### 3.1 Initial local repository
 
 1. Create a dedicated sibling directory under `portfolio_projects`.
-2. Copy only Guarded Agent files; do not nest it in the Site DNA repository.
+2. Copy only Guarded Agent files; do not nest the new repository inside any other existing repository.
 3. Initialize Git with `main` as the initial branch.
 4. Verify no parent repository captures the new directory.
 5. Run the documentation bootstrap test.
@@ -120,7 +120,7 @@ Create labels:
 - `risk:high`
 - `blocked`
 
-Create milestones matching the implementation guide's Milestones A through G. Every issue belongs to one milestone or the explicitly deferred backlog.
+Create milestones matching the implementation guide's Milestones A through H. Every issue belongs to one milestone or the explicitly deferred backlog.
 
 ## 4. Developer Bootstrap
 
@@ -595,8 +595,8 @@ Run the following common corpus against every direct-provider adapter using a sy
 - Ambiguous disconnect after transmission
 - User cancellation
 - Provider terminal incomplete state
-- `store: false` present
-- `parallel_tool_calls: false` present
+- Provider-storage-disabled request setting present where the dialect supports it, such as `store: false` for the OpenAI Responses dialect
+- Parallel-tool-calls-disabled setting present where controllable, such as `parallel_tool_calls: false` for the OpenAI Responses dialect
 - Required encrypted reasoning item requested, stored opaquely, and returned unchanged when the selected model contract supports it
 - Function-call IDs, function outputs, item order, and provider-required protocol fields survive reconstruction
 - Local custom-function-call budget applies even when provider built-in-tool limits do not

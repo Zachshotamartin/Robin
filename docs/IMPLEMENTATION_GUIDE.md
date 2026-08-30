@@ -1772,6 +1772,19 @@ No pull-request job receives a real provider or external-agent credential.
 
 ## 24. Detailed Milestone Execution
 
+Milestones map to the build plan's phased roadmap as follows; Phase 0 (specification and threat model) precedes Milestone A and is complete when these documents are accepted.
+
+| Milestone | Build-plan phase |
+|---|---|
+| A — Deterministic runtime kernel | Phase 1 |
+| B — Policy and context boundary | Phases 2–3 |
+| C — Isolated real filesystem execution | Phase 4 |
+| D — Direct-model driver, credentials, and first real provider | Phase 5 |
+| E — PostgreSQL durability, minimal daemon, and approvals | Phase 6 |
+| F — Evaluation, research profile, and release-quality CLI | Phases 7–8 |
+| G — Broad provider and external-agent compatibility | Phase 9 |
+| H — Multi-client daemon hardening and editor client | Phase 10 |
+
 ### Milestone A — Deterministic runtime kernel
 
 Implementation order:

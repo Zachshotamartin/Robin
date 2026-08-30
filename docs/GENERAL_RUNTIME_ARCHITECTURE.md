@@ -525,6 +525,7 @@ Required generic facts:
 - `AgentDriverStarted`
 - `AgentAttemptStarted`
 - `AgentAttemptUncertain`
+- `AgentAttemptFailed`
 - `AgentContentCompleted`
 - `AgentUsageRecorded`
 - `ContextRequested`
@@ -550,6 +551,7 @@ Required generic facts:
 - `BudgetExceeded`
 - `OutcomeProposed`
 - `OutcomeValidated`
+- `ArtifactReferenced`
 - `CancellationRequested`
 - `RecoveryStarted`
 - `RecoveryCompleted`
