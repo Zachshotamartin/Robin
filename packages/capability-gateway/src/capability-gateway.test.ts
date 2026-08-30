@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   ActionIdKind,
+  DEFAULT_JSON_BOUNDARY_LIMITS,
+  canonicalBytes,
   canonicalize,
   createDomainError,
   isDomainError,
@@ -13,6 +15,7 @@ import type { CompiledJsonObjectSchema } from "@guard/schema-validation";
 import {
   CapabilityGateway,
   CapabilityPackRegistry,
+  DEFAULT_MAXIMUM_OPERATION_SCHEMA_BYTES,
   type CapabilityOperation,
   type CapabilityOperationReference,
   type CapabilityPack,
@@ -299,6 +302,54 @@ test("compiles strict versioned schemas at registry startup", () => {
   };
   assert.throws(
     () => new CapabilityPackRegistry([asyncSchemaPack]),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+});
+
+test("bounds installed operation schemas before shared compiler traversal", () => {
+  assert.equal(
+    DEFAULT_MAXIMUM_OPERATION_SCHEMA_BYTES <
+      DEFAULT_JSON_BOUNDARY_LIMITS.maximumCanonicalUtf8Bytes,
+    true,
+  );
+  const operation = counterOperation(spies());
+  const exact = Math.max(
+    canonicalBytes(operation.definition.inputSchema).byteLength,
+    canonicalBytes(operation.definition.outputSchema).byteLength,
+  );
+  assert.doesNotThrow(
+    () => new CapabilityPackRegistry([pack(operation)], {
+      maximumSchemaBytes: exact,
+    }),
+  );
+  assert.throws(
+    () => new CapabilityPackRegistry([pack(operation)], {
+      maximumSchemaBytes: exact - 1,
+    }),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+
+  const canary = "REGISTRY_SCHEMA_LIMIT_CANARY";
+  let getterCalls = 0;
+  const accessor = {};
+  Object.defineProperty(accessor, "maximumSchemaBytes", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      throw new Error(canary);
+    },
+  });
+  assert.throws(
+    () => new CapabilityPackRegistry([pack(operation)], accessor),
+    (error: unknown) =>
+      isDomainError(error) && !JSON.stringify(error).includes(canary),
+  );
+  assert.equal(getterCalls, 0);
+  assert.throws(
+    () => new CapabilityPackRegistry([pack(operation)], {
+      maximumSchemaBytes:
+        DEFAULT_JSON_BOUNDARY_LIMITS.maximumCanonicalUtf8Bytes + 1,
+    }),
     (error: unknown) => isDomainCode(error, "invalid_input"),
   );
 });

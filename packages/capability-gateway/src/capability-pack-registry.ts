@@ -1,6 +1,10 @@
 import { isProxy } from "node:util/types";
 
-import { createDomainError, isDomainError } from "@guard/contracts";
+import {
+  DEFAULT_JSON_BOUNDARY_LIMITS,
+  createDomainError,
+  isDomainError,
+} from "@guard/contracts";
 import type { JsonObject, VersionedSchema } from "@guard/contracts";
 import {
   compileTrustedJsonObjectSchema,
@@ -43,18 +47,11 @@ const ADVERTISEMENT_OPERATIONS = new WeakMap<
   ReadonlySet<string>
 >();
 
-/*
- * CapabilityGateway applies its configured input and raw-output byte bounds
- * before invoking either validator. Using the largest representable canonical
- * byte limit here preserves those public, per-gateway limits while the shared
- * compiler remains the sole Ajv boundary. Installed pack schemas are trusted
- * executable configuration and were previously accepted up to the same
- * representable limit.
- */
-const TRUSTED_OPERATION_SCHEMA_LIMITS = Object.freeze({
-  maxSchemaBytes: Number.MAX_SAFE_INTEGER,
-  maxValueBytes: Number.MAX_SAFE_INTEGER,
-});
+export const DEFAULT_MAXIMUM_OPERATION_SCHEMA_BYTES = 256 * 1_024;
+
+export interface CapabilityPackRegistryOptions {
+  readonly maximumSchemaBytes?: number;
+}
 
 /**
  * Immutable registry that compiles every input and output schema eagerly.
@@ -66,7 +63,11 @@ const TRUSTED_OPERATION_SCHEMA_LIMITS = Object.freeze({
 export class CapabilityPackRegistry {
   readonly #packs: readonly RegisteredPackDescriptor[];
 
-  constructor(packs: readonly CapabilityPack[]) {
+  constructor(
+    packs: readonly CapabilityPack[],
+    options: CapabilityPackRegistryOptions = {},
+  ) {
+    const maximumSchemaBytes = normalizeMaximumSchemaBytes(options);
     const installedPacks = inspectTrustedArray(
       packs,
       "Capability packs must be supplied as a dense array.",
@@ -111,8 +112,16 @@ export class CapabilityPackRegistry {
 
         const inputSchema = operation.definition.inputSchema;
         const outputSchema = operation.definition.outputSchema;
-        const validateInput = compileSchema(inputSchema, "input");
-        const validateOutput = compileSchema(outputSchema, "output");
+        const validateInput = compileSchema(
+          inputSchema,
+          "input",
+          maximumSchemaBytes,
+        );
+        const validateOutput = compileSchema(
+          outputSchema,
+          "output",
+          maximumSchemaBytes,
+        );
         const reference: CapabilityOperationReference = Object.freeze({
           packId: pack.packId,
           packVersion: pack.packVersion,
@@ -439,6 +448,7 @@ function normalizeSchema(schema: unknown, purpose: string): VersionedSchema {
 function compileSchema(
   schema: VersionedSchema,
   purpose: string,
+  maximumSchemaBytes: number,
 ): CompiledJsonObjectSchema {
   if (schema.document["$async"] === true) {
     throw invalidInput(
@@ -452,7 +462,11 @@ function compileSchema(
   try {
     return compileTrustedJsonObjectSchema(
       schema,
-      TRUSTED_OPERATION_SCHEMA_LIMITS,
+      {
+        maxSchemaBytes: maximumSchemaBytes,
+        maxValueBytes:
+          DEFAULT_JSON_BOUNDARY_LIMITS.maximumCanonicalUtf8Bytes,
+      },
     );
   } catch {
     throw invalidInput(`The operation ${purpose} schema is invalid in Ajv strict mode.`, {
@@ -460,6 +474,30 @@ function compileSchema(
       schemaVersion: schema.schemaVersion,
     });
   }
+}
+
+function normalizeMaximumSchemaBytes(value: unknown): number {
+  const options = snapshotObject(value, "Capability registry options");
+  const keys = Object.keys(options);
+  if (
+    keys.some((key) => key !== "maximumSchemaBytes") ||
+    keys.length > 1
+  ) {
+    throw invalidInput("Capability registry options contain an unknown field.");
+  }
+  const maximum = options["maximumSchemaBytes"] ??
+    DEFAULT_MAXIMUM_OPERATION_SCHEMA_BYTES;
+  if (
+    typeof maximum !== "number" ||
+    !Number.isSafeInteger(maximum) ||
+    maximum < 1 ||
+    maximum > DEFAULT_JSON_BOUNDARY_LIMITS.maximumCanonicalUtf8Bytes
+  ) {
+    throw invalidInput(
+      "maximumSchemaBytes must be a positive safe integer within the JSON boundary.",
+    );
+  }
+  return maximum;
 }
 
 function validateReference(
