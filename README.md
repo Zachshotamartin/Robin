@@ -14,14 +14,17 @@ UX, provider normalization, and verification workflow. Its policy and runtime
 control layer is internal infrastructure for that coding experience, not the
 product's primary surface.
 
-> **Implementation status:** the pivot branch now contains an initial R1
-> preview: `robin` starts an ephemeral multi-turn prompt loop and `robin -p`
-> runs the same provider-neutral application path with text, JSON, or streaming
-> JSON output. It uses a deterministic credential-free synthetic model provider
-> and deliberately has no repository, process, Git, network, credential, or
-> persistence tools. Milestones A and B remain the accepted internal substrate;
-> neither the R0 rename gate nor the complete R1 terminal gate is claimed as
-> accepted until all evidence in the build plan passes.
+> **Implementation status:** the pivot branch is an R0 acceptance candidate and
+> contains an initial R1 preview. Cold help/version/error paths, the private
+> tarball inventory, tracked public identity, and clean-commit evidence workflow
+> are now tested; R0 is still not accepted until its generated evidence and
+> hosted checks are reviewed and the candidate is mainline-backed. `robin`
+> starts an ephemeral multi-turn prompt loop and `robin -p` runs the same
+> provider-neutral application path with text, JSON, or streaming JSON output.
+> It uses a deterministic credential-free synthetic model provider and
+> deliberately has no repository, process, Git, network, credential, or
+> persistence tools. Milestones A and B remain the accepted internal substrate,
+> while the complete R1 terminal gate remains open.
 
 ## Intended Robin Experience
 

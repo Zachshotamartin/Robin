@@ -84,10 +84,14 @@ package names are not assumed available.
 
 ## Immediate Implementation Sequence
 
-1. Finish and verify the R0 documentation/identity pivot and initial R1 preview
-   slice.
-2. Push `codex/robin-cli-pivot` and open a new truthful draft pull request.
-3. Complete R1 with the versioned application-event/reducer model, deterministic
+1. Commit the R0 cold-path, package-inventory, public-identity, and gate-evidence
+   closeout on `codex/robin-cli-pivot`; generate and validate the R0 manifest
+   only from that clean commit.
+2. Push the refreshed candidate to existing draft pull request #2, attach the
+   exact manifest/test summary, require hosted CI to pass, then make the pull
+   request review-ready and merge it before calling R0 accepted.
+3. From the accepted R0 mainline, complete R1 with the versioned
+   application-event/reducer model, deterministic
    synthetic tool calls, queued input, signal cancellation, raw terminal input,
    renderer state, PTY restoration tests, and terminal compatibility evidence.
 4. Complete R2 repository understanding and bounded workspace mutation in

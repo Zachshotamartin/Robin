@@ -3104,7 +3104,7 @@ the same commit's gate evidence manifest.
 | `FR-CLI-001` | R1 | PTY-001, E2E-001 | `pty-linux` and `package-smoke`: packed no-argument launch enters one interactive synthetic session. |
 | `FR-CLI-002` | R1 | PTY-002, E2E-001 | `pty-linux`: positional prompt and follow-up share one ordered session. |
 | `FR-CLI-003` | R7 | UNIT-001, PTY-011, E2E-007 | `unit-contract` and `node-os-matrix`: bounded stdin is a distinct attachment and conflicts fail before initialization. |
-| `FR-CLI-004` | R10 | UNIT-001, SEC-001 | R0 establishes the side-effect-free parser corpus; `release-candidate` closes it over every R10 administrative option with duplicate/conflict/oversize coverage. |
+| `FR-CLI-004` | R10 | UNIT-001, SEC-001 | `unit-contract` establishes the R0 side-effect-free parser corpus; `release-candidate` closes it over every R10 administrative option with duplicate/conflict/oversize coverage. |
 | `FR-CLI-005` | R1 | UNIT-001 | `unit-contract`: R0 reserves command parsing and R1 closes prompt-versus-command behavior; close misses fail before workspace/provider construction. |
 | `FR-CLI-006` | R10 | UNIT-001, PTY-014 | R0 establishes cold help/version; `package-smoke` and `release-candidate` close installed help/version/completion/schema snapshots for the full command tree. |
 | `FR-CLI-007` | R1 | TERM-011, PTY-003, PTY-005, PTY-015 | `pty-linux` plus macOS PTY evidence: capability, width, Unicode, and reduced-motion cells pass. |
@@ -3326,7 +3326,7 @@ the same commit's gate evidence manifest.
 | `FR-AUTO-001` | R7 | UNIT-018, PTY-011, E2E-007 | external consumer evidence: text stdout contains only final assistant result; progress/diagnostics use stderr. |
 | `FR-AUTO-002` | R7 | TERM-012, E2E-007 | external consumer evidence parses one final envelope or typed monotonic JSON Lines. |
 | `FR-AUTO-003` | R10 | UNIT-001, UNIT-016, TERM-012, E2E-011 | R7 freezes input/output/error schemas; `release-candidate` closes their published lifecycle compatibility and fixtures. |
-| `FR-AUTO-004` | R7 | TERM-012, PTY-011 | `node-os-matrix`: machine modes contain no ANSI, spinner, carriage-return rewrite, or prefix bytes. |
+| `FR-AUTO-004` | R7 | TERM-012, PTY-011 | `package-smoke` preserves flat implemented R0 paths; `node-os-matrix` closes machine modes with no ANSI, spinner, carriage-return rewrite, or prefix bytes. |
 | `FR-AUTO-005` | R7 | SES-001, E2E-007 | headless persistence evidence: `--no-session` creates no transcript/CAS and explicitly disables resume. |
 | `FR-AUTO-006` | R7 | UNIT-002, SES-015 | headless contract evidence: caller IDs are accepted only in the validated namespace without collision. |
 | `FR-AUTO-007` | R8 | PERM-006, EXT-003, EXT-007 | permission/extension evidence: framed callbacks enforce length/nonce/hash/schema/time/resource bounds and no stdout spoof. |
@@ -3384,7 +3384,7 @@ the same commit's gate evidence manifest.
 
 | Requirement | Terminal gate | Required tests | Required gate/release evidence |
 | --- | --- | --- | --- |
-| `NFR-PERF-001` | R10 | UNIT-001, PTY-014 | `performance-full`: packaged warm help/version p95 target 150 ms, CI ceiling 250 ms, with forbidden import sentinels. |
+| `NFR-PERF-001` | R10 | UNIT-001, PTY-014 | `package-smoke` proves R0 forbidden-import sentinels; `performance-full` closes packaged warm help/version p95 target 150 ms and CI ceiling 250 ms. |
 | `NFR-PERF-002` | R12 | TERM-005, TERM-006, PTY-016 | `performance-full` plus editor performance evidence: input/render p95 remains within Section 13 under load. |
 | `NFR-PERF-003` | R10 | FS-005, CTX-002 | `performance-full`: lazy 100,000-path startup proves no full repository scan/hash/content read. |
 | `NFR-PERF-004` | R3 | TERM-015, SES-026, CTX-006 | `session-recovery` and performance evidence: windowed memory, snapshots, session-local CAS, incremental replay/compaction pass. |
