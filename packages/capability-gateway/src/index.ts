@@ -10,6 +10,7 @@ export type {
   CapabilityAdvertisement,
   CapabilityExecutionContext,
   CapabilityExecutionResult,
+  EvaluatedCapabilityAction,
   CapabilityGatewayOptions,
   CapabilityNormalizationContext,
   CapabilityOperation,
@@ -22,3 +23,4 @@ export type {
   RegisteredOperationDescriptor,
   RegisteredPackDescriptor,
 } from "./capability-types.js";
+export type { PinnedPolicyEvaluator, PolicyDecision } from "@guard/policy-engine";

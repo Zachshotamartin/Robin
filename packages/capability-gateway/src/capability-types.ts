@@ -6,6 +6,9 @@ import type {
   SideEffectClass,
   VersionedSchema,
 } from "@guard/contracts";
+import type { PolicyDecision } from "@guard/policy-engine";
+
+declare const evaluatedCapabilityActionBrand: unique symbol;
 
 export interface CapabilityOperationReference {
   readonly packId: string;
@@ -98,6 +101,17 @@ export interface CapabilityActionProposal extends CapabilityOperationReference {
 export interface PreparedCapabilityAction {
   readonly action: NormalizedAction;
   readonly actionHash: string;
+}
+
+/**
+ * Gateway-owned receipt for one completed evaluation. The private type brand
+ * prevents structural construction in TypeScript; runtime ownership is
+ * enforced independently by the issuing gateway's WeakMap.
+ */
+export interface EvaluatedCapabilityAction {
+  readonly prepared: PreparedCapabilityAction;
+  readonly decision: PolicyDecision;
+  readonly [evaluatedCapabilityActionBrand]: true;
 }
 
 export interface CapabilityExecutionResult {

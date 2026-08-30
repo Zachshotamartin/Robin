@@ -1,6 +1,9 @@
+import { isProxy } from "node:util/types";
+
 import {
   ActionIdKind,
   CONTRACT_SCHEMA_VERSION,
+  PolicyVersionIdKind,
   canonicalBytes,
   canonicalSha256Hex,
   createDomainError,
@@ -11,6 +14,11 @@ import type {
   JsonObject,
   NormalizedAction,
 } from "@guard/contracts";
+import type {
+  PinnedPolicyEvaluator,
+  PolicyDecision,
+  PolicyEffect,
+} from "@guard/policy-engine";
 
 import type {
   CapabilityActionProposal,
@@ -21,6 +29,7 @@ import type {
   CapabilityNormalizationContext,
   CapabilityReleasedViews,
   CapabilitySemanticNormalization,
+  EvaluatedCapabilityAction,
   PreparedCapabilityAction,
 } from "./capability-types.js";
 import {
@@ -38,6 +47,18 @@ interface PreparedProvenance {
   readonly actionHash: string;
 }
 
+interface CapturedPolicyEvaluator {
+  readonly policyVersionId: PolicyDecision["policyVersionId"];
+  readonly evaluate: PinnedPolicyEvaluator["evaluate"];
+}
+
+interface EvaluatedProvenance extends PreparedProvenance {
+  readonly prepared: PreparedCapabilityAction;
+  readonly decision: PolicyDecision;
+  readonly decisionHash: string;
+  consumed: boolean;
+}
+
 interface CapabilityGatewayLimits {
   readonly maximumInputBytes: number;
   readonly maximumRawOutputBytes: number;
@@ -53,13 +74,17 @@ const DEFAULT_GATEWAY_LIMITS: CapabilityGatewayLimits = Object.freeze({
 });
 
 /**
- * Structural validation, semantic normalization, hashing, and execution meet
- * only here. Handlers can be dispatched only with an object this instance
- * previously prepared, preventing reconstructed raw arguments after policy.
+ * Structural validation, semantic normalization, pinned policy evaluation,
+ * and execution meet only here. A handler can be dispatched only through the
+ * exact one-use receipt this instance issued after evaluating its exact
+ * normalized action, preventing policy bypass or reconstructed arguments.
  */
 export class CapabilityGateway {
   readonly #registry: CapabilityPackRegistry;
+  readonly #policyEvaluator: CapturedPolicyEvaluator;
   readonly #prepared = new WeakMap<PreparedCapabilityAction, PreparedProvenance>();
+  readonly #evaluatedPrepared = new WeakSet<PreparedCapabilityAction>();
+  readonly #evaluated = new WeakMap<EvaluatedCapabilityAction, EvaluatedProvenance>();
   readonly #maximumInputBytes: number;
   readonly #maximumRawOutputBytes: number;
   readonly #maximumReleasedViewBytes: number;
@@ -67,6 +92,7 @@ export class CapabilityGateway {
 
   constructor(
     registry: CapabilityPackRegistry,
+    policyEvaluator: PinnedPolicyEvaluator,
     options: CapabilityGatewayOptions = {},
   ) {
     if (!(registry instanceof CapabilityPackRegistry)) {
@@ -77,6 +103,7 @@ export class CapabilityGateway {
     }
     const limits = normalizeGatewayOptions(options);
     this.#registry = registry;
+    this.#policyEvaluator = capturePinnedPolicyEvaluator(policyEvaluator);
     this.#maximumInputBytes = limits.maximumInputBytes;
     this.#maximumRawOutputBytes = limits.maximumRawOutputBytes;
     this.#maximumReleasedViewBytes = limits.maximumReleasedViewBytes;
@@ -152,19 +179,98 @@ export class CapabilityGateway {
     return prepared;
   }
 
+  /**
+   * Evaluate one exact prepared action through the evaluator pinned when this
+   * gateway was constructed. Milestone B evaluators are intentionally
+   * synchronous; async policy dependencies are outside the pure policy model.
+   */
+  evaluate(prepared: PreparedCapabilityAction): EvaluatedCapabilityAction {
+    const provenance = this.#preparedProvenance(prepared);
+    if (this.#evaluatedPrepared.has(prepared)) {
+      throw invariant("A prepared capability action may be evaluated only once.");
+    }
+    // Set before calling the port so hostile or accidental reentrancy cannot
+    // produce two decisions for one normalized action.
+    this.#evaluatedPrepared.add(prepared);
+
+    let untrustedDecision: unknown;
+    try {
+      untrustedDecision = this.#policyEvaluator.evaluate(provenance.action);
+    } catch {
+      throw policyEvaluationFailure(
+        "The pinned policy evaluator failed before producing a decision.",
+      );
+    }
+
+    let decision: PolicyDecision;
+    try {
+      decision = normalizePolicyDecision(
+        untrustedDecision,
+        this.#policyEvaluator.policyVersionId,
+      );
+    } catch {
+      throw policyEvaluationFailure(
+        "The pinned policy evaluator returned an invalid decision.",
+      );
+    }
+    const decisionHash = canonicalSha256Hex(decision);
+    const receipt = Object.freeze({
+      prepared,
+      decision,
+    }) as unknown as EvaluatedCapabilityAction;
+    this.#evaluated.set(receipt, {
+      ...provenance,
+      prepared,
+      decision,
+      decisionHash,
+      consumed: false,
+    });
+    return receipt;
+  }
+
   async execute(
-    prepared: PreparedCapabilityAction,
+    evaluated: EvaluatedCapabilityAction,
     context: CapabilityExecutionContext,
   ): Promise<CapabilityExecutionResult> {
-    const provenance = this.#prepared.get(prepared);
+    const provenance = this.#evaluated.get(evaluated);
     if (
       provenance === undefined ||
-      prepared.action !== provenance.action ||
-      prepared.actionHash !== provenance.actionHash
+      evaluated.prepared !== provenance.prepared ||
+      evaluated.decision !== provenance.decision ||
+      provenance.prepared.action !== provenance.action ||
+      provenance.prepared.actionHash !== provenance.actionHash ||
+      canonicalSha256Hex(provenance.action) !== provenance.actionHash ||
+      canonicalSha256Hex(provenance.decision) !== provenance.decisionHash
     ) {
       throw createDomainError({
         code: "invariant_violated",
-        message: "Capability dispatch requires this gateway's prepared action object.",
+        message: "Capability dispatch requires this gateway's evaluated action receipt.",
+      });
+    }
+    if (provenance.consumed) {
+      throw invariant("An evaluated capability action receipt may be consumed only once.");
+    }
+    provenance.consumed = true;
+    if (provenance.decision.effect === "deny") {
+      throw createDomainError({
+        code: "policy_denied",
+        message: "The pinned policy snapshot denied this capability action.",
+        details: {
+          actionId: provenance.action.actionId,
+          policyVersionId: provenance.decision.policyVersionId,
+          winningPolicyName: provenance.decision.winningPolicyName,
+        },
+      });
+    }
+    if (provenance.decision.effect === "require_approval") {
+      throw createDomainError({
+        code: "approval_required",
+        message: "The pinned policy snapshot requires approval for this capability action.",
+        details: {
+          actionId: provenance.action.actionId,
+          policyVersionId: provenance.decision.policyVersionId,
+          winningPolicyName: provenance.decision.winningPolicyName,
+        },
       });
     }
     const signal = validateExecutionContext(context);
@@ -244,6 +350,202 @@ export class CapabilityGateway {
     );
     return snapshot({ raw: structurallyValidRaw, ...views });
   }
+
+  #preparedProvenance(prepared: PreparedCapabilityAction): PreparedProvenance {
+    const provenance = this.#prepared.get(prepared);
+    if (
+      provenance === undefined ||
+      prepared.action !== provenance.action ||
+      prepared.actionHash !== provenance.actionHash ||
+      canonicalSha256Hex(provenance.action) !== provenance.actionHash
+    ) {
+      throw invariant(
+        "Policy evaluation requires this gateway's exact prepared action object.",
+      );
+    }
+    return provenance;
+  }
+}
+
+function capturePinnedPolicyEvaluator(
+  value: PinnedPolicyEvaluator,
+): CapturedPolicyEvaluator {
+  try {
+    if (
+      typeof value !== "object" || value === null || Array.isArray(value) ||
+      isProxy(value)
+    ) {
+      throw new TypeError();
+    }
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError();
+    }
+    const keys = Reflect.ownKeys(value);
+    if (
+      keys.length !== 2 ||
+      keys.some((key) => key !== "policyVersionId" && key !== "evaluate")
+    ) {
+      throw new TypeError();
+    }
+    const idDescriptor = Object.getOwnPropertyDescriptor(value, "policyVersionId");
+    const evaluateDescriptor = Object.getOwnPropertyDescriptor(value, "evaluate");
+    if (
+      idDescriptor === undefined || !("value" in idDescriptor) ||
+      idDescriptor.enumerable !== true ||
+      !PolicyVersionIdKind.is(idDescriptor.value) ||
+      evaluateDescriptor === undefined || !("value" in evaluateDescriptor) ||
+      evaluateDescriptor.enumerable !== true ||
+      typeof evaluateDescriptor.value !== "function"
+    ) {
+      throw new TypeError();
+    }
+    const policyVersionId = idDescriptor.value;
+    if (isProxy(evaluateDescriptor.value)) {
+      throw new TypeError();
+    }
+    const evaluate = evaluateDescriptor.value as PinnedPolicyEvaluator["evaluate"];
+    const captured: CapturedPolicyEvaluator = {
+      policyVersionId,
+      evaluate(action: NormalizedAction): PolicyDecision {
+        return Reflect.apply(evaluate, captured, [action]) as PolicyDecision;
+      },
+    };
+    return Object.freeze(captured);
+  } catch {
+    throw invalidInput(
+      "The capability gateway requires one descriptor-safe pinned policy evaluator.",
+    );
+  }
+}
+
+function normalizePolicyDecision(
+  value: unknown,
+  expectedPolicyVersionId: PolicyDecision["policyVersionId"],
+): PolicyDecision {
+  const detached = snapshotObject(
+    value,
+    "Policy decision",
+    "invariant_violated",
+  );
+  if (!hasExactKeys(detached, [
+    "policyVersionId",
+    "effect",
+    "winningPolicyName",
+    "reason",
+    "matchedPolicyNames",
+    "trace",
+  ])) {
+    throw new TypeError("invalid policy decision envelope");
+  }
+  const policyVersionId = detached["policyVersionId"];
+  const effect = detached["effect"];
+  const winningPolicyName = detached["winningPolicyName"];
+  const reason = detached["reason"];
+  const rawMatchedPolicyNames = detached["matchedPolicyNames"];
+  const rawTrace = detached["trace"];
+  if (
+    !PolicyVersionIdKind.is(policyVersionId) ||
+    policyVersionId !== expectedPolicyVersionId ||
+    !isPolicyEffect(effect) ||
+    !isNullableNonEmptyString(winningPolicyName) ||
+    typeof reason !== "string" || reason.trim().length === 0 ||
+    !Array.isArray(rawMatchedPolicyNames) ||
+    !rawMatchedPolicyNames.every(
+      (entry) => typeof entry === "string" && entry.trim().length > 0,
+    ) ||
+    new Set(rawMatchedPolicyNames).size !== rawMatchedPolicyNames.length ||
+    !isPlainRecord(rawTrace)
+  ) {
+    throw new TypeError("invalid policy decision fields");
+  }
+  const matchedPolicyNames = Object.freeze([...rawMatchedPolicyNames]);
+  if (
+    (winningPolicyName === null) !== (matchedPolicyNames.length === 0) ||
+    (winningPolicyName !== null &&
+      matchedPolicyNames[0] !== winningPolicyName)
+  ) {
+    throw new TypeError("winning policy is inconsistent with matched policies");
+  }
+  const trace = normalizePolicyTrace(
+    rawTrace,
+    effect,
+    winningPolicyName,
+    matchedPolicyNames,
+  );
+  return Object.freeze({
+    policyVersionId,
+    effect,
+    winningPolicyName,
+    reason,
+    matchedPolicyNames,
+    trace,
+  });
+}
+
+function normalizePolicyTrace(
+  trace: Readonly<Record<string, unknown>>,
+  effect: PolicyEffect,
+  winningPolicyName: string | null,
+  matchedPolicyNames: readonly string[],
+): JsonObject {
+  if (!hasExactKeys(trace, [
+    "languageVersion",
+    "policyContentHash",
+    "attributeCatalogs",
+    "combiningAlgorithm",
+    "defaultEffect",
+    "result",
+    "winningPolicyName",
+    "evaluations",
+    "matchedPolicyNames",
+  ])) {
+    throw new TypeError("invalid policy trace envelope");
+  }
+  const traceMatches = trace["matchedPolicyNames"];
+  if (
+    trace["languageVersion"] !== "1" ||
+    typeof trace["policyContentHash"] !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(trace["policyContentHash"]) ||
+    !Array.isArray(trace["attributeCatalogs"]) ||
+    trace["combiningAlgorithm"] !== "deny_overrides" ||
+    !isPolicyEffect(trace["defaultEffect"]) ||
+    (winningPolicyName === null && trace["defaultEffect"] !== effect) ||
+    trace["result"] !== effect ||
+    trace["winningPolicyName"] !== winningPolicyName ||
+    !Array.isArray(trace["evaluations"]) ||
+    !Array.isArray(traceMatches) ||
+    traceMatches.length !== matchedPolicyNames.length ||
+    !traceMatches.every((entry, index) => entry === matchedPolicyNames[index])
+  ) {
+    throw new TypeError("policy trace does not bind its decision");
+  }
+  return trace as JsonObject;
+}
+
+function hasExactKeys(
+  value: Readonly<Record<string, unknown>>,
+  expected: readonly string[],
+): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length &&
+    expected.every((key) => Object.hasOwn(value, key));
+}
+
+function isPolicyEffect(value: unknown): value is PolicyEffect {
+  return value === "allow" || value === "deny" || value === "require_approval";
+}
+
+function isNullableNonEmptyString(value: unknown): value is string | null {
+  return value === null || (typeof value === "string" && value.trim().length > 0);
+}
+
+function policyEvaluationFailure(message: string) {
+  return createDomainError({
+    code: "policy_denied",
+    message,
+    details: { reason: "policy_evaluation_error" },
+  });
 }
 
 function validateProposalEnvelope(
