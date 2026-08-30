@@ -461,6 +461,21 @@ const EVENT_ORACLE_BUILDERS = {
       requestId: "context:gate-a",
       resource: RESOURCE,
     }),
+  ContextManifestRecorded: () =>
+    oracle(contextPending(), "ContextManifestRecorded", {
+      manifestKind: "release",
+      referenceId: "context:gate-a",
+      manifest: {
+        schemaVersion: 1,
+        status: "denied",
+        itemId: null,
+        resource: null,
+        selector: null,
+        releasedContentHash: null,
+        byteLength: 0,
+        reason: "policy_denied",
+      },
+    }),
   ContextReleased: () =>
     oracle(contextPending(), "ContextReleased", {
       requestId: "context:gate-a",

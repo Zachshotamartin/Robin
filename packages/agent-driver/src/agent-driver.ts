@@ -5,10 +5,11 @@ import type {
   DriverProposalId,
   JsonObject,
   ObjectiveEnvelope,
-  Observation,
   OutcomeEnvelope,
   RunId,
 } from "@guard/contracts";
+
+import type { AgentObservation } from "./agent-observation.js";
 
 export const AGENT_DRIVER_SCHEMA_VERSION = 1 as const;
 
@@ -35,7 +36,7 @@ export interface AgentTurnRequest {
   readonly objective: ObjectiveEnvelope;
   readonly advertisedOperations: readonly AdvertisedOperation[];
   readonly context: readonly ContentBlock[];
-  readonly observations: readonly Observation[];
+  readonly observations: readonly AgentObservation[];
 }
 
 export type AgentContentChannel = "analysis" | "answer";

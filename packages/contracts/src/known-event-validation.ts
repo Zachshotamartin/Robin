@@ -148,6 +148,19 @@ export function validateKnownEventPayload(
           validateResource(payload["resource"])
         );
       }
+      case "ContextManifestRecorded": {
+        const payload = exactRecord(value, [
+          "manifestKind",
+          "referenceId",
+          "manifest",
+        ]);
+        return (
+          payload !== null &&
+          oneOf(payload["manifestKind"], ["release", "agent_input"]) &&
+          identifier(payload["referenceId"]) &&
+          isJsonObject(payload["manifest"])
+        );
+      }
       case "ContextReleased": {
         const payload = exactRecord(value, ["requestId", "resource", "content"]);
         return (

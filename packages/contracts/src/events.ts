@@ -58,6 +58,7 @@ export const GENERIC_EVENT_TYPES = [
   "AgentAttemptUncertain",
   "AgentAttemptFailed",
   "ContextRequested",
+  "ContextManifestRecorded",
   "ContextReleased",
   "ContextDenied",
   "ContextRedacted",
@@ -93,6 +94,8 @@ export function isGenericEventType(value: unknown): value is GenericEventType {
 }
 
 export type EventActor = ActorIdentity;
+
+export type ContextManifestKind = "release" | "agent_input";
 
 export interface NewEvent<TType extends string = string, TPayload = JsonObject> {
   readonly eventId: EventId;
@@ -157,6 +160,12 @@ export interface GenericEventPayloadMap {
   readonly ContextRequested: {
     readonly requestId: string;
     readonly resource: ResourceRef;
+  };
+  readonly ContextManifestRecorded: {
+    readonly manifestKind: ContextManifestKind;
+    readonly referenceId: string;
+    /** Detached, deeply frozen broker manifest metadata; never raw denied content. */
+    readonly manifest: JsonObject;
   };
   readonly ContextReleased: {
     readonly requestId: string;

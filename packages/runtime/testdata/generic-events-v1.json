@@ -515,6 +515,35 @@
       }
     },
     {
+      "eventId": "evt_018f05a0-7b01-7000-8000-00000000012b",
+      "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
+      "streamVersion": 1,
+      "eventType": "ContextManifestRecorded",
+      "eventSchemaVersion": 1,
+      "occurredAt": "2026-08-30T12:00:00.000Z",
+      "recordedAt": "2026-08-30T12:00:01.000Z",
+      "actor": {
+        "kind": "runtime",
+        "id": "runtime:persisted-fixture"
+      },
+      "correlationId": "correlation:persisted-generic-events-v1",
+      "causationId": null,
+      "payload": {
+        "manifestKind": "release",
+        "referenceId": "request:context",
+        "manifest": {
+          "schemaVersion": 1,
+          "status": "denied",
+          "itemId": null,
+          "resource": null,
+          "selector": null,
+          "releasedContentHash": null,
+          "byteLength": 0,
+          "reason": "policy_denied"
+        }
+      }
+    },
+    {
       "eventId": "evt_018f05a0-7b01-7000-8000-000000000112",
       "streamId": "run_018f05a0-7b01-7000-8000-000000000001",
       "streamVersion": 1,

@@ -150,6 +150,7 @@ export {
   parseNewEvent,
 } from "./events.js";
 export type {
+  ContextManifestKind,
   EventActor,
   EventEnvelope,
   GenericEvent,

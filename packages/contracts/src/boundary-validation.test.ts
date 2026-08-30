@@ -284,6 +284,20 @@ const PAYLOADS: GenericEventPayloadMap = {
   AgentAttemptUncertain: { attemptId: ATTEMPT_ID, error: FAILURE },
   AgentAttemptFailed: { attemptId: ATTEMPT_ID, error: FAILURE },
   ContextRequested: { requestId: "request:context", resource: RESOURCE },
+  ContextManifestRecorded: {
+    manifestKind: "release",
+    referenceId: "request:context",
+    manifest: {
+      schemaVersion: 1,
+      status: "denied",
+      itemId: null,
+      resource: null,
+      selector: null,
+      releasedContentHash: null,
+      byteLength: 0,
+      reason: "policy_denied",
+    },
+  },
   ContextReleased: {
     requestId: "request:context",
     resource: RESOURCE,
@@ -434,6 +448,9 @@ test("known payload validation is exact and validates nested contracts", () => {
     ["AgentAttemptFailed", (payload) => {
       (payload["error"] as Record<string, unknown>)["unexpected"] = true;
     }],
+    ["ContextManifestRecorded", (payload) => {
+      payload["manifestKind"] = "provider_trace";
+    }],
     ["RunFailed", (payload) => {
       (payload["result"] as Record<string, unknown>)["status"] = "orphaned";
     }],
@@ -455,6 +472,37 @@ test("known payload validation is exact and validates nested contracts", () => {
   };
   extra.payload["providerRequestId"] = "must-not-cross";
   assert.equal(isGenericEvent(extra), false);
+});
+
+test("context manifest events detach and freeze strict metadata without a raw-content field", () => {
+  const mutable = structuredClone(event("ContextManifestRecorded")) as unknown as {
+    payload: {
+      manifestKind: string;
+      referenceId: string;
+      manifest: Record<string, unknown>;
+    };
+  };
+  const parsed = parseGenericEvent(mutable);
+  mutable.payload.manifest["reason"] = "tampered";
+
+  assert.equal(parsed.eventType, "ContextManifestRecorded");
+  assert.equal(parsed.payload.manifest["reason"], "policy_denied");
+  assert.equal(Object.isFrozen(parsed), true);
+  assert.equal(Object.isFrozen(parsed.payload), true);
+  assert.equal(Object.isFrozen(parsed.payload.manifest), true);
+  assert.equal(Object.hasOwn(parsed.payload, "content"), false);
+
+  const extraPayload = structuredClone(event("ContextManifestRecorded")) as unknown as {
+    payload: Record<string, unknown>;
+  };
+  extraPayload.payload["content"] = [TEXT];
+  assert.equal(isGenericEvent(extraPayload), false);
+
+  const malformedManifest = structuredClone(event("ContextManifestRecorded")) as unknown as {
+    payload: Record<string, unknown>;
+  };
+  malformedManifest.payload["manifest"] = ["not", "an", "object"];
+  assert.equal(isGenericEvent(malformedManifest), false);
 });
 
 test("extensible framing remains distinct from the known generic event union", () => {

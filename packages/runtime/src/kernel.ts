@@ -490,6 +490,19 @@ function reduceEvent(state: RunState, event: GenericEventEnvelope): RunState {
         currentContextRequest: { requestId: event.payload.requestId },
       };
     }
+    case "ContextManifestRecorded": {
+      ensure(
+        event.payload.manifestKind === "release" ||
+          event.payload.manifestKind === "agent_input",
+        "ContextManifestRecorded requires a recognized manifest kind."
+      );
+      ensureNonEmpty(
+        event.payload.referenceId,
+        "ContextManifestRecorded.referenceId"
+      );
+      ensureObject(event.payload.manifest, "ContextManifestRecorded.manifest");
+      return state;
+    }
     case "ContextReleased": {
       assertContextRequest(state, event.payload.requestId);
       ensure(Array.isArray(event.payload.content), "Released context must be an array.");
@@ -1101,6 +1114,7 @@ function planEffectsUnchecked(
     case "AgentContentCompleted":
     case "AgentUsageRecorded":
     case "AgentAttemptUncertain":
+    case "ContextManifestRecorded":
     case "ContextRedacted":
     case "ActionNormalized":
     case "ActionDenied":

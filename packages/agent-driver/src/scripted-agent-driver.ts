@@ -8,10 +8,10 @@ import {
   parseContentBlock,
   parseDomainError,
   parseObjectiveEnvelope,
-  parseObservation,
   parseOutcomeEnvelope,
 } from "@guard/contracts";
 
+import { parseAgentObservation } from "./agent-observation.js";
 import {
   AGENT_DRIVER_SCHEMA_VERSION,
   type AgentDriver,
@@ -285,7 +285,7 @@ function validateRequest(request: AgentTurnRequest, path: string): void {
   if (!Array.isArray(request.observations)) {
     invalidInput(`${path}.observations must be an array.`);
   }
-  request.observations.forEach((observation) => parseObservation(observation));
+  request.observations.forEach((observation) => parseAgentObservation(observation));
 }
 
 function validateEvents(

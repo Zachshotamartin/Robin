@@ -90,6 +90,7 @@ export const EVENT_LEGAL_STATES = Object.freeze({
     "recovering",
   ]),
   ContextRequested: Object.freeze(["waiting_for_agent"]),
+  ContextManifestRecorded: Object.freeze(ACTIVE),
   ContextReleased: Object.freeze([
     "waiting_for_agent",
     "cancellation_requested",

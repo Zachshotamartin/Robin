@@ -658,6 +658,21 @@ test("pause rejects an active consequential command and resume plans new work", 
 
 test("context and retry flows replace rather than multiply consequential commands", () => {
   let state = createWaitingForAgentState();
+  const agentInputManifest = nextEvent(state, "ContextManifestRecorded", {
+    manifestKind: "agent_input",
+    referenceId: state.currentAttempt?.attemptId ?? assert.fail("missing attempt"),
+    manifest: {
+      schemaVersion: 1,
+      runId: state.runId,
+      entries: [],
+      totalBytes: 0,
+    },
+  });
+  assert.deepEqual(planEffects(state, agentInputManifest), []);
+  const agentCommand = state.outstandingCommand;
+  state = evolve(state, agentInputManifest);
+  assert.deepEqual(state.outstandingCommand, agentCommand);
+
   state = apply(state, "ContextRequested", {
     requestId: "context:1",
     resource: {
@@ -670,6 +685,21 @@ test("context and retry flows replace rather than multiply consequential command
     },
   });
   assert.equal(state.outstandingCommand?.commandType, "FetchContextResource");
+  const releaseManifest = nextEvent(state, "ContextManifestRecorded", {
+    manifestKind: "release",
+    referenceId: "context:1",
+    manifest: {
+      schemaVersion: 1,
+      status: "released",
+      itemId: "ctx_alpha",
+      byteLength: 0,
+    },
+  });
+  assert.deepEqual(planEffects(state, releaseManifest), []);
+  const fetchCommand = state.outstandingCommand;
+  state = evolve(state, releaseManifest);
+  assert.deepEqual(state.outstandingCommand, fetchCommand);
+  assert.equal(state.currentContextRequest?.requestId, "context:1");
   state = apply(state, "ContextRedacted", {
     requestId: "context:1",
     transformationIds: ["transform:redact"],
@@ -704,6 +734,29 @@ test("context and retry flows replace rather than multiply consequential command
   assert.equal(state.status, "planning");
   assert.equal(state.budget.retriesScheduled, 1);
   assert.equal(state.outstandingCommand?.commandType, "AdvanceAgentDriver");
+});
+
+test("context manifest records are immutable informational facts in active states", () => {
+  const activeStatuses = [
+    "created",
+    "planning",
+    "waiting_for_agent",
+    "attempt_result_uncertain",
+    "evaluating_action",
+    "waiting_for_approval",
+    "executing_action",
+    "recording_observation",
+    "cancellation_requested",
+    "recovering",
+    "paused",
+  ] as const;
+  assert.deepEqual(EVENT_LEGAL_STATES.ContextManifestRecorded, activeStatuses);
+  for (const terminal of TERMINAL_RUN_STATUSES) {
+    assert.equal(
+      EVENT_LEGAL_STATES.ContextManifestRecorded.includes(terminal as never),
+      false,
+    );
+  }
 });
 
 test("recorded usage and action facts alone advance budget counters", () => {

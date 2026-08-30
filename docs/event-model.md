@@ -123,6 +123,10 @@ organizational; every item is handled by the same strict parser and reducer.
 ### Context
 
 - `ContextRequested` identifies one resource request.
+- `ContextManifestRecorded` durably records either one broker release manifest
+  entry or the complete manifest for an assembled agent input. It is an
+  informational fact that schedules no command. A denied entry contains only
+  broker-produced metadata; raw denied content is never an event field.
 - `ContextReleased` records the agent-safe content blocks released for it.
 - `ContextDenied` records a domain error instead of content.
 - `ContextRedacted` records the transformation IDs applied to an active

@@ -1,3 +1,12 @@
+export {
+  AGENT_OBSERVATION_SCHEMA_VERSION,
+  parseAgentObservation,
+} from "./agent-observation.js";
+export type {
+  AgentObservation,
+  AgentObservationError,
+  AgentObservationSchemaVersion,
+} from "./agent-observation.js";
 export { AGENT_DRIVER_SCHEMA_VERSION } from "./agent-driver.js";
 export type {
   AdvertisedOperation,

@@ -13,12 +13,13 @@ import {
 import type {
   ContentBlock,
   ObjectiveEnvelope,
-  Observation,
   OutcomeEnvelope,
 } from "@guard/contracts";
 
 import {
   ScriptedAgentDriver,
+  parseAgentObservation,
+  type AgentObservation,
   type AgentDriverEvent,
   type AgentTurnRequest,
   type ScriptedAgentDriverScript,
@@ -81,16 +82,23 @@ function objective(question = "Which document defines the policy boundary?"): Ob
   };
 }
 
-function observation(status: "succeeded" | "denied" = "succeeded"): Observation {
+function observation(
+  status: "succeeded" | "denied" = "succeeded",
+): AgentObservation {
   return {
     schemaVersion: 1,
     observationId: "observation-1",
     actionId: ACTION_ID,
     status,
-    audit: { documentsMatched: status === "succeeded" ? 1 : 0 },
-    human: [textBlock("human-observation", status)],
-    agent: [textBlock("agent-observation", status)],
-    error: status === "succeeded" ? null : DENIED_OBSERVATION_ERROR,
+    content: [textBlock("agent-observation", status)],
+    error: status === "succeeded"
+      ? null
+      : {
+          errorId: DENIED_OBSERVATION_ERROR.errorId,
+          code: DENIED_OBSERVATION_ERROR.code,
+          message: DENIED_OBSERVATION_ERROR.message,
+          retry: DENIED_OBSERVATION_ERROR.retry,
+        },
     occurredAt: "2026-08-30T00:00:01.000Z",
   };
 }
@@ -117,7 +125,7 @@ function outcome(): OutcomeEnvelope {
 
 function turn(
   turnNumber: number,
-  observations: readonly Observation[] = [],
+  observations: readonly AgentObservation[] = [],
   overrides: Partial<AgentTurnRequest> = {},
 ): AgentTurnRequest {
   return {
@@ -624,6 +632,77 @@ test("rejects malformed nested contracts and vendor-branded extra fields", () =>
     assert.throws(
       () => new ScriptedAgentDriver(candidate as ScriptedAgentDriverScript),
       (error: unknown) => isDomainCode(error, "invalid_input"),
+    );
+  }
+});
+
+test("accepts only the exact safe agent-observation projection", () => {
+  const mutable = structuredClone(observation("denied"));
+  const parsed = parseAgentObservation(mutable);
+  (mutable.content as ContentBlock[])[0] = textBlock("tampered", "tampered");
+
+  assert.deepEqual(parsed, observation("denied"));
+  assert.equal(Object.isFrozen(parsed), true);
+  assert.equal(Object.isFrozen(parsed.content), true);
+  assert.equal(Object.isFrozen(parsed.content[0]), true);
+  assert.equal(Object.isFrozen(parsed.error), true);
+  assert.deepEqual(Object.keys(parsed).sort(), [
+    "actionId",
+    "content",
+    "error",
+    "observationId",
+    "occurredAt",
+    "schemaVersion",
+    "status",
+  ]);
+});
+
+test("rejects capability audit and human views at the agent-driver boundary", () => {
+  const forbiddenFields = ["audit", "human", "agent"] as const;
+  for (const field of forbiddenFields) {
+    const candidate = structuredClone(observation()) as unknown as Record<
+      string,
+      unknown
+    >;
+    candidate[field] = field === "audit" ? { rawReceipt: "secret" } : [
+      textBlock(`forbidden-${field}`, "must stay host-side"),
+    ];
+    assert.throws(
+      () => parseAgentObservation(candidate),
+      (error: unknown) => isDomainCode(error, "invalid_input"),
+      field,
+    );
+
+    const script = structuredClone(driverScript()) as unknown as Record<
+      string,
+      unknown
+    >;
+    const turns = script["turns"] as Array<Record<string, unknown>>;
+    const secondRequest = turns[1]?.["expectedRequest"] as Record<string, unknown>;
+    const observations = secondRequest["observations"] as Array<
+      Record<string, unknown>
+    >;
+    observations[0]![field] = candidate[field];
+    assert.throws(
+      () => new ScriptedAgentDriver(script as unknown as ScriptedAgentDriverScript),
+      (error: unknown) => isDomainCode(error, "invalid_input"),
+      field,
+    );
+  }
+});
+
+test("rejects error details and cause chains from agent observations", () => {
+  for (const field of ["details", "causeErrorId"] as const) {
+    const candidate = structuredClone(observation("denied")) as unknown as {
+      error: Record<string, unknown>;
+    };
+    candidate.error[field] = field === "details"
+      ? { rawProviderResponse: "must-not-cross" }
+      : DENIED_OBSERVATION_ERROR.errorId;
+    assert.throws(
+      () => parseAgentObservation(candidate),
+      (error: unknown) => isDomainCode(error, "invalid_input"),
+      field,
     );
   }
 });
