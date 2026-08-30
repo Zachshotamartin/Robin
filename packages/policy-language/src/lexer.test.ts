@@ -120,3 +120,57 @@ test("all lexer output is deeply frozen and invalid runtime inputs fail closed",
   assert.throws(() => lexGuardSource(42 as unknown as string), TypeError);
   assert.throws(() => lexGuardSource("", { sourceId: "" }), TypeError);
 });
+
+test("lexer options reject active objects without invoking caller code", () => {
+  let getterCalls = 0;
+  const accessor = {} as { readonly sourceId?: string };
+  Object.defineProperty(accessor, "sourceId", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      throw new Error("lexer getter canary");
+    },
+  });
+  let proxyTrapCalls = 0;
+  const proxy = new Proxy(
+    {},
+    {
+      get() {
+        proxyTrapCalls += 1;
+        throw new Error("lexer proxy canary");
+      },
+      getPrototypeOf() {
+        proxyTrapCalls += 1;
+        throw new Error("lexer proxy canary");
+      },
+      ownKeys() {
+        proxyTrapCalls += 1;
+        throw new Error("lexer proxy canary");
+      },
+    },
+  );
+  const symbolOptions = { sourceId: "safe.guard" } as Record<PropertyKey, unknown>;
+  symbolOptions[Symbol("canary")] = true;
+  const inherited = Object.create({ sourceId: "inherited.guard" }) as { sourceId: string };
+
+  for (const options of [
+    accessor,
+    proxy,
+    { sourceId: "safe.guard", unknown: true },
+    symbolOptions,
+    inherited,
+  ]) {
+    assert.throws(
+      () => lexGuardSource("", options as { readonly sourceId?: string }),
+      (error: unknown) =>
+        error instanceof TypeError && !error.message.includes("canary"),
+    );
+  }
+  assert.equal(getterCalls, 0);
+  assert.equal(proxyTrapCalls, 0);
+
+  const mutable = { sourceId: "captured.guard" };
+  const result = lexGuardSource("policy", mutable);
+  mutable.sourceId = "mutated.guard";
+  assert.equal(result.tokens[0]?.span.sourceId, "captured.guard");
+});

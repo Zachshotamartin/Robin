@@ -1,3 +1,4 @@
+import { captureOptionalDataRecord } from "./boundary.js";
 import { deepFreeze } from "./immutable.js";
 import { DEFAULT_SOURCE_ID, position, span } from "./source.js";
 import type {
@@ -530,10 +531,12 @@ function parseOptions(options: GuardLexOptions | undefined): string {
   if (options === undefined) {
     return DEFAULT_SOURCE_ID;
   }
-  if (typeof options !== "object" || options === null || Array.isArray(options)) {
-    throw new TypeError("Guard lexer options must be an object.");
-  }
-  const sourceId = options.sourceId ?? DEFAULT_SOURCE_ID;
+  const captured = captureOptionalDataRecord(
+    options,
+    ["sourceId"],
+    "Guard lexer options",
+  );
+  const sourceId = captured["sourceId"] ?? DEFAULT_SOURCE_ID;
   if (typeof sourceId !== "string" || sourceId.length === 0) {
     throw new TypeError("Guard sourceId must be a non-empty string.");
   }

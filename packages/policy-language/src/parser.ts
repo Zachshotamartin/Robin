@@ -1,3 +1,4 @@
+import { captureOptionalDataRecord } from "./boundary.js";
 import { deepFreeze } from "./immutable.js";
 import { lexGuardSource } from "./lexer.js";
 import { coveringSpan, position, span } from "./source.js";
@@ -656,28 +657,25 @@ function compareDiagnostics(left: GuardDiagnostic, right: GuardDiagnostic): numb
   if (left.phase !== right.phase) {
     return left.phase === "lexer" ? -1 : 1;
   }
-  return left.code.localeCompare(right.code);
+  return left.code < right.code ? -1 : left.code > right.code ? 1 : 0;
 }
 
 function parseOptions(options: GuardParseOptions | undefined): ParsedOptions {
   if (options === undefined) {
     return { sourceId: undefined, maxNesting: DEFAULT_MAX_GUARD_NESTING };
   }
-  if (typeof options !== "object" || options === null || Array.isArray(options)) {
-    throw new TypeError("Guard parser options must be an object.");
-  }
-  for (const key of Object.keys(options)) {
-    if (key !== "sourceId" && key !== "maxNesting") {
-      throw new TypeError(`Unknown Guard parser option ${JSON.stringify(key)}.`);
-    }
-  }
-  const sourceId = options.sourceId;
+  const captured = captureOptionalDataRecord(
+    options,
+    ["sourceId", "maxNesting"],
+    "Guard parser options",
+  );
+  const sourceId = captured["sourceId"];
   if (sourceId !== undefined && (typeof sourceId !== "string" || sourceId.length === 0)) {
     throw new TypeError("Guard sourceId must be a non-empty string.");
   }
-  const maxNesting = options.maxNesting ?? DEFAULT_MAX_GUARD_NESTING;
+  const maxNesting = captured["maxNesting"] ?? DEFAULT_MAX_GUARD_NESTING;
   if (
-    !Number.isSafeInteger(maxNesting) || maxNesting < 1 ||
+    typeof maxNesting !== "number" || !Number.isSafeInteger(maxNesting) || maxNesting < 1 ||
     maxNesting > MAX_CONFIGURABLE_GUARD_NESTING
   ) {
     throw new TypeError(

@@ -114,3 +114,59 @@ test("formatter rejects corrupted runtime AST values", () => {
     TypeError,
   );
 });
+
+test("formatter rejects active AST trees without executing caller code", () => {
+  const parsed = parseGuardDocument(`policy "passive" priority 1 {
+    when action.operation == "read"
+    deny
+    reason "passive"
+  }`);
+  assert.equal(parsed.ok, true);
+  const rule = parsed.document.policies[0];
+  assert.ok(rule);
+
+  let getterCalls = 0;
+  const accessorRule = { ...rule } as Record<string, unknown>;
+  Object.defineProperty(accessorRule, "name", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      throw new Error("formatter getter canary");
+    },
+  });
+  let proxyTrapCalls = 0;
+  const proxyCondition = new Proxy(
+    rule.condition,
+    {
+      get() {
+        proxyTrapCalls += 1;
+        throw new Error("formatter proxy canary");
+      },
+      getPrototypeOf() {
+        proxyTrapCalls += 1;
+        throw new Error("formatter proxy canary");
+      },
+      ownKeys() {
+        proxyTrapCalls += 1;
+        throw new Error("formatter proxy canary");
+      },
+    },
+  );
+  const symbolRule = { ...rule } as Record<PropertyKey, unknown>;
+  symbolRule[Symbol("canary")] = true;
+  const hostileDocuments = [
+    { ...parsed.document, policies: [accessorRule] },
+    { ...parsed.document, policies: [{ ...rule, condition: proxyCondition }] },
+    { ...parsed.document, policies: [symbolRule] },
+  ];
+
+  for (const document of hostileDocuments) {
+    assert.throws(
+      () => formatGuardDocument(document as unknown as typeof parsed.document),
+      (error: unknown) =>
+        error instanceof TypeError && !error.message.includes("canary"),
+    );
+  }
+  assert.equal(getterCalls, 0);
+  assert.equal(proxyTrapCalls, 0);
+});

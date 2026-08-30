@@ -184,6 +184,78 @@ test("parser output is deeply frozen and malformed runtime options fail closed",
   );
 });
 
+test("parser options are captured from passive exact data properties", () => {
+  let getterCalls = 0;
+  const accessor = {} as { readonly maxNesting?: number };
+  Object.defineProperty(accessor, "maxNesting", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      throw new Error("parser getter canary");
+    },
+  });
+  let proxyTrapCalls = 0;
+  const proxy = new Proxy(
+    {},
+    {
+      get() {
+        proxyTrapCalls += 1;
+        throw new Error("parser proxy canary");
+      },
+      getPrototypeOf() {
+        proxyTrapCalls += 1;
+        throw new Error("parser proxy canary");
+      },
+      ownKeys() {
+        proxyTrapCalls += 1;
+        throw new Error("parser proxy canary");
+      },
+    },
+  );
+  const symbolOptions = { maxNesting: 8 } as Record<PropertyKey, unknown>;
+  symbolOptions[Symbol("canary")] = true;
+
+  for (const options of [
+    accessor,
+    proxy,
+    { maxNesting: 8, unexpected: true },
+    symbolOptions,
+  ]) {
+    assert.throws(
+      () => parseGuardDocument(MINIMAL, options as { readonly maxNesting?: number }),
+      (error: unknown) =>
+        error instanceof TypeError && !error.message.includes("canary"),
+    );
+  }
+  assert.equal(getterCalls, 0);
+  assert.equal(proxyTrapCalls, 0);
+
+  const mutable = { sourceId: "captured.guard", maxNesting: 8 };
+  const result = parseGuardDocument(MINIMAL, mutable);
+  mutable.sourceId = "mutated.guard";
+  mutable.maxNesting = 1;
+  assert.equal(result.document.span.sourceId, "captured.guard");
+  assert.equal(result.ok, true);
+});
+
+test("equal-offset diagnostic ordering is independent of host locale", () => {
+  const original = String.prototype.localeCompare;
+  String.prototype.localeCompare = function localeCompareCanary(): number {
+    throw new Error("host locale comparator must not run");
+  };
+  try {
+    const result = parseGuardDocument(`policy "diagnostics" priority 1 {
+      when action.operation == "read" and deny
+      deny
+      reason "invalid"
+    }`);
+    assert.equal(result.ok, false);
+    assert.ok(result.diagnostics.length >= 2);
+  } finally {
+    String.prototype.localeCompare = original;
+  }
+});
+
 function collectExpressionSpans(expression: Expression, output: SourceSpan[]): void {
   output.push(expression.span);
   switch (expression.kind) {

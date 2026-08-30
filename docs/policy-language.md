@@ -144,8 +144,13 @@ const canonical = formatGuardDocument(parsed.document);
 ```
 
 All result arrays, tokens, positions, spans, AST nodes, and semantic projections
-are deeply frozen. `projectGuardDocumentSemantics` removes source coordinates
-for golden and structural round-trip comparisons; it is not an evaluator.
+are deeply frozen. Options are captured once through own enumerable data
+descriptors; accessors, proxies, symbols, inherited properties, and unknown
+keys are rejected without executing caller code. The formatter normally accepts
+parser-owned ASTs, and defensively verifies any public input as a finite plain
+data tree before reading it. `projectGuardDocumentSemantics` removes source
+coordinates for golden and structural round-trip comparisons; it is not an
+evaluator.
 
 ## Reviewed examples
 

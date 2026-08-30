@@ -1,3 +1,4 @@
+import { assertPlainDataTree } from "./boundary.js";
 import type {
   Expression,
   GuardDocument,
@@ -8,6 +9,7 @@ import type {
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function formatGuardDocument(document: GuardDocument): string {
+  assertPlainDataTree(document, "Guard document");
   assertRecord(document, "Guard document");
   if (document.kind !== "document" || document.languageVersion !== "1") {
     throw new TypeError('Guard formatter only supports document languageVersion "1".');
