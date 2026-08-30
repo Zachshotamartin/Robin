@@ -236,6 +236,7 @@ test("generic synthetic entrypoint stays coding-free and scenario implementation
   ]);
   assert.doesNotMatch(syntheticSource, /capability-repository|VirtualRepository/u);
   assert.match(codingSource, /@guard\/capability-repository/u);
+  assert.doesNotMatch(supportSource, /\bProxy\b/u);
   for (const source of [syntheticSource, codingSource, supportSource]) {
     assert.doesNotMatch(
       source,

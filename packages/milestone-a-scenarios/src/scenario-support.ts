@@ -4,12 +4,12 @@ import type {
   AgentDriverDescriptor,
   AgentTurnRequest,
 } from "@guard/agent-driver";
-import type {
-  CapabilityOperationReference,
-  CapabilityPackRegistry,
+import {
   CapabilityGateway,
+  CapabilityPackRegistry,
+  type CapabilityOperationReference,
 } from "@guard/capability-gateway";
-import type { ContextSourceRegistry } from "@guard/context-broker";
+import { ContextSourceRegistry } from "@guard/context-broker";
 import {
   CONTRACT_SCHEMA_VERSION,
   ActionIdKind,
@@ -307,18 +307,19 @@ export async function replayWithFailOnEffectPorts(
       return fail("agent-driver.advance");
     },
   });
+  const capabilityPacks = new FailOnCallCapabilityPackRegistry(fail);
 
   const options: SynchronousRuntimeHostOptions = {
     eventStore,
-    profileRegistry: effectSpy<TaskProfileRegistry>(fail, "profile-registry"),
+    profileRegistry: new FailOnCallTaskProfileRegistry(fail),
     installedDriver: {
       componentId: "replay-effect-spy",
       componentVersion: 1,
       driver,
     },
-    contextSources: effectSpy<ContextSourceRegistry>(fail, "context-sources"),
-    capabilityPacks: effectSpy<CapabilityPackRegistry>(fail, "capability-packs"),
-    capabilityGateway: effectSpy<CapabilityGateway>(fail, "capability-gateway"),
+    contextSources: new FailOnCallContextSourceRegistry(fail),
+    capabilityPacks,
+    capabilityGateway: new FailOnCallCapabilityGateway(capabilityPacks, fail),
     contextPlanner: Object.freeze({
       plan() {
         return fail("context-planner.plan");
@@ -336,7 +337,7 @@ export async function replayWithFailOnEffectPorts(
         return fail("runtime-clock.now");
       },
     }),
-    ids: effectSpy<RuntimeHostIdFactory>(fail, "runtime-id-factory"),
+    ids: new FailOnCallRuntimeHostIdFactory(fail),
   };
   const replay = await new SynchronousRuntimeHost(options).replayRun(runId);
   return Object.freeze({ replay, effectCalls });
@@ -361,15 +362,153 @@ function fixedUuid(namespace: number, category: number, ordinal: number): string
   return `${first}-0000-7000-8000-${tail}`;
 }
 
-function effectSpy<T>(
-  fail: (port: string) => never,
-  label: string,
-): T {
-  return new Proxy(Object.create(null) as object, {
-    get(_target, property) {
-      return () => fail(`${label}.${String(property)}`);
-    },
-  }) as unknown as T;
+type EffectFailure = (port: string) => never;
+
+const EFFECT_FAILURES = new WeakMap<object, EffectFailure>();
+
+function failEffect(port: object, method: string): never {
+  const fail = EFFECT_FAILURES.get(port);
+  if (fail === undefined) {
+    throw new Error("A fail-on-call scenario port was not initialized.");
+  }
+  return fail(method);
+}
+
+class FailOnCallTaskProfileRegistry implements TaskProfileRegistry {
+  public constructor(fail: EffectFailure) {
+    EFFECT_FAILURES.set(this, fail);
+    Object.freeze(this);
+  }
+
+  public register(_profile: unknown): ReturnType<TaskProfileRegistry["register"]> {
+    return failEffect(this, "profile-registry.register");
+  }
+
+  public resolve(
+    _profileId: unknown,
+    _profileVersion: unknown,
+  ): ReturnType<TaskProfileRegistry["resolve"]> {
+    return failEffect(this, "profile-registry.resolve");
+  }
+
+  public list(): ReturnType<TaskProfileRegistry["list"]> {
+    return failEffect(this, "profile-registry.list");
+  }
+
+  public pin(
+    _profileId: unknown,
+    _profileVersion: unknown,
+  ): ReturnType<TaskProfileRegistry["pin"]> {
+    return failEffect(this, "profile-registry.pin");
+  }
+
+  public validateObjective(
+    _value: unknown,
+  ): ReturnType<TaskProfileRegistry["validateObjective"]> {
+    return failEffect(this, "profile-registry.validateObjective");
+  }
+
+  public validateOutcome(
+    _value: unknown,
+  ): ReturnType<TaskProfileRegistry["validateOutcome"]> {
+    return failEffect(this, "profile-registry.validateOutcome");
+  }
+}
+
+class FailOnCallContextSourceRegistry extends ContextSourceRegistry {
+  public constructor(fail: EffectFailure) {
+    super([]);
+    EFFECT_FAILURES.set(this, fail);
+  }
+
+  public override resolve(
+    _sourceId: string,
+    _sourceVersion: number,
+  ): ReturnType<ContextSourceRegistry["resolve"]> {
+    return failEffect(this, "context-sources.resolve");
+  }
+}
+
+class FailOnCallCapabilityPackRegistry extends CapabilityPackRegistry {
+  public constructor(fail: EffectFailure) {
+    super([]);
+    EFFECT_FAILURES.set(this, fail);
+  }
+
+  public override listPacks(): ReturnType<CapabilityPackRegistry["listPacks"]> {
+    return failEffect(this, "capability-packs.listPacks");
+  }
+
+  public override createAdvertisement(
+    _references: Parameters<CapabilityPackRegistry["createAdvertisement"]>[0],
+  ): ReturnType<CapabilityPackRegistry["createAdvertisement"]> {
+    return failEffect(this, "capability-packs.createAdvertisement");
+  }
+}
+
+class FailOnCallCapabilityGateway extends CapabilityGateway {
+  public constructor(
+    registry: CapabilityPackRegistry,
+    fail: EffectFailure,
+  ) {
+    super(registry);
+    EFFECT_FAILURES.set(this, fail);
+  }
+
+  public override normalize(
+    ..._arguments: Parameters<CapabilityGateway["normalize"]>
+  ): ReturnType<CapabilityGateway["normalize"]> {
+    return failEffect(this, "capability-gateway.normalize");
+  }
+
+  public override execute(
+    ..._arguments: Parameters<CapabilityGateway["execute"]>
+  ): ReturnType<CapabilityGateway["execute"]> {
+    return failEffect(this, "capability-gateway.execute");
+  }
+}
+
+class FailOnCallRuntimeHostIdFactory implements RuntimeHostIdFactory {
+  public constructor(fail: EffectFailure) {
+    EFFECT_FAILURES.set(this, fail);
+    Object.freeze(this);
+  }
+
+  public nextRunId(): ReturnType<RuntimeHostIdFactory["nextRunId"]> {
+    return failEffect(this, "runtime-id-factory.nextRunId");
+  }
+
+  public nextEventId(): ReturnType<RuntimeHostIdFactory["nextEventId"]> {
+    return failEffect(this, "runtime-id-factory.nextEventId");
+  }
+
+  public nextAgentAttemptId(
+    _turn: number,
+  ): ReturnType<RuntimeHostIdFactory["nextAgentAttemptId"]> {
+    return failEffect(this, "runtime-id-factory.nextAgentAttemptId");
+  }
+
+  public nextActionId(): ReturnType<RuntimeHostIdFactory["nextActionId"]> {
+    return failEffect(this, "runtime-id-factory.nextActionId");
+  }
+
+  public nextContextRequestId(): ReturnType<
+    RuntimeHostIdFactory["nextContextRequestId"]
+  > {
+    return failEffect(this, "runtime-id-factory.nextContextRequestId");
+  }
+
+  public nextContentBlockId(): ReturnType<
+    RuntimeHostIdFactory["nextContentBlockId"]
+  > {
+    return failEffect(this, "runtime-id-factory.nextContentBlockId");
+  }
+
+  public nextObservationId(): ReturnType<
+    RuntimeHostIdFactory["nextObservationId"]
+  > {
+    return failEffect(this, "runtime-id-factory.nextObservationId");
+  }
 }
 
 function deepFreeze<T>(value: T): T {
