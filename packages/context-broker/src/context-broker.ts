@@ -5,12 +5,14 @@ import {
   CONTRACT_SCHEMA_VERSION,
   PolicyVersionIdKind,
   canonicalBytes,
+  canonicalSha256Hex,
   canonicalize,
   createDomainError,
   isDomainError,
   sha256Hex,
 } from "@guard/contracts";
 import type {
+  DomainError,
   JsonObject,
   JsonValue,
   PolicyVersionId,
@@ -32,6 +34,7 @@ import type {
   CapabilityOutputReleaseRequest,
   ContextBudgetLimits,
   ContextBudgetUsage,
+  ContextBrokerIntegrationDescriptor,
   ContextContentDecision,
   ContextContentPolicyInput,
   ContextManifest,
@@ -118,6 +121,7 @@ interface PolicyHandlers {
 const MAXIMUM_BROKER_RESOURCE_BYTES = 16 * 1024 * 1024;
 const MAXIMUM_BROKER_CUMULATIVE_BYTES = 1024 * 1024 * 1024;
 const MAXIMUM_BROKER_ITEMS = 4_096;
+const RECOGNIZED_CONTEXT_BROKERS = new WeakSet<object>();
 const SOURCE_CONTROL_PLANE_LIMITS = Object.freeze({
   maximumDepth: 32,
   maximumNodes: 8_192,
@@ -136,6 +140,7 @@ export class ContextBroker {
   readonly runId: string;
   readonly policySnapshotId: PolicyVersionId;
   readonly releasePolicy: ContextReleasePolicySnapshot;
+  readonly descriptor: ContextBrokerIntegrationDescriptor;
   readonly #sources: BrokerContextSourceRegistry;
   readonly #policy: PolicyHandlers;
   readonly #budgets: ContextBudgetLimits;
@@ -147,7 +152,8 @@ export class ContextBroker {
   readonly #releasedItems = new Map<string, ReleasedContextItem>();
   readonly #deduplicatedItems = new Map<string, ReleasedContextItem>();
   readonly #assemblies = new Map<string, AgentContextAssembly>();
-  readonly #itemAssemblyOwners = new Map<string, string>();
+  readonly #turnAssemblyOwners = new Map<string, string>();
+  readonly #sealedTurns = new Set<string>();
   #runAttempts = 0;
   #runReleasedItems = 0;
   #runBytes = 0;
@@ -163,7 +169,8 @@ export class ContextBroker {
     const policySnapshotId = PolicyVersionIdKind.parse(fields["policySnapshotId"]);
     if (
       !(fields["sources"] instanceof BrokerContextSourceRegistry) ||
-      isProxy(fields["sources"])
+      isProxy(fields["sources"]) ||
+      Object.getPrototypeOf(fields["sources"]) !== BrokerContextSourceRegistry.prototype
     ) {
       throw invalidInput("A context broker requires an immutable source registry.");
     }
@@ -196,6 +203,40 @@ export class ContextBroker {
     this.#customClassifiers = custom;
     this.#additionalTextMediaTypes = additionalMedia;
     this.#runCorrelationId = randomBytes(18).toString("base64url");
+    const sourceDescriptors = snapshot(this.#sources.list());
+    const additionalReviewedTextMediaTypes = Object.freeze(
+      [...this.#additionalTextMediaTypes].sort(),
+    );
+    const classifierDescriptors = Object.freeze(
+      this.#customClassifiers.map((classifier) =>
+        Object.freeze({
+          classifierId: classifier.classifierId,
+          pattern: classifier.source,
+          caseInsensitive: classifier.caseInsensitive,
+        }),
+      ),
+    );
+    const configurationContentHash = canonicalSha256Hex({
+      schemaVersion: CONTRACT_SCHEMA_VERSION,
+      policySnapshotId,
+      releasePolicy: this.releasePolicy,
+      sourceDescriptors,
+      budgets,
+      customSecretClassifiers: classifierDescriptors,
+      additionalReviewedTextMediaTypes,
+    });
+    this.descriptor = snapshot({
+      schemaVersion: CONTRACT_SCHEMA_VERSION,
+      runId: this.runId,
+      policySnapshotId: this.policySnapshotId,
+      releasePolicyId: this.releasePolicy.releasePolicyId,
+      releasePolicyVersion: this.releasePolicy.releasePolicyVersion,
+      releasePolicyContentHash: this.releasePolicy.contentHash,
+      sourceDescriptors,
+      budgets,
+      configurationContentHash,
+    });
+    RECOGNIZED_CONTEXT_BROKERS.add(this);
     Object.freeze(this);
   }
 
@@ -221,28 +262,40 @@ export class ContextBroker {
     return this.#serialized(() => this.#releaseCapabilityOutput(parsed));
   }
 
-  assembleAgentContext(request: AgentContextAssemblyRequest): AgentContextAssembly {
-    const parsed = parseAssemblyRequest(
-      request,
-      this.#budgets.maximumItemsPerTurn,
-    );
-    const assemblyKey = `${parsed.turnId}\u0000${
-      parsed.providerRequestId === null
-        ? "none"
-        : `provider:${parsed.providerRequestId}`
-    }`;
-    const priorAssembly = this.#assemblies.get(assemblyKey);
+  assembleAgentContext(
+    request: AgentContextAssemblyRequest,
+  ): Promise<AgentContextAssembly> {
+    let parsed: AgentContextAssemblyRequest;
+    try {
+      parsed = parseAssemblyRequest(request, this.#budgets.maximumItemsPerTurn);
+    } catch (error: unknown) {
+      return Promise.reject(error);
+    }
+    return this.#serialized(() => this.#assembleAgentContext(parsed));
+  }
+
+  async #assembleAgentContext(
+    parsed: AgentContextAssemblyRequest,
+  ): Promise<AgentContextAssembly> {
+    const priorAssembly = this.#assemblies.get(parsed.agentRequestId);
     if (priorAssembly !== undefined) {
       if (
+        priorAssembly.manifest.turnId !== parsed.turnId ||
         canonicalize(priorAssembly.manifest.orderedItemIds) !==
-        canonicalize(parsed.orderedItemIds)
+          canonicalize(parsed.orderedItemIds)
       ) {
         throw createDomainError({
           code: "conflict",
-          message: "A provider request ID is already bound to different context items.",
+          message: "An agent request ID is already bound to different context items.",
         });
       }
-      return priorAssembly;
+    }
+    const turnOwner = this.#turnAssemblyOwners.get(parsed.turnId);
+    if (turnOwner !== undefined && turnOwner !== parsed.agentRequestId) {
+      throw createDomainError({
+        code: "conflict",
+        message: "A context turn is already sealed for another agent request.",
+      });
     }
     const seen = new Set<string>();
     const items: ReleasedContextItem[] = [];
@@ -251,16 +304,9 @@ export class ContextBroker {
         throw invalidInput("An assembled context item may appear only once.");
       }
       seen.add(itemId);
-      const owner = this.#itemAssemblyOwners.get(itemId);
-      if (owner !== undefined && owner !== assemblyKey) {
-        throw createDomainError({
-          code: "conflict",
-          message: "A released context item is already bound to another request.",
-        });
-      }
       const item = this.#releasedItems.get(itemId);
-      if (item === undefined || item.turnId !== parsed.turnId) {
-        throw invalidInput("An assembled context item is unknown or belongs to another turn.");
+      if (item === undefined) {
+        throw invalidInput("An assembled context item is unknown to this run broker.");
       }
       items.push(item);
     }
@@ -282,6 +328,9 @@ export class ContextBroker {
         "The assembled provider context exceeds the per-request byte budget.",
       );
     }
+    if (priorAssembly !== undefined) {
+      return priorAssembly;
+    }
     const serializedValues = Object.freeze(items.map((item) => item.serializedValue));
     const utf8Text = serializedValues.join("\n");
     const entries = Object.freeze(
@@ -302,7 +351,7 @@ export class ContextBroker {
       schemaVersion: CONTRACT_SCHEMA_VERSION,
       runId: this.runId,
       turnId: parsed.turnId,
-      providerRequestId: parsed.providerRequestId,
+      agentRequestId: parsed.agentRequestId,
       policySnapshotId: this.policySnapshotId,
       releasePolicyId: this.releasePolicy.releasePolicyId,
       releasePolicyVersion: this.releasePolicy.releasePolicyVersion,
@@ -315,13 +364,15 @@ export class ContextBroker {
     });
     const assembly: AgentContextAssembly = Object.freeze({
       schemaVersion: CONTRACT_SCHEMA_VERSION,
+      items: Object.freeze([...items]),
       serializedValues,
       utf8Text,
       utf8ByteLength,
       manifest,
     });
-    this.#assemblies.set(assemblyKey, assembly);
-    for (const item of items) this.#itemAssemblyOwners.set(item.itemId, assemblyKey);
+    this.#assemblies.set(parsed.agentRequestId, assembly);
+    this.#turnAssemblyOwners.set(parsed.turnId, parsed.agentRequestId);
+    this.#sealedTurns.add(parsed.turnId);
     return assembly;
   }
 
@@ -344,7 +395,25 @@ export class ContextBroker {
     parsed: ParsedSourceRequest,
   ): Promise<ContextReleaseResult> {
     assertNotAborted(parsed.signal);
-    const allowance = this.#preflightUsage(parsed.turnId, parsed.maximumBytes);
+    this.#assertTurnOpen(parsed.turnId);
+    let allowance: UsageAllowance;
+    try {
+      allowance = this.#preflightUsage(parsed.turnId, parsed.maximumBytes);
+    } catch (error: unknown) {
+      if (!isDomainError(error) || error.code !== "budget_exceeded") throw error;
+      return this.#recordDenial({
+        turnId: parsed.turnId,
+        sourceId: parsed.sourceId,
+        sourceVersion: parsed.sourceVersion,
+        policyProjection: null,
+        safeResourceCategory: "context_request",
+        reason: "context.budget.preflight",
+        redactions: [],
+        promptInjectionTags: [],
+        truncated: false,
+        error,
+      });
+    }
     const source = this.#sources.resolve(parsed.sourceId, parsed.sourceVersion);
     const normalized = await callSource(() =>
       source.normalizeResourceRequest(parsed.rawRequest),
@@ -355,16 +424,18 @@ export class ContextBroker {
     );
     const metadata = validateMetadata(rawMetadata, source, request);
     if (metadata.byteLength > this.#budgets.maximumResourceBytes) {
-      this.#recordDenial({
+      return this.#recordDenial({
         turnId: parsed.turnId,
-        metadata,
+        sourceId: metadata.sourceId,
+        sourceVersion: metadata.sourceVersion,
+        policyProjection: metadata.policyProjection,
         safeResourceCategory: "oversized_resource",
         reason: "context.budget.resource",
         redactions: [],
         promptInjectionTags: [],
         truncated: false,
+        error: budgetExceeded("The context resource exceeds the per-resource byte budget."),
       });
-      throw budgetExceeded("The context resource exceeds the per-resource byte budget.");
     }
 
     const metadataDecision = await this.#decideMetadata(
@@ -375,12 +446,15 @@ export class ContextBroker {
     if (metadataDecision.effect === "deny") {
       return this.#recordDenial({
         turnId: parsed.turnId,
-        metadata,
+        sourceId: metadata.sourceId,
+        sourceVersion: metadata.sourceVersion,
+        policyProjection: metadata.policyProjection,
         safeResourceCategory: metadataDecision.safeResourceCategory,
         reason: metadataDecision.reason,
         redactions: [],
         promptInjectionTags: [],
         truncated: false,
+        error: policyDenied("The pinned context metadata policy denied this resource."),
       });
     }
 
@@ -391,12 +465,15 @@ export class ContextBroker {
     if (!media.supported) {
       return this.#recordDenial({
         turnId: parsed.turnId,
-        metadata,
+        sourceId: metadata.sourceId,
+        sourceVersion: metadata.sourceVersion,
+        policyProjection: metadata.policyProjection,
         safeResourceCategory: metadataDecision.safeResourceCategory,
         reason: media.reason,
         redactions: [],
         promptInjectionTags: [],
         truncated: false,
+        error: policyDenied("The context media type is not eligible for agent release."),
       });
     }
 
@@ -424,12 +501,15 @@ export class ContextBroker {
     if (!decoded.accepted) {
       return this.#recordDenial({
         turnId: parsed.turnId,
-        metadata,
+        sourceId: metadata.sourceId,
+        sourceVersion: metadata.sourceVersion,
+        policyProjection: metadata.policyProjection,
         safeResourceCategory: metadataDecision.safeResourceCategory,
         reason: decoded.reason,
         redactions: [],
         promptInjectionTags: [],
         truncated: opened.truncated,
+        error: policyDenied("The context bytes could not be decoded for agent release."),
       });
     }
 
@@ -464,18 +544,33 @@ export class ContextBroker {
   async #releaseCapabilityOutput(
     request: ParsedCapabilityReleaseRequest,
   ): Promise<ContextReleaseResult> {
-    const allowance = this.#preflightUsage(
-      request.turnId,
-      this.#budgets.maximumRequestBytes,
-    );
+    this.#assertTurnOpen(request.turnId);
+    const resource = canonicalizeResourceRef(request.rawResource);
+    const policyProjection = parsePolicyProjection(request.rawPolicyProjection);
+    let allowance: UsageAllowance;
+    try {
+      allowance = this.#preflightUsage(
+        request.turnId,
+        this.#budgets.maximumRequestBytes,
+      );
+    } catch (error: unknown) {
+      if (!isDomainError(error) || error.code !== "budget_exceeded") throw error;
+      return this.#recordDenial({
+        turnId: request.turnId,
+        sourceId: resource.sourceId,
+        sourceVersion: request.sourceVersion,
+        policyProjection,
+        safeResourceCategory: "capability_output",
+        reason: "context.budget.preflight",
+        redactions: [],
+        promptInjectionTags: [],
+        truncated: false,
+        error,
+      });
+    }
     const snapshotCeiling = Math.min(
       this.#budgets.maximumResourceBytes,
       allowance.maximumBytes,
-    );
-    const resource = canonicalizeResourceRef(request.rawResource);
-    const policyProjection = parsePolicyProjection(
-      request.rawPolicyProjection,
-      snapshotCeiling,
     );
     if (resource.classification !== request.classification) {
       throw invalidInput(
@@ -483,18 +578,35 @@ export class ContextBroker {
       );
     }
     const structuralCeiling = Math.max(1, Math.min(100_000, snapshotCeiling));
-    const wrapped = snapshotBoundaryObject(
-      { value: request.rawOutput },
-      "Capability agent output",
-      {
-        maximumDepth: 64,
-        maximumNodes: structuralCeiling,
-        maximumArrayLength: Math.min(10_000, structuralCeiling),
-        maximumObjectProperties: Math.min(10_000, structuralCeiling),
-        maximumStringUtf8Bytes: Math.min(1_048_576, snapshotCeiling),
-        maximumCanonicalUtf8Bytes: snapshotCeiling,
-      },
-    );
+    let wrapped: JsonObject;
+    try {
+      wrapped = snapshotBoundaryObject(
+        { value: request.rawOutput },
+        "Capability agent output",
+        {
+          maximumDepth: 64,
+          maximumNodes: structuralCeiling,
+          maximumArrayLength: Math.min(10_000, structuralCeiling),
+          maximumObjectProperties: Math.min(10_000, structuralCeiling),
+          maximumStringUtf8Bytes: Math.min(1_048_576, snapshotCeiling),
+          maximumCanonicalUtf8Bytes: snapshotCeiling,
+        },
+      );
+    } catch (error: unknown) {
+      if (!isDomainError(error) || error.code !== "budget_exceeded") throw error;
+      return this.#recordDenial({
+        turnId: request.turnId,
+        sourceId: resource.sourceId,
+        sourceVersion: request.sourceVersion,
+        policyProjection,
+        safeResourceCategory: "capability_output",
+        reason: "context.budget.capability_output",
+        redactions: [],
+        promptInjectionTags: [],
+        truncated: false,
+        error,
+      });
+    }
     const output = wrapped["value"] as JsonValue;
     const rawEnvelope: JsonObject = {
       schemaVersion: CONTRACT_SCHEMA_VERSION,
@@ -517,7 +629,18 @@ export class ContextBroker {
       sourceBytes.byteLength > this.#budgets.maximumResourceBytes ||
       sourceBytes.byteLength > allowance.maximumBytes
     ) {
-      throw budgetExceeded("The capability output exceeds its context byte budget.");
+      return this.#recordDenial({
+        turnId: request.turnId,
+        sourceId: resource.sourceId,
+        sourceVersion: request.sourceVersion,
+        policyProjection,
+        safeResourceCategory: "capability_output",
+        reason: "context.budget.capability_output",
+        redactions: [],
+        promptInjectionTags: [],
+        truncated: false,
+        error: budgetExceeded("The capability output exceeds its context byte budget."),
+      });
     }
     const metadata = validateMetadata(
       {
@@ -545,12 +668,15 @@ export class ContextBroker {
     if (metadataDecision.effect === "deny") {
       return this.#recordDenial({
         turnId: request.turnId,
-        metadata,
+        sourceId: metadata.sourceId,
+        sourceVersion: metadata.sourceVersion,
+        policyProjection: metadata.policyProjection,
         safeResourceCategory: metadataDecision.safeResourceCategory,
         reason: metadataDecision.reason,
         redactions: [],
         promptInjectionTags: [],
         truncated: false,
+        error: policyDenied("The pinned context metadata policy denied this output."),
       });
     }
     return this.#releaseEnvelope({
@@ -585,12 +711,15 @@ export class ContextBroker {
     if (contentDecision.effect === "deny") {
       return this.#recordDenial({
         turnId: input.turnId,
-        metadata: input.metadata,
+        sourceId: input.metadata.sourceId,
+        sourceVersion: input.metadata.sourceVersion,
+        policyProjection: input.metadata.policyProjection,
         safeResourceCategory: contentDecision.safeResourceCategory,
         reason: contentDecision.reason,
         redactions: classified.categories,
         promptInjectionTags: classified.promptInjectionTags,
         truncated: input.truncated,
+        error: policyDenied("The pinned context content policy denied agent release."),
       });
     }
 
@@ -606,9 +735,21 @@ export class ContextBroker {
     const serializedValue = canonicalize(transformed.value);
     const byteLength = Buffer.byteLength(serializedValue, "utf8");
     if (byteLength > input.allowance.maximumBytes) {
-      throw budgetExceeded(
-        "The released context representation exceeds its remaining byte budget.",
-      );
+      return this.#recordDenial({
+        turnId: input.turnId,
+        sourceId: input.metadata.sourceId,
+        sourceVersion: input.metadata.sourceVersion,
+        policyProjection: input.metadata.policyProjection,
+        safeResourceCategory: contentDecision.safeResourceCategory,
+        reason: "context.budget.released_representation",
+        redactions:
+          contentDecision.effect === "redact" ? classified.categories : [],
+        promptInjectionTags: classified.promptInjectionTags,
+        truncated: input.truncated,
+        error: budgetExceeded(
+          "The released context representation exceeds its remaining byte budget.",
+        ),
+      });
     }
     if (!isPlainObject(transformed.value)) {
       throw createDomainError({
@@ -865,13 +1006,18 @@ export class ContextBroker {
 
   #recordDenial(input: {
     readonly turnId: string;
-    readonly metadata: ContextResourceMetadata;
+    readonly sourceId: string;
+    readonly sourceVersion: number;
+    readonly policyProjection: ContextResourceMetadata["policyProjection"] | null;
     readonly safeResourceCategory: string;
     readonly reason: string;
     readonly redactions: readonly SecretCategoryCount[];
     readonly promptInjectionTags: ContextManifestEntry["promptInjectionTags"];
     readonly truncated: boolean;
+    readonly error: DomainError;
   }): ContextReleaseResult {
+    validateSafeIdentifier(input.sourceId, "denial sourceId");
+    validatePositiveSafeInteger(input.sourceVersion, "denial sourceVersion");
     validateSafeIdentifier(input.safeResourceCategory, "safeResourceCategory");
     validateSafeIdentifier(input.reason, "decision reason");
     const manifest: ContextManifestEntry = snapshot({
@@ -880,8 +1026,8 @@ export class ContextBroker {
       itemId: null,
       runId: this.runId,
       turnId: input.turnId,
-      sourceId: input.metadata.sourceId,
-      sourceVersion: input.metadata.sourceVersion,
+      sourceId: input.sourceId,
+      sourceVersion: input.sourceVersion,
       resource: null,
       safeResourceCategory: input.safeResourceCategory,
       selector: null,
@@ -896,16 +1042,24 @@ export class ContextBroker {
       releasePolicyId: this.releasePolicy.releasePolicyId,
       releasePolicyVersion: this.releasePolicy.releasePolicyVersion,
       releasePolicyContentHash: this.releasePolicy.contentHash,
-      policyCatalogId: input.metadata.policyProjection.catalogId,
-      policyCatalogVersion: input.metadata.policyProjection.catalogVersion,
-      policyCatalogContentHash:
-        input.metadata.policyProjection.catalogContentHash,
+      policyCatalogId: input.policyProjection?.catalogId ?? null,
+      policyCatalogVersion: input.policyProjection?.catalogVersion ?? null,
+      policyCatalogContentHash: input.policyProjection?.catalogContentHash ?? null,
       reason: input.reason,
       promptInjectionTags: input.promptInjectionTags,
       truncated: input.truncated,
     });
     this.#manifestEntries.push(manifest);
-    return Object.freeze({ status: "denied", manifest });
+    return Object.freeze({ status: "denied", error: input.error, manifest });
+  }
+
+  #assertTurnOpen(turnId: string): void {
+    if (this.#sealedTurns.has(turnId)) {
+      throw createDomainError({
+        code: "conflict",
+        message: "Context cannot be released after its target turn is sealed.",
+      });
+    }
   }
 
   #nextOrdinal(): number {
@@ -926,6 +1080,18 @@ export class ContextBroker {
       unlock();
     }
   }
+}
+
+/** Internal identity check used by the integration boundary; not structural. */
+export function isRecognizedContextBroker(
+  value: unknown,
+): value is ContextBroker {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !isProxy(value) &&
+    RECOGNIZED_CONTEXT_BROKERS.has(value)
+  );
 }
 
 function validateNormalizedRequest(
@@ -1243,17 +1409,14 @@ function parseAssemblyRequest(
     },
   );
   if (
-    !hasExactKeys(detached, ["turnId", "providerRequestId", "orderedItemIds"])
+    !hasExactKeys(detached, ["turnId", "agentRequestId", "orderedItemIds"])
   ) {
     throw invalidInput("An agent context assembly request is malformed.");
   }
   validateSafeIdentifier(detached["turnId"], "turnId");
-  if (detached["providerRequestId"] !== null) {
-    validateSafeIdentifier(detached["providerRequestId"], "providerRequestId");
-  }
+  validateSafeIdentifier(detached["agentRequestId"], "agentRequestId");
   if (
     !Array.isArray(detached["orderedItemIds"]) ||
-    detached["orderedItemIds"].length === 0 ||
     !detached["orderedItemIds"].every(
       (item) => typeof item === "string" && /^ctx_[a-f0-9]{40}$/u.test(item),
     )
@@ -1262,7 +1425,7 @@ function parseAssemblyRequest(
   }
   return snapshot({
     turnId: detached["turnId"],
-    providerRequestId: detached["providerRequestId"],
+    agentRequestId: detached["agentRequestId"],
     orderedItemIds: detached["orderedItemIds"],
   });
 }
@@ -1648,6 +1811,10 @@ function isPlainObject(value: unknown): value is JsonObject {
 
 function budgetExceeded(message: string) {
   return createDomainError({ code: "budget_exceeded", message });
+}
+
+function policyDenied(message: string) {
+  return createDomainError({ code: "policy_denied", message });
 }
 
 function invalidInput(message: string) {

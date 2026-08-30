@@ -30,7 +30,10 @@ import {
   classifyText,
   compileCustomSecretClassifiers,
   createContextReleasePolicySnapshot,
+  captureContextBrokerIntegration,
+  captureContextBrokerIntegrationFactory,
   createContextBrokerIntegration,
+  createContextBrokerIntegrationFactory,
   createPinnedContextPolicyAdapter,
   type BrokerContextSource,
   type ContextBrokerOptions,
@@ -404,14 +407,147 @@ test("exposes one captured runtime seam for source reads and capability agent vi
     reason: "capability.output",
   });
   assert.equal(capabilityResult.status, "released");
-  const assembly = integration.assembleAgentContext({
+  const assembly = await integration.assembleAgentContext({
     turnId: "turn.integration.capability",
-    providerRequestId: "provider.integration",
+    agentRequestId: "agent.integration",
     orderedItemIds: [capabilityResult.item.itemId],
   });
   assert.equal(assembly.serializedValues.length, 1);
   assert.throws(
     () => createContextBrokerIntegration({} as ContextBroker),
+    (error: unknown) => isCode(error, "invalid_input"),
+  );
+});
+
+test("creates recognized one-broker-per-run integrations with immutable validation descriptors", () => {
+  const pinnedReleasePolicy = releasePolicy("allow");
+  const policy = createPinnedContextPolicyAdapter({
+    evaluator: evaluator(),
+    releasePolicy: pinnedReleasePolicy,
+  });
+  const mutableBudgets = { ...DEFAULT_BUDGETS };
+  const factory = createContextBrokerIntegrationFactory({
+    policySnapshotId: POLICY_ID,
+    releasePolicy: pinnedReleasePolicy,
+    sources: new BrokerContextSourceRegistry([memorySource()]),
+    policy,
+    budgets: mutableBudgets,
+  });
+  assert.equal(captureContextBrokerIntegrationFactory(factory), factory);
+  assert.equal(Object.isFrozen(factory.configurationDescriptor), true);
+  assert.match(
+    factory.configurationDescriptor.configurationContentHash,
+    /^[a-f0-9]{64}$/u,
+  );
+
+  mutableBudgets.maximumItemsPerRun = 1;
+  const first = factory.createForRun({ runId: "run.factory.one" });
+  assert.equal(captureContextBrokerIntegration(first), first);
+  assert.equal(first.descriptor.runId, "run.factory.one");
+  assert.equal(first.descriptor.policySnapshotId, POLICY_ID);
+  assert.equal(first.descriptor.releasePolicyId, "context.default");
+  assert.equal(first.descriptor.releasePolicyVersion, 1);
+  assert.equal(
+    first.descriptor.releasePolicyContentHash,
+    pinnedReleasePolicy.contentHash,
+  );
+  assert.deepEqual(first.descriptor.sourceDescriptors, [
+    {
+      sourceId: "memory.notes",
+      sourceVersion: 1,
+      scheme: "memory",
+      description: "Non-repository context fixture.",
+    },
+  ]);
+  assert.equal(
+    first.descriptor.budgets.maximumItemsPerRun,
+    DEFAULT_BUDGETS.maximumItemsPerRun,
+  );
+  assert.match(first.descriptor.configurationContentHash, /^[a-f0-9]{64}$/u);
+  const { runId: _runId, ...firstConfigurationDescriptor } = first.descriptor;
+  assert.deepEqual(firstConfigurationDescriptor, factory.configurationDescriptor);
+  assert.equal(Object.isFrozen(first), true);
+  assert.equal(Object.isFrozen(first.descriptor), true);
+  assert.equal(Object.isFrozen(first.descriptor.sourceDescriptors), true);
+  assert.equal(Object.isFrozen(first.descriptor.budgets), true);
+
+  const second = factory.createForRun({ runId: "run.factory.two" });
+  assert.notEqual(second, first);
+  assert.equal(
+    second.descriptor.configurationContentHash,
+    first.descriptor.configurationContentHash,
+  );
+  assert.throws(
+    () => factory.createForRun({ runId: "run.factory.one" }),
+    (error: unknown) => isCode(error, "conflict"),
+  );
+  assert.throws(
+    () =>
+      factory.createForRun(
+        new Proxy(
+          { runId: "run.proxy" },
+          {
+            get() {
+              throw new Error(HOSTILE_CANARY);
+            },
+          },
+        ),
+      ),
+    (error: unknown) => isCode(error, "invalid_input"),
+  );
+  assert.throws(
+    () =>
+      captureContextBrokerIntegrationFactory({
+        createForRun: () => first,
+      }),
+    (error: unknown) => isCode(error, "invalid_input"),
+  );
+  assert.throws(
+    () => captureContextBrokerIntegration({ ...first }),
+    (error: unknown) => isCode(error, "invalid_input"),
+  );
+  assert.throws(
+    () => captureContextBrokerIntegration(new Proxy(first, {})),
+    (error: unknown) => isCode(error, "invalid_input"),
+  );
+
+  let optionAccessorCalls = 0;
+  const hostileOptions: Record<string, unknown> = {
+    policySnapshotId: POLICY_ID,
+    releasePolicy: pinnedReleasePolicy,
+    sources: new BrokerContextSourceRegistry([memorySource()]),
+    policy,
+    budgets: DEFAULT_BUDGETS,
+  };
+  Object.defineProperty(hostileOptions, "budgets", {
+    enumerable: true,
+    get() {
+      optionAccessorCalls += 1;
+      throw new Error(HOSTILE_CANARY);
+    },
+  });
+  assert.throws(
+    () =>
+      createContextBrokerIntegrationFactory(
+        hostileOptions as unknown as Parameters<
+          typeof createContextBrokerIntegrationFactory
+        >[0],
+      ),
+    (error: unknown) => isCode(error, "invalid_input"),
+  );
+  assert.equal(optionAccessorCalls, 0);
+
+  const standaloneBroker = createBroker();
+  createContextBrokerIntegration(standaloneBroker);
+  assert.throws(
+    () => createContextBrokerIntegration(standaloneBroker),
+    (error: unknown) => isCode(error, "conflict"),
+  );
+  assert.throws(
+    () =>
+      createContextBrokerIntegration(
+        Object.create(ContextBroker.prototype) as ContextBroker,
+      ),
     (error: unknown) => isCode(error, "invalid_input"),
   );
 });
@@ -491,6 +627,8 @@ test("denied metadata never opens content and denied manifests retain no locator
   });
 
   assert.equal(result.status, "denied");
+  assert.equal(result.error.code, "policy_denied");
+  assert.equal(Object.isFrozen(result.error), true);
   assert.equal(source.openCalls, 0);
   assert.equal(result.manifest.resource, null);
   const evidence = canonicalize(result.manifest);
@@ -605,21 +743,21 @@ test("bounds denied attempts and rejects exact byte exhaustion before any furthe
     });
     assert.equal(result.status, "denied");
   }
-  await assert.rejects(
-    deniedBroker.releaseSource({
-      turnId: "turn.denials",
-      sourceId: deniedSource.descriptor.sourceId,
-      sourceVersion: 1,
-      request: { key: "record" },
-      maximumBytes: 1024,
-      reason: "task.context",
-      signal: new AbortController().signal,
-    }),
-    (error: unknown) => isCode(error, "budget_exceeded"),
-  );
+  const exhausted = await deniedBroker.releaseSource({
+    turnId: "turn.denials",
+    sourceId: deniedSource.descriptor.sourceId,
+    sourceVersion: 1,
+    request: { key: "record" },
+    maximumBytes: 1024,
+    reason: "task.context",
+    signal: new AbortController().signal,
+  });
+  assert.equal(exhausted.status, "denied");
+  assert.equal(exhausted.error.code, "budget_exceeded");
+  assert.equal(exhausted.manifest.policyCatalogId, null);
   assert.equal(deniedSource.metadataCalls, 2);
   assert.equal(deniedSource.openCalls, 0);
-  assert.equal(deniedBroker.listManifestEntries().length, 2);
+  assert.equal(deniedBroker.listManifestEntries().length, 3);
   assert.equal(deniedBroker.budgetUsage().runAttempts, 2);
 
   const measuredSource = new MutableSource(
@@ -661,18 +799,17 @@ test("bounds denied attempts and rejects exact byte exhaustion before any furthe
   });
   assert.equal(firstExact.status, "released");
   const opens = exactSource.openCalls;
-  await assert.rejects(
-    exactBroker.releaseSource({
-      turnId: "turn.exact",
-      sourceId: exactSource.descriptor.sourceId,
-      sourceVersion: 1,
-      request: { key: "record" },
-      maximumBytes: 8 * 1024,
-      reason: "task.context",
-      signal: new AbortController().signal,
-    }),
-    (error: unknown) => isCode(error, "budget_exceeded"),
-  );
+  const exactExhausted = await exactBroker.releaseSource({
+    turnId: "turn.exact",
+    sourceId: exactSource.descriptor.sourceId,
+    sourceVersion: 1,
+    request: { key: "record" },
+    maximumBytes: 8 * 1024,
+    reason: "task.context",
+    signal: new AbortController().signal,
+  });
+  assert.equal(exactExhausted.status, "denied");
+  assert.equal(exactExhausted.error.code, "budget_exceeded");
   assert.equal(exactSource.openCalls, opens);
 });
 
@@ -740,11 +877,11 @@ test("deduplicates unchanged releases while charging attempts and preserving aud
     ],
   });
   assert.equal(broker.listManifestEntries().length, 2);
-  assert.throws(
-    () =>
+  await assert.rejects(
+    async () =>
       broker.assembleAgentContext({
         turnId: "turn.dedup",
-        providerRequestId: "provider.dedup",
+        agentRequestId: "agent.dedup",
         orderedItemIds: [first.item.itemId, second.item.itemId],
       }),
     (error: unknown) => isCode(error, "invalid_input"),
@@ -797,47 +934,209 @@ test("bounds exact aggregate provider bytes and pins idempotent request ownershi
     assert.equal(result.status, "released");
     itemIds.push(result.item.itemId);
   }
-  assert.throws(
-    () =>
+  await assert.rejects(
+    async () =>
       broker.assembleAgentContext({
         turnId: "turn.aggregate",
-        providerRequestId: "provider.aggregate",
+        agentRequestId: "agent.aggregate",
+        orderedItemIds: itemIds,
+      }),
+    (error: unknown) => isCode(error, "budget_exceeded"),
+  );
+  await assert.rejects(
+    async () =>
+      broker.assembleAgentContext({
+        turnId: "turn.aggregate.later",
+        agentRequestId: "agent.aggregate.later",
         orderedItemIds: itemIds,
       }),
     (error: unknown) => isCode(error, "budget_exceeded"),
   );
 
-  const firstAssembly = broker.assembleAgentContext({
+  const firstAssembly = await broker.assembleAgentContext({
     turnId: "turn.aggregate",
-    providerRequestId: "provider.idempotent",
+    agentRequestId: "agent.idempotent",
     orderedItemIds: [itemIds[0]!],
   });
   assert.equal(
-    broker.assembleAgentContext({
+    await broker.assembleAgentContext({
       turnId: "turn.aggregate",
-      providerRequestId: "provider.idempotent",
+      agentRequestId: "agent.idempotent",
       orderedItemIds: [itemIds[0]!],
     }),
     firstAssembly,
   );
-  assert.throws(
-    () =>
+  await assert.rejects(
+    async () =>
       broker.assembleAgentContext({
         turnId: "turn.aggregate",
-        providerRequestId: "provider.idempotent",
+        agentRequestId: "agent.idempotent",
         orderedItemIds: [itemIds[1]!],
       }),
     (error: unknown) => isCode(error, "conflict"),
   );
-  assert.throws(
-    () =>
+  await assert.rejects(
+    async () =>
       broker.assembleAgentContext({
         turnId: "turn.aggregate",
-        providerRequestId: "provider.changed",
+        agentRequestId: "agent.changed",
         orderedItemIds: [itemIds[0]!],
       }),
     (error: unknown) => isCode(error, "conflict"),
   );
+});
+
+test("assembles exact ordered items across turns, supports empty context, and seals target turns", async () => {
+  const broker = createBroker({ releasePolicy: releasePolicy("allow") });
+  const released = [];
+  for (const [index, value] of ["first", "second"].entries()) {
+    const result = await broker.releaseCapabilityOutput({
+      turnId: "turn.lifecycle.source",
+      sourceVersion: 1,
+      resource: capabilityResource({ operationId: `lifecycle_${String(index)}` }),
+      policyProjection: genericProjection(),
+      output: { value },
+      classification: "internal",
+      reason: "capability.output",
+    });
+    assert.equal(result.status, "released");
+    released.push(result.item);
+  }
+
+  const ordered = [released[1]!, released[0]!];
+  const firstAssembly = await broker.assembleAgentContext({
+    turnId: "turn.lifecycle.source",
+    agentRequestId: "agent.lifecycle.first",
+    orderedItemIds: ordered.map((item) => item.itemId),
+  });
+  assert.deepEqual(firstAssembly.items, ordered);
+  assert.equal(firstAssembly.items[0], ordered[0]);
+  assert.equal(firstAssembly.items[1], ordered[1]);
+  assert.deepEqual(
+    firstAssembly.serializedValues,
+    ordered.map((item) => item.serializedValue),
+  );
+  assert.deepEqual(
+    firstAssembly.manifest.entries.map((entry) => entry.itemId),
+    ordered.map((item) => item.itemId),
+  );
+  assert.deepEqual(
+    firstAssembly.manifest.orderedItemIds,
+    ordered.map((item) => item.itemId),
+  );
+  assert.equal(firstAssembly.manifest.agentRequestId, "agent.lifecycle.first");
+  assert.equal(Object.isFrozen(firstAssembly), true);
+  assert.equal(Object.isFrozen(firstAssembly.items), true);
+  assert.equal(Object.isFrozen(firstAssembly.manifest.entries), true);
+
+  await assert.rejects(
+    releaseMemory(broker, "turn.lifecycle.source"),
+    (error: unknown) => isCode(error, "conflict"),
+  );
+
+  const laterAssembly = await broker.assembleAgentContext({
+    turnId: "turn.lifecycle.later",
+    agentRequestId: "agent.lifecycle.later",
+    orderedItemIds: ordered.map((item) => item.itemId),
+  });
+  assert.deepEqual(laterAssembly.items, ordered);
+  assert.equal(laterAssembly.items[0], firstAssembly.items[0]);
+  assert.equal(laterAssembly.items[1], firstAssembly.items[1]);
+
+  await assert.rejects(
+    broker.assembleAgentContext({
+      turnId: "turn.lifecycle.rebound",
+      agentRequestId: "agent.lifecycle.first",
+      orderedItemIds: ordered.map((item) => item.itemId),
+    }),
+    (error: unknown) => isCode(error, "conflict"),
+  );
+  await assert.rejects(
+    broker.assembleAgentContext({
+      turnId: "turn.lifecycle.later",
+      agentRequestId: "agent.lifecycle.other",
+      orderedItemIds: ordered.map((item) => item.itemId),
+    }),
+    (error: unknown) => isCode(error, "conflict"),
+  );
+
+  const empty = await broker.assembleAgentContext({
+    turnId: "turn.lifecycle.empty",
+    agentRequestId: "agent.lifecycle.empty",
+    orderedItemIds: [],
+  });
+  assert.deepEqual(empty.items, []);
+  assert.deepEqual(empty.serializedValues, []);
+  assert.equal(empty.utf8Text, "");
+  assert.equal(empty.utf8ByteLength, 0);
+  assert.deepEqual(empty.manifest.orderedItemIds, []);
+  assert.deepEqual(empty.manifest.entries, []);
+});
+
+test("serializes release and assembly races without exposing partial context", async () => {
+  const source = new MutableSource(Buffer.from("serialized source", "utf8"));
+  let releaseMetadata!: () => void;
+  const metadataGate = new Promise<void>((resolve) => {
+    releaseMetadata = resolve;
+  });
+  let metadataEntered!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    metadataEntered = resolve;
+  });
+  source.metadataGate = metadataGate;
+  source.metadataEntered = metadataEntered;
+  const broker = createBroker({ source, releasePolicy: releasePolicy("allow") });
+
+  const release = broker.releaseSource({
+    turnId: "turn.race.release-first",
+    sourceId: source.descriptor.sourceId,
+    sourceVersion: 1,
+    request: { key: "record" },
+    maximumBytes: 1024,
+    reason: "task.context",
+    signal: new AbortController().signal,
+  });
+  await entered;
+  let assemblySettled = false;
+  const assembly = broker
+    .assembleAgentContext({
+      turnId: "turn.race.release-first",
+      agentRequestId: "agent.race.release-first",
+      orderedItemIds: [],
+    })
+    .then((value) => {
+      assemblySettled = true;
+      return value;
+    });
+  await Promise.resolve();
+  assert.equal(assemblySettled, false);
+  releaseMetadata();
+  const released = await release;
+  const assembled = await assembly;
+  assert.equal(released.status, "released");
+  assert.deepEqual(assembled.items, []);
+
+  const sourceCalls = source.metadataCalls;
+  const assemblyFirst = broker.assembleAgentContext({
+    turnId: "turn.race.assembly-first",
+    agentRequestId: "agent.race.assembly-first",
+    orderedItemIds: [],
+  });
+  const lateRelease = broker.releaseSource({
+    turnId: "turn.race.assembly-first",
+    sourceId: source.descriptor.sourceId,
+    sourceVersion: 1,
+    request: { key: "record" },
+    maximumBytes: 1024,
+    reason: "task.context",
+    signal: new AbortController().signal,
+  });
+  await assemblyFirst;
+  await assert.rejects(
+    lateRelease,
+    (error: unknown) => isCode(error, "conflict"),
+  );
+  assert.equal(source.metadataCalls, sourceCalls);
 });
 
 test("denies truncated prefixes before a partial secret can become provider context", async () => {
@@ -857,6 +1156,7 @@ test("denies truncated prefixes before a partial secret can become provider cont
     signal: new AbortController().signal,
   });
   assert.equal(result.status, "denied");
+  assert.equal(result.error.code, "policy_denied");
   assert.equal(result.manifest.reason, "context.release.truncated_denied");
   assert.equal(result.manifest.truncated, true);
   const evidence = canonicalize(result.manifest);
@@ -919,6 +1219,7 @@ test("denies unsupported media before open and invalid text after bounded open",
     signal: new AbortController().signal,
   });
   assert.equal(unsupported.status, "denied");
+  assert.equal(unsupported.error.code, "policy_denied");
   assert.equal(unsupported.manifest.reason, "unsupported_media");
   assert.equal(binaryMedia.openCalls, 0);
 
@@ -990,9 +1291,9 @@ test("redacts raw, percent, base64, escaped, filename, search, snippet, and spli
   assert.equal(artifacts.includes(keySecret.slice(0, keyHalf)), false);
   assert.equal(artifacts.includes(keySecret.slice(keyHalf)), false);
   assert.match(released.item.serializedValue, /\[REDACTED:(?:api_token|high_entropy_token):/u);
-  const assembly = broker.assembleAgentContext({
+  const assembly = await broker.assembleAgentContext({
     turnId: "turn.canary",
-    providerRequestId: "provider.request.1",
+    agentRequestId: "agent.request.1",
     orderedItemIds: [released.item.itemId],
   });
   assert.equal(assembly.utf8Text, released.item.serializedValue);
@@ -1051,11 +1352,20 @@ test("uses one random run correlation marker per broker and blocks secrets split
     assert.equal(result.status, "released");
     itemIds.push(result.item.itemId);
   }
-  assert.throws(
-    () =>
+  await assert.rejects(
+    async () =>
       allowing.assembleAgentContext({
         turnId: "turn.split",
-        providerRequestId: "provider.request.split",
+        agentRequestId: "agent.request.split",
+        orderedItemIds: itemIds,
+      }),
+    (error: unknown) => isCode(error, "policy_denied"),
+  );
+  await assert.rejects(
+    async () =>
+      allowing.assembleAgentContext({
+        turnId: "turn.split.later",
+        agentRequestId: "agent.request.split.later",
         orderedItemIds: itemIds,
       }),
     (error: unknown) => isCode(error, "policy_denied"),
@@ -1099,11 +1409,11 @@ test("blocks percent, base64, escaped, and key-value canaries split across items
       assert.equal(result.status, "released");
       itemIds.push(result.item.itemId);
     }
-    assert.throws(
-      () =>
+    await assert.rejects(
+      async () =>
         broker.assembleAgentContext({
           turnId: "turn.encoded-split",
-          providerRequestId: "provider.encoded-split",
+          agentRequestId: "agent.encoded-split",
           orderedItemIds: itemIds,
         }),
       (error: unknown) => isCode(error, "policy_denied"),
@@ -1181,6 +1491,8 @@ class MutableSource implements BrokerContextSource {
   readonly mediaType: string;
   metadataCalls = 0;
   openCalls = 0;
+  metadataGate: Promise<void> | null = null;
+  metadataEntered: (() => void) | null = null;
   openMutation: ((opened: OpenedContextResource) => OpenedContextResource) | null = null;
 
   constructor(bytes: Uint8Array, mediaType = "text/plain") {
@@ -1203,6 +1515,8 @@ class MutableSource implements BrokerContextSource {
     request: NormalizedResourceRequest,
   ): Promise<ContextResourceMetadata> {
     this.metadataCalls += 1;
+    this.metadataEntered?.();
+    await this.metadataGate;
     return Object.freeze({
       schemaVersion: CONTRACT_SCHEMA_VERSION,
       sourceId: request.sourceId,

@@ -9,8 +9,18 @@ export type {
 export { ContextSourceRegistry } from "./context-source-registry.js";
 export { BrokerContextSourceRegistry } from "./broker-source-registry.js";
 export { ContextBroker } from "./context-broker.js";
-export { createContextBrokerIntegration } from "./integration.js";
-export type { ContextBrokerIntegration } from "./integration.js";
+export {
+  captureContextBrokerIntegration,
+  captureContextBrokerIntegrationFactory,
+  createContextBrokerIntegration,
+  createContextBrokerIntegrationFactory,
+} from "./integration.js";
+export type {
+  ContextBrokerIntegration,
+  ContextBrokerIntegrationFactory,
+  ContextBrokerIntegrationFactoryOptions,
+  ContextBrokerIntegrationFactoryRequest,
+} from "./integration.js";
 export {
   CONTEXT_POLICY_ATTRIBUTE_CATALOG,
   MEMORY_POLICY_ATTRIBUTE_CATALOG,
@@ -23,6 +33,8 @@ export type {
   CapabilityOutputReleaseRequest,
   ContextBudgetLimits,
   ContextBudgetUsage,
+  ContextBrokerConfigurationDescriptor,
+  ContextBrokerIntegrationDescriptor,
   ContextContentDecision,
   ContextContentPolicyInput,
   ContextManifest,

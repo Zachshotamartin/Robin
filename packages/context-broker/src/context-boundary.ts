@@ -1,4 +1,5 @@
 import type {
+  DomainError,
   JsonObject,
   JsonValue,
   PolicyVersionId,
@@ -226,9 +227,10 @@ export interface ContextManifestEntry {
   readonly releasePolicyId: string;
   readonly releasePolicyVersion: number;
   readonly releasePolicyContentHash: string;
-  readonly policyCatalogId: string;
-  readonly policyCatalogVersion: number;
-  readonly policyCatalogContentHash: string;
+  /** Null only when a safe denial occurs before source policy metadata exists. */
+  readonly policyCatalogId: string | null;
+  readonly policyCatalogVersion: number | null;
+  readonly policyCatalogContentHash: string | null;
   readonly reason: string;
   readonly promptInjectionTags: readonly PromptInjectionTag[];
   readonly truncated: boolean;
@@ -242,6 +244,7 @@ export interface ReleasedContextResult {
 
 export interface DeniedContextResult {
   readonly status: "denied";
+  readonly error: DomainError;
   readonly manifest: ContextManifestEntry;
 }
 
@@ -269,7 +272,8 @@ export interface CapabilityOutputReleaseRequest {
 
 export interface AgentContextAssemblyRequest {
   readonly turnId: string;
-  readonly providerRequestId: string | null;
+  /** Globally unique downstream agent request identity, normally an attempt ID. */
+  readonly agentRequestId: string;
   readonly orderedItemIds: readonly string[];
 }
 
@@ -277,7 +281,7 @@ export interface ContextManifest {
   readonly schemaVersion: 1;
   readonly runId: string;
   readonly turnId: string;
-  readonly providerRequestId: string | null;
+  readonly agentRequestId: string;
   readonly policySnapshotId: PolicyVersionId;
   readonly releasePolicyId: string;
   readonly releasePolicyVersion: number;
@@ -291,12 +295,34 @@ export interface ContextManifest {
 
 export interface AgentContextAssembly {
   readonly schemaVersion: 1;
+  /** Exact broker-owned values that passed the final aggregate checks. */
+  readonly items: readonly ReleasedContextItem[];
   readonly serializedValues: readonly string[];
   /** Newline-delimited exact serializedValues; every value is canonical JSON. */
   readonly utf8Text: string;
   readonly utf8ByteLength: number;
   readonly manifest: ContextManifest;
 }
+
+/** Immutable facts a runtime uses to validate one run-owned broker boundary. */
+export interface ContextBrokerIntegrationDescriptor {
+  readonly schemaVersion: 1;
+  readonly runId: string;
+  readonly policySnapshotId: PolicyVersionId;
+  readonly releasePolicyId: string;
+  readonly releasePolicyVersion: number;
+  readonly releasePolicyContentHash: string;
+  readonly sourceDescriptors: readonly ContextSourceDescriptor[];
+  readonly budgets: ContextBudgetLimits;
+  /** Hash of every enforcement-relevant captured factory option. */
+  readonly configurationContentHash: string;
+}
+
+/** Run-independent pins exposed by a recognized integration factory. */
+export type ContextBrokerConfigurationDescriptor = Omit<
+  ContextBrokerIntegrationDescriptor,
+  "runId"
+>;
 
 export interface ContextBudgetUsage {
   readonly runAttempts: number;
