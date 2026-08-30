@@ -1,7 +1,7 @@
 export { SynchronousRuntimeHost } from "./runtime-host.js";
 export type {
   InstalledAgentDriver,
-  InstalledPhaseAPolicy,
+  InstalledPolicy,
   RuntimeContextPlanItem,
   RuntimeContextPlanner,
   RuntimeHostClock,

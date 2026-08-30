@@ -7,6 +7,7 @@ import type {
 } from "@guard/agent-driver";
 import type {
   CapabilityAdvertisement,
+  EvaluatedCapabilityAction,
   PreparedCapabilityAction,
 } from "@guard/capability-gateway";
 import type {
@@ -20,6 +21,7 @@ import {
   CONTRACT_SCHEMA_VERSION,
   ActionIdKind,
   AgentAttemptIdKind,
+  ApprovalIdKind,
   DriverProposalIdKind,
   EventIdKind,
   PolicyVersionIdKind,
@@ -63,6 +65,7 @@ import type {
 } from "@guard/contracts";
 import { decide, evolve, planEffects, replay } from "@guard/runtime";
 import type { RunIntent, RunState, RuntimeCommand } from "@guard/runtime";
+import { createPolicySnapshotManifest } from "@guard/policy-engine";
 
 import type {
   RuntimeContextPlanItem,
@@ -88,6 +91,11 @@ interface PlannedContextRead {
   readonly request: NormalizedContextRequest;
   readonly budget: ContextReadBudget;
   released: boolean;
+}
+
+interface EvaluatedActionOwnership {
+  readonly prepared: PreparedCapabilityAction;
+  readonly evaluated: EvaluatedCapabilityAction;
 }
 
 interface BoundContextSource {
@@ -117,10 +125,15 @@ interface CapturedOptions {
   >;
   readonly capabilityGateway: Pick<
     SynchronousRuntimeHostOptions["capabilityGateway"],
-    "normalize" | "execute"
+    "normalize" | "evaluate" | "execute"
   >;
   readonly contextPlanner: Pick<SynchronousRuntimeHostOptions["contextPlanner"], "plan">;
-  readonly phaseAPolicy: SynchronousRuntimeHostOptions["phaseAPolicy"];
+  readonly installedPolicy: {
+    readonly componentId: string;
+    readonly componentVersion: number;
+    readonly policyVersionId: PolicyVersionId;
+    readonly snapshotManifest: JsonObject;
+  };
   readonly normalizationSubject: JsonObject;
   readonly normalizationEnvironment: JsonObject;
   readonly clock: Pick<SynchronousRuntimeHostOptions["clock"], "now">;
@@ -178,7 +191,7 @@ export class SynchronousRuntimeHost {
   #plannedContext = new Map<string, PlannedContextRead>();
   #releasedContext: ContentBlock[] = [];
   #releasedObservations: Observation[] = [];
-  #preparedActions = new Map<ActionId, PreparedCapabilityAction>();
+  #evaluatedActions = new Map<ActionId, EvaluatedActionOwnership>();
   #evidence = new Map<string, EvidenceEntry>();
   #usedEventIds = new Set<EventId>();
   #usedContextRequestIds = new Set<string>();
@@ -200,12 +213,12 @@ export class SynchronousRuntimeHost {
       "installed driver",
     );
     validateInstalledIdentity(
-      captured.phaseAPolicy.componentId,
-      captured.phaseAPolicy.componentVersion,
-      "Phase-A policy",
+      captured.installedPolicy.componentId,
+      captured.installedPolicy.componentVersion,
+      "installed policy",
     );
-    if (!PolicyVersionIdKind.is(captured.phaseAPolicy.policyVersionId)) {
-      throw invalidInput("The Phase-A policy version identifier is invalid.");
+    if (!PolicyVersionIdKind.is(captured.installedPolicy.policyVersionId)) {
+      throw invalidInput("The installed policy version identifier is invalid.");
     }
   }
 
@@ -247,7 +260,10 @@ export class SynchronousRuntimeHost {
     await this.#appendIntent("start_run", "RunStarted", { startedAt });
     await this.#drainCommands();
 
-    if (!TERMINAL_STATUSES.has(this.#state.status)) {
+    if (
+      !TERMINAL_STATUSES.has(this.#state.status) &&
+      this.#state.status !== "waiting_for_approval"
+    ) {
       if (this.#state.outstandingCommand !== null) {
         throw invariant("The dispatcher stopped with consequential work outstanding.");
       }
@@ -292,12 +308,20 @@ export class SynchronousRuntimeHost {
     ) {
       throw invalidInput("The installed driver does not match the exact pinned profile identity.");
     }
-    const policy = this.#options.phaseAPolicy;
+    const policy = this.#options.installedPolicy;
     if (
       profile.policyProfile.componentId !== policy.componentId ||
       profile.policyProfile.componentVersion !== policy.componentVersion
     ) {
-      throw invalidInput("The installed Phase-A policy does not match the pinned profile identity.");
+      throw invalidInput("The installed policy does not match the pinned profile identity.");
+    }
+    if (
+      canonicalize(profile.policyProfile.configuration) !==
+      canonicalize(policy.snapshotManifest)
+    ) {
+      throw invalidInput(
+        "The pinned policy profile does not match the compiler-owned snapshot manifest.",
+      );
     }
 
     assertNoDuplicateComponentIdentities(profile.contextSources, "context source");
@@ -591,9 +615,11 @@ export class SynchronousRuntimeHost {
         await this.#finalize(command);
         return;
       case "CreateApprovalRequest":
+        await this.#createApprovalRequest(command);
+        return;
       case "CancelCapabilityAction":
         throw invariant(
-          "The Phase-A pure-or-deny dispatcher received an unreachable command type.",
+          "The synchronous dispatcher received an unsupported cancellation command.",
         );
       default:
         return assertNever(command.commandType);
@@ -974,7 +1000,7 @@ export class SynchronousRuntimeHost {
       );
       return;
     }
-    if (this.#preparedActions.has(actionId)) {
+    if (this.#evaluatedActions.has(actionId)) {
       await this.#failRun(conflict("The runtime ID factory reused an action identifier."));
       return;
     }
@@ -1008,7 +1034,6 @@ export class SynchronousRuntimeHost {
       await this.#failRun(invariant("The capability gateway returned a mismatched action hash."));
       return;
     }
-    this.#preparedActions.set(actionId, prepared);
     await this.#append(
       this.#makeEvent(
         "ActionNormalized",
@@ -1018,32 +1043,41 @@ export class SynchronousRuntimeHost {
       ),
     );
 
-    const allow = prepared.action.sideEffectClass === "none";
+    let evaluated: EvaluatedCapabilityAction;
+    try {
+      evaluated = this.#options.capabilityGateway.evaluate(prepared);
+      assertPolicyDecisionMatchesManifest(
+        evaluated,
+        this.#options.installedPolicy,
+      );
+    } catch (error: unknown) {
+      await this.#failRun(
+        safeError(error, "policy_denied", "Pinned policy evaluation failed closed."),
+      );
+      return;
+    }
+    this.#evaluatedActions.set(actionId, Object.freeze({ prepared, evaluated }));
     await this.#append(
       this.#makeEvent(
         "PolicyEvaluated",
         {
           actionId,
-          policyVersionId: this.#options.phaseAPolicy.policyVersionId,
-          decision: allow ? "allow" : "deny",
-          trace: {
-            policyComponentId: this.#options.phaseAPolicy.componentId,
-            policyComponentVersion: this.#options.phaseAPolicy.componentVersion,
-            rule: "phase_a_side_effect_class_none",
-            sideEffectClass: prepared.action.sideEffectClass,
-          },
+          policyVersionId: evaluated.decision.policyVersionId,
+          decision: evaluated.decision.effect,
+          trace: evaluated.decision.trace,
         },
         RUNTIME_ACTOR,
       ),
     );
 
-    if (!allow) {
+    if (evaluated.decision.effect === "deny") {
       const error = createDomainError({
         code: "policy_denied",
-        message: "Phase A permits only capabilities with side-effect class none.",
+        message: "The pinned policy snapshot denied this capability action.",
         details: {
           actionId,
-          sideEffectClass: prepared.action.sideEffectClass,
+          policyVersionId: evaluated.decision.policyVersionId,
+          winningPolicyName: evaluated.decision.winningPolicyName,
         },
       });
       await this.#append(
@@ -1053,15 +1087,59 @@ export class SynchronousRuntimeHost {
     }
   }
 
+  async #createApprovalRequest(command: RuntimeCommand): Promise<void> {
+    const actionId = command.payload["actionId"];
+    const current = this.#state.currentAction;
+    const ownership = ActionIdKind.is(actionId)
+      ? this.#evaluatedActions.get(actionId)
+      : undefined;
+    if (
+      !ActionIdKind.is(actionId) ||
+      current === null ||
+      current.phase !== "approval_required" ||
+      current.normalizedAction?.actionId !== actionId ||
+      ownership === undefined ||
+      ownership.evaluated.decision.effect !== "require_approval"
+    ) {
+      throw invariant("An approval request requires the exact approval-gated action.");
+    }
+    const approvalId = this.#options.ids.nextApprovalId();
+    if (!ApprovalIdKind.is(approvalId)) {
+      throw invalidInput("The runtime ID factory returned an invalid approval identifier.");
+    }
+    const preconditionHash = canonicalSha256Hex({
+      schemaVersion: CONTRACT_SCHEMA_VERSION,
+      action: ownership.prepared.action,
+      policyVersionId: ownership.evaluated.decision.policyVersionId,
+      policyContentHash: this.#options.installedPolicy.snapshotManifest[
+        "policyContentHash"
+      ]!,
+      preconditions: ownership.prepared.action.preconditions,
+    });
+    await this.#append(
+      this.#makeEvent(
+        "ApprovalRequested",
+        { approvalId, actionId, preconditionHash },
+        RUNTIME_ACTOR,
+        command.causedByEventId,
+      ),
+    );
+  }
+
   async #executeAction(command: RuntimeCommand): Promise<void> {
     const actionId = command.payload["actionId"];
     if (!ActionIdKind.is(actionId)) {
       throw invariant("A capability execution command has an invalid action ID.");
     }
-    const prepared = this.#preparedActions.get(actionId);
-    if (prepared === undefined || this.#state.currentAction?.phase !== "allowed") {
-      throw invariant("Capability execution requires the exact prepared allowed action.");
+    const ownership = this.#evaluatedActions.get(actionId);
+    if (
+      ownership === undefined ||
+      this.#state.currentAction?.phase !== "allowed" ||
+      ownership.evaluated.decision.effect !== "allow"
+    ) {
+      throw invariant("Capability execution requires the exact evaluated allowed action.");
     }
+    const { prepared, evaluated } = ownership;
 
     const startedAt = this.#now();
     await this.#append(
@@ -1080,7 +1158,7 @@ export class SynchronousRuntimeHost {
       readonly agent: JsonObject;
     };
     try {
-      executionResult = await this.#options.capabilityGateway.execute(prepared, {
+      executionResult = await this.#options.capabilityGateway.execute(evaluated, {
         signal: controller.signal,
       });
     } catch (error: unknown) {
@@ -1720,6 +1798,44 @@ function parseDriverEvent(
   }
 }
 
+function assertPolicyDecisionMatchesManifest(
+  evaluated: EvaluatedCapabilityAction,
+  installed: CapturedOptions["installedPolicy"],
+): void {
+  const decision = evaluated.decision;
+  const manifest = installed.snapshotManifest;
+  let actual: JsonObject;
+  let expected: JsonObject;
+  try {
+    actual = snapshotBoundaryJsonObject({
+      schemaVersion: 1,
+      policyVersionId: decision.policyVersionId,
+      languageVersion: decision.trace["languageVersion"],
+      policyContentHash: decision.trace["policyContentHash"],
+      defaultEffect: decision.trace["defaultEffect"],
+      attributeCatalogs: decision.trace["attributeCatalogs"],
+    });
+    expected = snapshotBoundaryJsonObject({
+      schemaVersion: manifest["schemaVersion"],
+      policyVersionId: manifest["policyVersionId"],
+      languageVersion: manifest["languageVersion"],
+      policyContentHash: manifest["policyContentHash"],
+      defaultEffect: manifest["defaultEffect"],
+      attributeCatalogs: manifest["attributeCatalogs"],
+    });
+  } catch {
+    throw invariant("The gateway policy decision has no valid snapshot manifest.");
+  }
+  if (
+    decision.policyVersionId !== installed.policyVersionId ||
+    canonicalize(actual) !== canonicalize(expected)
+  ) {
+    throw invariant(
+      "The gateway policy decision does not match the run-pinned snapshot manifest.",
+    );
+  }
+}
+
 function captureOptions(value: unknown): CapturedOptions {
   const fields = inspectExactDataFields(
     value,
@@ -1731,7 +1847,7 @@ function captureOptions(value: unknown): CapturedOptions {
       "capabilityPacks",
       "capabilityGateway",
       "contextPlanner",
-      "phaseAPolicy",
+      "installedPolicy",
       "normalizationSubject",
       "normalizationEnvironment",
       "clock",
@@ -1777,18 +1893,27 @@ function captureOptions(value: unknown): CapturedOptions {
   );
 
   const policy = inspectExactDataFields(
-    fields["phaseAPolicy"],
-    ["componentId", "componentVersion", "policyVersionId"],
+    fields["installedPolicy"],
+    ["componentId", "componentVersion", "snapshot"],
     [],
-    "Phase-A policy binding",
+    "Installed policy binding",
   );
+  let manifest: JsonObject;
+  try {
+    manifest = createPolicySnapshotManifest(
+      policy["snapshot"] as SynchronousRuntimeHostOptions["installedPolicy"]["snapshot"],
+    );
+  } catch {
+    throw invalidInput("The installed policy snapshot was not produced by the compiler.");
+  }
   const policySnapshot = safeSnapshot(
     {
       componentId: policy["componentId"],
       componentVersion: policy["componentVersion"],
-      policyVersionId: policy["policyVersionId"],
+      policyVersionId: manifest["policyVersionId"],
+      snapshotManifest: manifest,
     },
-    "The Phase-A policy binding is invalid.",
+    "The installed policy binding is invalid.",
   );
 
   const captured: CapturedOptions = {
@@ -1854,6 +1979,9 @@ function captureOptions(value: unknown): CapturedOptions {
       normalize: bindMethod<
         SynchronousRuntimeHostOptions["capabilityGateway"]["normalize"]
       >(capabilityGateway, "normalize", "capability gateway"),
+      evaluate: bindMethod<
+        SynchronousRuntimeHostOptions["capabilityGateway"]["evaluate"]
+      >(capabilityGateway, "evaluate", "capability gateway"),
       execute: bindMethod<
         SynchronousRuntimeHostOptions["capabilityGateway"]["execute"]
       >(capabilityGateway, "execute", "capability gateway"),
@@ -1865,10 +1993,11 @@ function captureOptions(value: unknown): CapturedOptions {
         "context planner",
       ),
     }),
-    phaseAPolicy: Object.freeze({
+    installedPolicy: Object.freeze({
       componentId: policySnapshot["componentId"] as string,
       componentVersion: policySnapshot["componentVersion"] as number,
       policyVersionId: policySnapshot["policyVersionId"] as PolicyVersionId,
+      snapshotManifest: policySnapshot["snapshotManifest"] as JsonObject,
     }),
     normalizationSubject: safeSnapshot(
       fields["normalizationSubject"],
@@ -1906,6 +2035,9 @@ function captureOptions(value: unknown): CapturedOptions {
       nextActionId: bindMethod<
         SynchronousRuntimeHostOptions["ids"]["nextActionId"]
       >(ids, "nextActionId", "runtime ID factory"),
+      nextApprovalId: bindMethod<
+        SynchronousRuntimeHostOptions["ids"]["nextApprovalId"]
+      >(ids, "nextApprovalId", "runtime ID factory"),
       nextContextRequestId: bindMethod<
         SynchronousRuntimeHostOptions["ids"]["nextContextRequestId"]
       >(
@@ -2256,7 +2388,12 @@ function capabilityActor(id: string): ActorIdentity {
 
 function safeError(
   error: unknown,
-  code: "invalid_input" | "action_failed" | "driver_failed" | "infrastructure_failed",
+  code:
+    | "invalid_input"
+    | "action_failed"
+    | "driver_failed"
+    | "infrastructure_failed"
+    | "policy_denied",
   message: string,
 ): DomainError {
   try {

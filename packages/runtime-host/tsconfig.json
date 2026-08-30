@@ -12,6 +12,7 @@
     { "path": "../agent-driver" },
     { "path": "../context-broker" },
     { "path": "../capability-gateway" },
+    { "path": "../policy-engine" },
     { "path": "../profile-registry" }
   ]
 }

@@ -27,6 +27,7 @@
     "@guard/contracts": "0.0.0",
     "@guard/event-store": "0.0.0",
     "@guard/profile-registry": "0.0.0",
+    "@guard/policy-engine": "0.0.0",
     "@guard/runtime": "0.0.0"
   }
 }

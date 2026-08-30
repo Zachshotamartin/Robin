@@ -32,6 +32,7 @@ import {
 import type {
   ActionId,
   AgentAttemptId,
+  ApprovalId,
   EventId,
   GenericEventEnvelope,
   JsonObject,
@@ -43,6 +44,12 @@ import type {
 import { InMemoryEventStore } from "@guard/event-store";
 import { InMemoryTaskProfileRegistry } from "@guard/profile-registry";
 import { replay } from "@guard/runtime";
+import {
+  compilePolicySnapshot,
+  createPinnedPolicyEvaluator,
+  createPolicySnapshotManifest,
+  type PolicySnapshot,
+} from "@guard/policy-engine";
 
 import { SynchronousRuntimeHost } from "./index.js";
 import type {
@@ -59,6 +66,30 @@ const POLICY_COMPONENT_ID = "fixture.phase-a-pure-only";
 const CONTEXT_COMPONENT_ID = "fixture.context";
 const PROPOSAL_ID = id("dpr", 700);
 const POLICY_VERSION_ID = id("pol", 800) as PolicyVersionId;
+const POLICY_SOURCE = `policy "deny-local-effects" priority 100 {
+  when action.side_effect != "none"
+  deny
+  reason "Fixture local effects are denied."
+}
+
+policy "allow-pure-effects" priority 50 {
+  when action.side_effect == "none"
+  allow
+  reason "Fixture pure effects are allowed."
+}
+`;
+const APPROVAL_POLICY_SOURCE = `policy "approve-local-effects" priority 100 {
+  when action.side_effect != "none"
+  require_approval
+  reason "Fixture local effects require approval."
+}
+
+policy "allow-pure-effects" priority 50 {
+  when action.side_effect == "none"
+  allow
+  reason "Fixture pure effects are allowed."
+}
+`;
 
 interface Counters {
   driverCalls: number;
@@ -80,6 +111,7 @@ interface FixtureOptions {
   readonly sideEffectClass?: "none" | "local_reversible";
   readonly handlerFails?: boolean;
   readonly contextFails?: boolean;
+  readonly approvalRequired?: boolean;
   readonly program?: DriverProgram;
   readonly limits?: SynchronousRuntimeHostOptions["limits"];
   readonly ids?: RuntimeHostIdFactory;
@@ -174,6 +206,7 @@ class DeterministicIds implements RuntimeHostIdFactory {
   #context = 0;
   #content = 0;
   #observation = 0;
+  #approval = 400;
 
   public nextRunId(): RunId {
     return id("run", 1) as RunId;
@@ -191,6 +224,11 @@ class DeterministicIds implements RuntimeHostIdFactory {
   public nextActionId(): ActionId {
     this.#action += 1;
     return id("act", this.#action) as ActionId;
+  }
+
+  public nextApprovalId(): ApprovalId {
+    this.#approval += 1;
+    return id("apr", this.#approval) as ApprovalId;
   }
 
   public nextContextRequestId(): string {
@@ -261,6 +299,17 @@ test("provider-free context/action/outcome run is exact, command-barriered, and 
   assert.equal(normalized.causationId, proposal.eventId);
   const started = findEvent(execution.history, "AgentDriverStarted");
   assert.match(started.payload.driverFingerprint, /^[0-9a-f]{64}$/u);
+  const pinned = findEvent(execution.history, "TaskProfilePinned");
+  assert.equal(
+    pinned.payload.taskProfile.policyProfile.configuration["policyVersionId"],
+    POLICY_VERSION_ID,
+  );
+  assert.match(
+    String(
+      pinned.payload.taskProfile.policyProfile.configuration["policyContentHash"],
+    ),
+    /^[0-9a-f]{64}$/u,
+  );
 
   const serialized = canonicalize(execution.history);
   assert.equal(serialized.includes(RAW_CANARY), false);
@@ -290,7 +339,7 @@ test("a zero-context outcome completes through the same reducer without source c
   assert.equal(eventTypes(execution.history).includes("ActionProposed"), false);
 });
 
-test("Phase-A policy denial never dispatches the handler and releases an exact denial", async () => {
+test("pinned policy denial never dispatches the handler and releases an exact denial", async () => {
   const fixture = createFixture({
     withContext: false,
     sideEffectClass: "local_reversible",
@@ -309,6 +358,30 @@ test("Phase-A policy denial never dispatches the handler and releases an exact d
   const observation = findEvent(execution.history, "ObservationReleased");
   assert.equal(observation.payload.observation.status, "denied");
   assert.equal(observation.payload.observation.error?.errorId, denied.payload.error.errorId);
+});
+
+test("approval policy routes to a replay-visible pending request without execution", async () => {
+  const fixture = createFixture({
+    withContext: false,
+    sideEffectClass: "local_reversible",
+    approvalRequired: true,
+  });
+  const execution = await fixture.host.run(fixture.objective);
+
+  assert.equal(execution.state.status, "waiting_for_approval");
+  assert.equal(execution.state.pendingApproval?.status, "requested");
+  assert.equal(fixture.counters.normalizations, 1);
+  assert.equal(fixture.counters.executions, 0);
+  assert.equal(fixture.counters.releases, 0);
+  assert.equal(eventTypes(execution.history).includes("ActionStarted"), false);
+  assert.equal(eventTypes(execution.history).includes("ObservationReleased"), false);
+  const policy = findEvent(execution.history, "PolicyEvaluated");
+  assert.equal(policy.payload.decision, "require_approval");
+  const requested = findEvent(execution.history, "ApprovalRequested");
+  assert.equal(requested.payload.actionId, policy.payload.actionId);
+  assert.match(requested.payload.preconditionHash, /^[0-9a-f]{64}$/u);
+  const replayed = await fixture.host.replayRun(execution.runId);
+  assert.equal(canonicalize(replayed.state), canonicalize(execution.state));
 });
 
 test("handler failure is recorded, safely observed, and can be followed by a valid outcome", async () => {
@@ -437,7 +510,7 @@ test("composition is captured once and ignores post-construction mutation or acc
     program: outcomeOnlyProgram,
     afterHostConstruction(options) {
       (options.installedDriver as { componentId: string }).componentId = "mutated.driver";
-      (options.phaseAPolicy as { componentId: string }).componentId = "mutated.policy";
+      (options.installedPolicy as { componentId: string }).componentId = "mutated.policy";
       (options.normalizationSubject as { principal: string }).principal = "mutated-user";
       Object.defineProperty(options.clock, "now", {
         configurable: true,
@@ -511,7 +584,15 @@ function createFixture(options: FixtureOptions = {}): Fixture {
     executionObservedInsideStream: [],
   };
   const withContext = options.withContext ?? false;
-  const profile = profileFixture(withContext);
+  const policySnapshot = compileFixturePolicy(
+    options.approvalRequired === true
+      ? APPROVAL_POLICY_SOURCE
+      : POLICY_SOURCE,
+  );
+  const profile = profileFixture(
+    withContext,
+    createPolicySnapshotManifest(policySnapshot),
+  );
   const objective = objectiveFixture(profile);
   const profileRegistry = new InMemoryTaskProfileRegistry();
   profileRegistry.register(profile);
@@ -541,7 +622,12 @@ function createFixture(options: FixtureOptions = {}): Fixture {
   const capabilityPacks = new CapabilityPackRegistry([
     capabilityPackFixture(counters, options),
   ]);
-  const gateway = new CapabilityGateway(capabilityPacks);
+  const gateway = new CapabilityGateway(
+    capabilityPacks,
+    createPinnedPolicyEvaluator(policySnapshot, {
+      secretCorrelationToken: "runtime-host-fixture-policy-token-0001",
+    }),
+  );
   const driver = new ProgrammedDriver(options.program ?? actionThenOutcomeProgram, counters);
   const eventStore = new InMemoryEventStore({ now: () => NOW });
 
@@ -569,13 +655,21 @@ function createFixture(options: FixtureOptions = {}): Fixture {
           : [];
       },
     },
-    phaseAPolicy: {
+    installedPolicy: {
       componentId: POLICY_COMPONENT_ID,
       componentVersion: 1,
-      policyVersionId: POLICY_VERSION_ID,
+      snapshot: policySnapshot,
     },
-    normalizationSubject: { principal: "fixture-user" },
-    normalizationEnvironment: { environment: "test" },
+    normalizationSubject: {
+      kind: "user",
+      principal: "fixture-user",
+    },
+    normalizationEnvironment: {
+      profileId: "fixture",
+      sandboxed: true,
+      networkProfile: "disabled",
+      trustLevel: "trusted_fixture",
+    },
     clock: { now: () => NOW },
     ids: options.ids ?? new DeterministicIds(),
     ...(options.limits === undefined ? {} : { limits: options.limits }),
@@ -629,8 +723,13 @@ function capabilityPackFixture(
           counters.normalizations += 1;
           return {
             normalizedInput: input,
-            resource: { kind: "fixture" },
-            request: { operation: OPERATION_ID },
+            resource: {
+              scheme: "memory",
+              sourceId: CONTEXT_COMPONENT_ID,
+              classification: "internal",
+              kind: "fixture",
+            },
+            request: { operation: OPERATION_ID, intent: OPERATION_ID },
             preconditions: [],
           };
         },
@@ -657,7 +756,22 @@ function capabilityPackFixture(
   };
 }
 
-function profileFixture(withContext: boolean): TaskProfile {
+function compileFixturePolicy(source: string): PolicySnapshot {
+  const result = compilePolicySnapshot({
+    policyVersionId: POLICY_VERSION_ID,
+    source,
+    sourceId: "runtime-host-fixture.guard",
+    defaultEffect: "deny",
+  });
+  assert.equal(result.ok, true, result.ok ? "" : JSON.stringify(result.diagnostics));
+  if (!result.ok) throw new Error("unreachable fixture policy compile failure");
+  return result.snapshot;
+}
+
+function profileFixture(
+  withContext: boolean,
+  policyManifest: JsonObject,
+): TaskProfile {
   return {
     schemaVersion: CONTRACT_SCHEMA_VERSION,
     profileId: "fixture.generic-task",
@@ -699,7 +813,7 @@ function profileFixture(withContext: boolean): TaskProfile {
     policyProfile: {
       componentId: POLICY_COMPONENT_ID,
       componentVersion: 1,
-      configuration: {},
+      configuration: policyManifest,
     },
     outcomeSchema: {
       schemaId: "fixture.outcome",

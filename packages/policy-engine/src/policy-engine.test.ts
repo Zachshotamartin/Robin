@@ -19,6 +19,7 @@ import {
   compilePolicySnapshotSet,
   composePolicyAttributeCatalogs,
   conjunction,
+  createPolicySnapshotManifest,
   createPinnedPolicyEvaluator,
   createPolicyAttributeCatalog,
   disjunction,
@@ -135,6 +136,18 @@ test("compiles a canonical immutable snapshot bound to catalogs and default", ()
   assert.match(snapshot.contentHash, /^[0-9a-f]{64}$/u);
   assert.equal(Object.isFrozen(snapshot), true);
   assert.equal(Object.isFrozen(snapshot.policies), true);
+  assert.deepEqual(createPolicySnapshotManifest(snapshot), {
+    schemaVersion: 1,
+    policyVersionId: POLICY_ID,
+    languageVersion: "1",
+    policyContentHash: snapshot.contentHash,
+    defaultEffect: "deny",
+    attributeCatalogs: snapshot.attributeCatalogs.manifest,
+    sourceCount: 1,
+  });
+  assert.throws(() =>
+    createPolicySnapshotManifest(structuredClone(snapshot)),
+  );
 
   const crlf = compile(SECURITY_POLICY.replaceAll("\n", "\r\n"), POLICY_ID_2);
   assert.equal(crlf.contentHash, snapshot.contentHash);

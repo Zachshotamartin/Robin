@@ -3,6 +3,7 @@ import {
   canonicalSha256Hex,
   snapshotBoundaryJsonObject,
 } from "@guard/contracts";
+import type { JsonObject } from "@guard/contracts";
 import {
   GUARD_LANGUAGE_VERSION,
   formatGuardDocument,
@@ -387,6 +388,26 @@ export function assertCompiledPolicySnapshot(snapshot: PolicySnapshot): void {
   if (!COMPILED_SNAPSHOTS.has(snapshot)) {
     throw new TypeError("An immutable snapshot produced by this compiler is required.");
   }
+}
+
+/**
+ * Safe replay/profile projection of a compiler-owned snapshot. Canonical
+ * policy text and ASTs remain in the snapshot store; the manifest binds the
+ * complete semantics needed to prove which immutable policy a run selected.
+ */
+export function createPolicySnapshotManifest(
+  snapshot: PolicySnapshot,
+): JsonObject {
+  assertCompiledPolicySnapshot(snapshot);
+  return Object.freeze({
+    schemaVersion: 1,
+    policyVersionId: snapshot.policyVersionId,
+    languageVersion: snapshot.languageVersion,
+    policyContentHash: snapshot.contentHash,
+    defaultEffect: snapshot.defaultEffect,
+    attributeCatalogs: snapshot.attributeCatalogs.manifest,
+    sourceCount: snapshot.sources.length,
+  });
 }
 
 function checkExpression(

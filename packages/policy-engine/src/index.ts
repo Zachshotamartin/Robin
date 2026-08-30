@@ -17,6 +17,7 @@ export {
 export {
   compilePolicySnapshot,
   compilePolicySnapshotSet,
+  createPolicySnapshotManifest,
 } from "./compiler.js";
 export {
   conjunction,

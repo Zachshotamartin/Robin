@@ -1,11 +1,11 @@
 import type {
   ActionId,
   AgentAttemptId,
+  ApprovalId,
   EventId,
   GenericEventEnvelope,
   JsonObject,
   ObjectiveEnvelope,
-  PolicyVersionId,
   RunId,
   TaskProfile,
 } from "@guard/contracts";
@@ -15,6 +15,7 @@ import type { ContextSourceRegistry } from "@guard/context-broker";
 import type { EventStore } from "@guard/event-store";
 import type { TaskProfileRegistry } from "@guard/profile-registry";
 import type { RunState } from "@guard/runtime";
+import type { PolicySnapshot } from "@guard/policy-engine";
 
 export interface RuntimeHostClock {
   now(): string;
@@ -30,6 +31,7 @@ export interface RuntimeHostIdFactory {
   nextEventId(): EventId;
   nextAgentAttemptId(turn: number): AgentAttemptId;
   nextActionId(): ActionId;
+  nextApprovalId(): ApprovalId;
   nextContextRequestId(): string;
   nextContentBlockId(): string;
   nextObservationId(): string;
@@ -41,10 +43,10 @@ export interface InstalledAgentDriver {
   readonly driver: AgentDriver;
 }
 
-export interface InstalledPhaseAPolicy {
+export interface InstalledPolicy {
   readonly componentId: string;
   readonly componentVersion: number;
-  readonly policyVersionId: PolicyVersionId;
+  readonly snapshot: PolicySnapshot;
 }
 
 /** A task-neutral request for one exactly pinned context-source binding. */
@@ -82,7 +84,7 @@ export interface SynchronousRuntimeHostOptions {
   readonly capabilityPacks: CapabilityPackRegistry;
   readonly capabilityGateway: CapabilityGateway;
   readonly contextPlanner: RuntimeContextPlanner;
-  readonly phaseAPolicy: InstalledPhaseAPolicy;
+  readonly installedPolicy: InstalledPolicy;
   readonly normalizationSubject: JsonObject;
   readonly normalizationEnvironment: JsonObject;
   readonly clock: RuntimeHostClock;
