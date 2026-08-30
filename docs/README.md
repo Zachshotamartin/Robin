@@ -1,5 +1,15 @@
 # Documentation Index
 
+## Implemented Reference
+
+- [Event Model v1](event-model.md): Milestone A envelope fields, identifiers,
+  ordering, causation, event inventory, reducer lifecycle, legal intents,
+  command flow, replay behavior, schema evolution plan, and in-memory limits
+
+The repository root [README](../README.md) is the current implementation and
+quick-start snapshot. Milestone A is implemented; behavior assigned to
+Milestones B through H remains planned until its evidence gate passes.
+
 ## Source of Truth
 
 - [Build plan](BUILD_PLAN.md): product definition, architecture, scope, milestones, and definition of done
@@ -21,6 +31,9 @@
 ## Documentation Rules
 
 - Planned behavior must be labeled as planned until tests demonstrate it.
+- Current implementation claims must identify their milestone and must not
+  promote in-memory evidence into a durability, sandbox, approval, provider, or
+  daemon guarantee.
 - Security guarantees require a named enforcement point and adversarial evidence.
 - Task-profile, driver, model, source, capability, credential-metadata, event, policy, configuration, protocol, and RPC formats are versioned before release.
 - Architecture decisions that reverse an accepted plan choice receive an ADR under `docs/decisions/`.

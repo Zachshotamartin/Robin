@@ -75,6 +75,7 @@ test("general runtime and compatibility plans remain first-class documentation",
     "README.md",
     "docs/BUILD_PLAN.md",
     "docs/DEEP_AUDIT.md",
+    "docs/event-model.md",
     "docs/GLOSSARY.md",
     "docs/OPEN_QUESTIONS.md",
     "docs/GENERAL_RUNTIME_ARCHITECTURE.md",
@@ -95,6 +96,8 @@ test("general runtime and compatibility plans remain first-class documentation",
   const requirements = await readFile(path.join(repositoryRoot, "docs/PRODUCT_REQUIREMENTS.md"), "utf8");
 
   assert.match(readme, /general policy-enforced agent runtime/i);
+  assert.match(readme, /Milestone A[^\n]*complete/i);
+  assert.doesNotMatch(readme, /start of Phase 1/i);
   assert.match(buildPlan, /AgentDriver/);
   assert.match(buildPlan, /local-corpus research/i);
   assert.match(buildPlan, /Multi-provider and external-agent compatibility/);
