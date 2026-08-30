@@ -108,6 +108,14 @@ and replay fail closed on Windows because Node does not provide the required
 descendant process-tree containment there. This evidence isolation is not a
 claim about Robin's future coding-agent execution sandbox.
 
+Apple's `sandbox-exec` profiles cannot be nested. When the repository test suite
+is itself an R0 capture child, the 21 evidence-controller integration cases that
+would recursively launch another isolated capture are therefore reported as
+explicit skips; the five non-recursive schema/runtime cases still execute. The
+same 21 integration cases run without skips in ordinary local and hosted CI
+gates before capture. The generated R0 manifest attests the outer isolated gate
+commands, not a recursive self-attestation by the evidence controller.
+
 Process groups provide best-effort descendant termination, not a complete
 process-tree boundary: a child can create a new session and briefly outlive its
 original group. Robin's timeout watchdog destroys retained command pipes after

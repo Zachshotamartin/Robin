@@ -30,6 +30,13 @@ const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+// macOS sandbox-exec profiles do not nest. The enclosing evidence command
+// remains sandboxed; recursive controller integration cases run in full in CI
+// and direct local gates, and appear as explicit skips only during self-capture.
+const recursiveCaptureTest =
+  process.env.ROBIN_EVIDENCE_CAPTURE === "1"
+    ? (name, ...args) => test.skip(name, ...args)
+    : test;
 
 function gateManifestPath(root) {
   return path.join(root, "evidence", "manifests", "r0.json");
@@ -162,7 +169,7 @@ test("evidence binds the PATH-resolved Node runtime to its controller", () => {
   );
 });
 
-test("capture writes a validated manifest for the exact clean tested commit", async (t) => {
+recursiveCaptureTest("capture writes a validated manifest for the exact clean tested commit", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   const outputPath = gateManifestPath(root);
@@ -294,7 +301,7 @@ test("capture writes a validated manifest for the exact clean tested commit", as
   assert.equal(status, "?? evidence/manifests/r0.json\n");
 });
 
-test("capture rejects a dirty tree before executing commands", async (t) => {
+recursiveCaptureTest("capture rejects a dirty tree before executing commands", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   await writeJson(configPath, captureConfig());
@@ -314,7 +321,7 @@ test("capture rejects a dirty tree before executing commands", async (t) => {
   );
 });
 
-test("capture terminates a command that exceeds its bounded output stream", async (t) => {
+recursiveCaptureTest("capture terminates a command that exceeds its bounded output stream", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   const outputPath = gateManifestPath(root);
@@ -349,7 +356,7 @@ test("capture terminates a command that exceeds its bounded output stream", asyn
   await assert.rejects(stat(outputPath), /ENOENT/u);
 });
 
-test("capture audits source bytes independently of assume-unchanged index flags", async (t) => {
+recursiveCaptureTest("capture audits source bytes independently of assume-unchanged index flags", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   const outputPath = gateManifestPath(root);
@@ -373,7 +380,7 @@ test("capture audits source bytes independently of assume-unchanged index flags"
   await assert.rejects(readFile(outputPath, "utf8"), /ENOENT/u);
 });
 
-test("capture cannot overwrite a noncanonical repository file", async (t) => {
+recursiveCaptureTest("capture cannot overwrite a noncanonical repository file", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   const packageBefore = await readFile(path.join(root, "package.json"), "utf8");
@@ -397,7 +404,7 @@ test("capture cannot overwrite a noncanonical repository file", async (t) => {
   );
 });
 
-test("capture rejects an ignored config that is absent from the tested commit", async (t) => {
+recursiveCaptureTest("capture rejects an ignored config that is absent from the tested commit", async (t) => {
   const root = await createFixtureRepository(t);
   await writeFile(path.join(root, ".gitignore"), "ignored/\n", "utf8");
   await execFile("git", ["add", ".gitignore"], { cwd: root });
@@ -418,7 +425,7 @@ test("capture rejects an ignored config that is absent from the tested commit", 
   );
 });
 
-test("capture rejects ignored command-generated fixture and artifact paths", async (t) => {
+recursiveCaptureTest("capture rejects ignored command-generated fixture and artifact paths", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   await writeFile(path.join(root, ".gitignore"), "generated/\n", "utf8");
@@ -462,7 +469,7 @@ test("capture rejects ignored command-generated fixture and artifact paths", asy
   );
 });
 
-test("capture rejects a tracked config symlink before parsing it", async (t) => {
+recursiveCaptureTest("capture rejects a tracked config symlink before parsing it", async (t) => {
   const root = await createFixtureRepository(t);
   const realConfigPath = path.join(root, "capture-real.json");
   const linkedConfigPath = path.join(root, "capture-link.json");
@@ -485,7 +492,7 @@ test("capture rejects a tracked config symlink before parsing it", async (t) => 
   );
 });
 
-test(
+recursiveCaptureTest(
   "capture rejects a descriptor whose parent symlink aliases the output",
   { skip: process.platform === "win32" },
   async (t) => {
@@ -529,7 +536,7 @@ test(
   },
 );
 
-test(
+recursiveCaptureTest(
   "verification rejects a manifest reached through a parent symlink alias",
   { skip: process.platform === "win32" },
   async (t) => {
@@ -560,7 +567,7 @@ test(
   },
 );
 
-test("capture rejects a tracked version-manifest symlink", async (t) => {
+recursiveCaptureTest("capture rejects a tracked version-manifest symlink", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   await writeJson(configPath, captureConfig());
@@ -583,7 +590,7 @@ test("capture rejects a tracked version-manifest symlink", async (t) => {
   );
 });
 
-test("capture rejects tracked changes made by a gate command", async (t) => {
+recursiveCaptureTest("capture rejects tracked changes made by a gate command", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   await writeJson(
@@ -618,7 +625,7 @@ test("capture rejects tracked changes made by a gate command", async (t) => {
   );
 });
 
-test("capture audits the tracked tree after every command before a later restore", async (t) => {
+recursiveCaptureTest("capture audits the tracked tree after every command before a later restore", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   const outputPath = gateManifestPath(root);
@@ -661,7 +668,7 @@ test("capture audits the tracked tree after every command before a later restore
   await assert.rejects(readFile(outputPath, "utf8"), /ENOENT/u);
 });
 
-test("capture ignores command-controlled index flags when auditing tracked bytes", async (t) => {
+recursiveCaptureTest("capture ignores command-controlled index flags when auditing tracked bytes", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   const outputPath = gateManifestPath(root);
@@ -695,7 +702,7 @@ test("capture ignores command-controlled index flags when auditing tracked bytes
   await assert.rejects(readFile(outputPath, "utf8"), /ENOENT/u);
 });
 
-test("capture rejects untracked files made by a gate command", async (t) => {
+recursiveCaptureTest("capture rejects untracked files made by a gate command", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   await writeJson(
@@ -731,7 +738,7 @@ test("capture rejects untracked files made by a gate command", async (t) => {
   await assert.rejects(readFile(gateManifestPath(root), "utf8"), /ENOENT/u);
 });
 
-test("commands run in a disposable checkout and leave ignored output out of the source", async (t) => {
+recursiveCaptureTest("commands run in a disposable checkout and leave ignored output out of the source", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   const outputPath = gateManifestPath(root);
@@ -769,7 +776,7 @@ test("commands run in a disposable checkout and leave ignored output out of the 
   assert.equal(status, "?? evidence/manifests/r0.json\n");
 });
 
-test("disposable gate commands cannot discover source or identity through clone metadata", async (t) => {
+recursiveCaptureTest("disposable gate commands cannot discover source or identity through clone metadata", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   const outputPath = gateManifestPath(root);
@@ -801,7 +808,7 @@ test("disposable gate commands cannot discover source or identity through clone 
   );
 });
 
-test(
+recursiveCaptureTest(
   "capture terminates and rejects descendants left in a successful command group",
   { skip: process.platform === "win32" },
   async (t) => {
@@ -840,7 +847,7 @@ test(
   },
 );
 
-test(
+recursiveCaptureTest(
   "capture hard-settles after an escaped descendant retains command pipes",
   { skip: process.platform === "win32" },
   async (t) => {
@@ -881,7 +888,7 @@ test(
   },
 );
 
-test(
+recursiveCaptureTest(
   "macOS capture denies source writes from a reparented detached process group",
   { skip: process.platform !== "darwin" },
   async (t) => {
@@ -936,7 +943,7 @@ test(
   },
 );
 
-test("capture refuses failed commands and does not emit acceptance evidence", async (t) => {
+recursiveCaptureTest("capture refuses failed commands and does not emit acceptance evidence", async (t) => {
   const root = await createFixtureRepository(t);
   const configPath = path.join(root, "capture.json");
   const outputPath = gateManifestPath(root);
@@ -1090,7 +1097,15 @@ test("manifest validation rejects unredacted environment fields and self hashes"
 });
 
 test("repository R0 capture config and JSON schemas stay structurally valid", async () => {
-  const [config, buildPlan, operationsTestPlan, manifestSchema, configSchema] =
+  const [
+    config,
+    buildPlan,
+    operationsTestPlan,
+    manifestSchema,
+    configSchema,
+    evidenceReadme,
+    testSource,
+  ] =
     await Promise.all([
       readFile(path.join(repositoryRoot, "evidence/config/r0.json"), "utf8").then(JSON.parse),
       readFile(path.join(repositoryRoot, "docs/BUILD_PLAN.md"), "utf8"),
@@ -1109,6 +1124,11 @@ test("repository R0 capture config and JSON schemas stay structurally valid", as
         ),
         "utf8",
       ).then(JSON.parse),
+      readFile(path.join(repositoryRoot, "evidence/README.md"), "utf8"),
+      readFile(
+        path.join(repositoryRoot, "scripts/gate-evidence.test.mjs"),
+        "utf8",
+      ),
     ]);
 
   assert.doesNotThrow(() =>
@@ -1150,6 +1170,21 @@ test("repository R0 capture config and JSON schemas stay structurally valid", as
       "gate-a",
       "gate-b",
     ],
+  );
+  assert.equal(
+    [...testSource.matchAll(/^recursiveCaptureTest\(/gmu)].length,
+    21,
+  );
+  assert.match(
+    testSource,
+    /process\.env\.ROBIN_EVIDENCE_CAPTURE === "1"/u,
+  );
+  assert.match(evidenceReadme, /21 evidence-controller integration cases/u);
+  assert.equal(
+    config.knownLimitations.some(
+      ({ id }) => id === "nonrecursive-controller-self-capture",
+    ),
+    true,
   );
   const schemaManifest = {
     schemaVersion: 1,

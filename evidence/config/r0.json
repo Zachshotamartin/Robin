@@ -218,6 +218,11 @@
       "impact": "Only reviewed locked gate commands are eligible for R0 capture. Host resource containment requires a future cgroup, container, job-object, or equivalent platform boundary and is not claimed by this manifest."
     },
     {
+      "id": "nonrecursive-controller-self-capture",
+      "summary": "The 21 evidence-controller integration cases that launch nested captures are explicit skips when the repository suite is already running as an R0 evidence child because macOS sandbox-exec profiles cannot nest; five non-recursive controller cases still run.",
+      "impact": "Full controller integration coverage must pass in ordinary local and hosted CI outside self-capture. The R0 manifest attests its outer isolated commands and does not claim recursive self-attestation."
+    },
+    {
       "id": "external-r0-acceptance",
       "summary": "The local manifest contains no GitHub, pull-request, hosted-run, branch-protection, or merge identity.",
       "impact": "R0 remains a candidate until those external records pass review and the candidate is merged to mainline."
