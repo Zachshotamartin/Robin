@@ -300,24 +300,27 @@ An action contains:
 
 ```text
 policy "protect-secrets" priority 100 {
-  when action.tool == "read_file"
-    and resource.path matches "**/.env*"
+  when action.pack == "repository"
+    and action.operation == "read_file"
+    and repo.path matches "**/.env*"
   deny
   reason "Secret files cannot enter model context"
 }
 
 policy "approve-dependencies" priority 70 {
-  when action.tool == "run_process"
-    and request.executable in ["npm", "pnpm", "yarn"]
+  when action.pack == "process"
+    and process.executable in ["npm", "pnpm", "yarn"]
     and request.intent == "install_dependency"
   require_approval
   reason "Dependency installation can execute third-party lifecycle scripts"
 }
 
 policy "tests-in-sandbox" priority 50 {
-  when action.tool == "run_tests"
+  when action.pack == "process"
+    and action.operation == "run_tests"
     and environment.sandboxed == true
   allow
+  reason "Pinned test recipes may run inside the selected sandbox profile"
 }
 ```
 

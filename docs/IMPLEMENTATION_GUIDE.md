@@ -396,24 +396,32 @@ Error recovery synchronizes at `policy`, `effect`, `reason`, closing brace, or e
 
 ### 5.4 Type checking
 
-Define a closed attribute catalog:
+Define a closed, domain-neutral base catalog:
 
 ```text
-action.tool              string
-action.side_effect       string
-resource.path            string | absent
-resource.branch          string | absent
-resource.host            string | absent
-request.executable       string | absent
-request.argv             list<string> | absent
-request.intent           string | absent
-environment.sandboxed    boolean
-environment.network      string
-environment.repo_trust   string
-subject.kind             string
+subject.kind                  string
+subject.driver_id             string | absent
+subject.compatibility_tier    string | absent
+action.pack                   string
+action.operation              string
+action.side_effect            string
+resource.scheme               string
+resource.source_id            string
+resource.classification       string
+request.intent                string | absent
+request.estimated_cost        integer | absent
+request.provenance            string | absent
+environment.profile_id        string | absent
+environment.sandboxed         boolean
+environment.network_profile   string
+environment.trust_level       string
 ```
 
-The checker rejects unknown attributes, comparisons between incompatible types, heterogeneous lists, invalid glob patterns, and effects without reasons. `exists` accepts any catalogued optional attribute and is a type error for an unknown name. Compile glob patterns once when loading the policy snapshot.
+Capability packs and context-source adapters add versioned, namespaced catalogs rather than aliases in the generic base. The coding profile can therefore add `repo.path`, `repo.branch`, `process.executable`, and `process.argv`; another profile can add unrelated names such as `database.table` without importing coding vocabulary into the kernel. Every catalog entry declares its value type, optionality, secret-trace classification, match kind, and exact source in the normalized action. A catalog ID and schema version are permanently bound to a canonical content hash. The immutable policy snapshot hash includes the ordered catalog ID/version/content-hash manifest and the default effect, so a changed projection or classification requires a new catalog version and policy snapshot.
+
+The checker rejects unknown attributes, comparisons between incompatible types, heterogeneous lists, invalid glob patterns, and effects without reasons. `exists` accepts any catalogued optional attribute and is a type error for an unknown name. `matches` accepts only attributes whose catalog entry declares canonical-path matching. Compile glob patterns once when loading the policy snapshot. The normalized action is the only evaluation input: pack/source adapters project their fields into that object before policy evaluation, and the exact same immutable normalized action proceeds to authorized execution.
+
+This catalog composition supersedes the earlier flat coding-specific list in this section. No legacy aliases are supported because no persisted policy or released schema predates Milestone B. The rationale and migration rule are recorded in [ADR-0004](decisions/ADR-0004-composable-policy-attribute-catalogs.md).
 
 ### 5.5 Evaluation
 
