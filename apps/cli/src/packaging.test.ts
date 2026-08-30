@@ -55,8 +55,17 @@ interface ReviewedPackInventory {
   readonly packageName: string;
   readonly archive: {
     readonly filename: string;
-    readonly bytes: number;
-    readonly sha256: string;
+    readonly tar: {
+      readonly bytes: number;
+      readonly sha256: string;
+    };
+    readonly compressionProfiles: readonly {
+      readonly id: string;
+      readonly platform: NodeJS.Platform;
+      readonly arch: NodeJS.Architecture;
+      readonly bytes: number;
+      readonly sha256: string;
+    }[];
   };
   readonly files: readonly {
     readonly path: string;
@@ -415,7 +424,7 @@ function assertReviewedPackInventory(result: PackResult): void {
   assert.equal(paths.size, actual.length, "tarball inventory repeats a path");
   assert.deepEqual(actual, expected);
   assert.equal(result.filename, REVIEWED_PACK_INVENTORY.archive.filename);
-  assert.equal(result.size, REVIEWED_PACK_INVENTORY.archive.bytes);
+  assert.equal(result.size, currentCompressionProfile().bytes);
   assert.ok(result.size <= MAXIMUM_PACK_ARCHIVE_BYTES);
   assert.ok(result.unpackedSize <= MAXIMUM_PACK_UNPACKED_BYTES);
   assert.equal([...paths].some((path) => /(?:^|\/)src\//u.test(path)), false);
@@ -440,11 +449,12 @@ async function assertPackArchiveIntegrity(
   );
   assert.equal(contents.length, pack.size, "npm-reported tarball size differs from bytes");
   assert.equal(pack.filename, REVIEWED_PACK_INVENTORY.archive.filename);
-  assert.equal(contents.length, REVIEWED_PACK_INVENTORY.archive.bytes);
+  const compressionProfile = currentCompressionProfile();
+  assert.equal(contents.length, compressionProfile.bytes);
   assert.equal(
     createHash("sha256").update(contents).digest("hex"),
-    REVIEWED_PACK_INVENTORY.archive.sha256,
-    "actual tarball SHA-256 differs from the reviewed archive",
+    compressionProfile.sha256,
+    `actual tarball SHA-256 differs from reviewed ${compressionProfile.id}`,
   );
   assert.equal(
     createHash("sha1").update(contents).digest("hex"),
@@ -472,6 +482,16 @@ async function assertPackArchiveIntegrity(
 
 function parseReviewedTarEntries(archive: Buffer): readonly ReviewedPackInventory["files"][number][] {
   const tar = gunzipSync(archive, { maxOutputLength: MAXIMUM_PACK_UNPACKED_BYTES });
+  assert.equal(
+    tar.length,
+    REVIEWED_PACK_INVENTORY.archive.tar.bytes,
+    "uncompressed tar size differs from the reviewed archive",
+  );
+  assert.equal(
+    createHash("sha256").update(tar).digest("hex"),
+    REVIEWED_PACK_INVENTORY.archive.tar.sha256,
+    "uncompressed tar SHA-256 differs from the reviewed archive",
+  );
   const entries: ReviewedPackInventory["files"][number][] = [];
   const paths = new Set<string>();
   let offset = 0;
@@ -554,17 +574,56 @@ async function loadReviewedPackInventory(): Promise<ReviewedPackInventory> {
   assert.equal(inventory.schemaVersion, 1);
   assert.equal(inventory.packageName, "@zachshotamartin/robin");
   assert.deepEqual(Object.keys(inventory.archive ?? {}).sort(), [
-    "bytes",
+    "compressionProfiles",
     "filename",
-    "sha256",
+    "tar",
   ]);
   assert.match(inventory.archive!.filename, /^zachshotamartin-robin-[0-9A-Za-z.+-]+\.tgz$/u);
+  assert.deepEqual(Object.keys(inventory.archive!.tar ?? {}).sort(), [
+    "bytes",
+    "sha256",
+  ]);
   assert.ok(
-    Number.isSafeInteger(inventory.archive!.bytes) &&
-      inventory.archive!.bytes > 0 &&
-      inventory.archive!.bytes <= MAXIMUM_PACK_ARCHIVE_BYTES,
+    Number.isSafeInteger(inventory.archive!.tar.bytes) &&
+      inventory.archive!.tar.bytes > 0 &&
+      inventory.archive!.tar.bytes <= MAXIMUM_PACK_UNPACKED_BYTES,
   );
-  assert.match(inventory.archive!.sha256, SHA256_PATTERN);
+  assert.match(inventory.archive!.tar.sha256, SHA256_PATTERN);
+  assert.equal(Array.isArray(inventory.archive!.compressionProfiles), true);
+  assert.ok(inventory.archive!.compressionProfiles.length > 0);
+  const compressionProfileIds = new Set<string>();
+  const compressionPlatformCells = new Set<string>();
+  for (const [index, profile] of inventory.archive!.compressionProfiles.entries()) {
+    assert.deepEqual(Object.keys(profile).sort(), [
+      "arch",
+      "bytes",
+      "id",
+      "platform",
+      "sha256",
+    ]);
+    assert.match(profile.id, /^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
+    assert.equal(
+      compressionProfileIds.has(profile.id),
+      false,
+      `duplicate compression profile ID at index ${index}`,
+    );
+    compressionProfileIds.add(profile.id);
+    assert.match(profile.platform, /^[a-z0-9]+$/u);
+    assert.match(profile.arch, /^[a-z0-9_]+$/u);
+    const cell = `${profile.platform}/${profile.arch}`;
+    assert.equal(
+      compressionPlatformCells.has(cell),
+      false,
+      `duplicate compression platform cell ${cell}`,
+    );
+    compressionPlatformCells.add(cell);
+    assert.ok(
+      Number.isSafeInteger(profile.bytes) &&
+        profile.bytes > 0 &&
+        profile.bytes <= MAXIMUM_PACK_ARCHIVE_BYTES,
+    );
+    assert.match(profile.sha256, SHA256_PATTERN);
+  }
   assert.equal(Array.isArray(inventory.files), true);
   assert.equal(inventory.files!.length, 47);
   const paths = new Set<string>();
@@ -599,6 +658,19 @@ async function loadReviewedPackInventory(): Promise<ReviewedPackInventory> {
     );
   }
   return inventory as ReviewedPackInventory;
+}
+
+function currentCompressionProfile(): ReviewedPackInventory["archive"]["compressionProfiles"][number] {
+  const matches = REVIEWED_PACK_INVENTORY.archive.compressionProfiles.filter(
+    (profile) =>
+      profile.platform === process.platform && profile.arch === process.arch,
+  );
+  assert.equal(
+    matches.length,
+    1,
+    `npm archive compression is not reviewed for ${process.platform}/${process.arch}`,
+  );
+  return matches[0]!;
 }
 
 async function assertPackedContentsContainNoDevelopmentIdentity(

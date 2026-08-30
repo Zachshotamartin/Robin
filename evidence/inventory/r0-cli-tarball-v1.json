@@ -3,8 +3,26 @@
   "packageName": "@zachshotamartin/robin",
   "archive": {
     "filename": "zachshotamartin-robin-0.0.0.tgz",
-    "bytes": 38263,
-    "sha256": "001548dd69f74e0d2322ca36241613c0ecb6e16dfb1bba107d477036a6d82725"
+    "tar": {
+      "bytes": 211968,
+      "sha256": "e393752d784d2a5fc116ad5c70d0f997a0ae3124b69b8b5abd178c35bbc6c3f4"
+    },
+    "compressionProfiles": [
+      {
+        "id": "darwin-arm64-npm-gzip-v1",
+        "platform": "darwin",
+        "arch": "arm64",
+        "bytes": 38263,
+        "sha256": "001548dd69f74e0d2322ca36241613c0ecb6e16dfb1bba107d477036a6d82725"
+      },
+      {
+        "id": "linux-x64-npm-gzip-v1",
+        "platform": "linux",
+        "arch": "x64",
+        "bytes": 38411,
+        "sha256": "c3de0766f22d9b7e2e6b4895e148a6a3b55461b3dc2bf132c90c7dc47254fa4f"
+      }
+    ]
   },
   "files": [
     {
