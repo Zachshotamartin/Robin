@@ -574,75 +574,59 @@ test("strict versioned case corpus parser binds actions and snapshot hash", () =
       ],
     }),
   );
+  assert.throws(() =>
+    parsePolicyCaseCorpus({
+      schemaVersion: 0,
+      policyContentHash: snapshot.contentHash,
+      cases: [],
+    }),
+  );
+  assert.throws(() =>
+    parsePolicyCaseCorpus({
+      schemaVersion: 1,
+      policyFile: "legacy.guard",
+      defaultEffect: "deny",
+      baseAction: {},
+      cases: [],
+    }),
+  );
+  assert.throws(() =>
+    runPolicyCaseCorpus(
+      snapshot,
+      Object.freeze({
+        ...corpus,
+        policyContentHash: "0".repeat(64),
+      }),
+      TOKEN,
+    ),
+  );
 });
 
 test("checked-in policy-v1 security table contains and passes at least 25 cases", async () => {
-  const fixture = JSON.parse(
+  const fixture: unknown = JSON.parse(
     await readFile(new URL("../testdata/policy-cases-v1.json", import.meta.url), "utf8"),
-  ) as {
-    readonly schemaVersion: number;
-    readonly policyFile: string;
-    readonly defaultEffect: "deny";
-    readonly baseAction: {
-      readonly operationId: string;
-      readonly sideEffectClass: "none";
-      readonly classification: string;
-      readonly sandboxed: boolean;
-      readonly networkProfile: string;
-    };
-    readonly cases: readonly {
-      readonly caseId: string;
-      readonly overrides: Readonly<Record<string, unknown>>;
-      readonly expectedEffect: "allow" | "deny" | "require_approval";
-      readonly expectedWinner: string | null;
-    }[];
-  };
-  assert.equal(fixture.schemaVersion, 1);
-  assert.equal(fixture.policyFile, "policies/strict.guard");
-  assert.ok(fixture.cases.length >= 25);
-  assert.equal(new Set(fixture.cases.map((entry) => entry.caseId)).size, fixture.cases.length);
+  );
+  const corpus = parsePolicyCaseCorpus(fixture);
+  assert.ok(corpus.cases.length >= 25);
   const strictSource = await readFile(
     new URL("../../../policies/strict.guard", import.meta.url),
     "utf8",
   );
-  const snapshot = compile(strictSource);
-  const cases = fixture.cases.map((entry, index) => {
-    const allowed = new Set([
-      "operationId",
-      "sideEffectClass",
-      "classification",
-      "sandboxed",
-      "networkProfile",
-    ]);
-    assert.deepEqual(
-      Object.keys(entry.overrides).filter((key) => !allowed.has(key)),
-      [],
-      entry.caseId,
-    );
-    const merged = { ...fixture.baseAction, ...entry.overrides } as {
-      readonly operationId: string;
-      readonly sideEffectClass: "none" | "local_reversible" | "local_irreversible" | "external";
-      readonly classification: string;
-      readonly sandboxed: boolean;
-      readonly networkProfile: string;
-    };
-    return {
-      name: entry.caseId,
-      action: action({
-        actionOrdinal: index + 1,
-        operationId: merged.operationId,
-        sideEffectClass: merged.sideEffectClass,
-        classification: merged.classification,
-        sandboxed: merged.sandboxed,
-        networkProfile: merged.networkProfile,
-      }),
-      expectedEffect: entry.expectedEffect,
-      expectedWinningPolicyName: entry.expectedWinner,
-    };
-  });
-  const run = runPolicyTestCases(snapshot, cases, TOKEN);
+  const result = compilePolicySnapshot(
+    {
+      policyVersionId: POLICY_ID,
+      source: strictSource,
+      sourceId: "policies/strict.guard",
+      defaultEffect: "deny",
+    },
+    {},
+    CATALOGS,
+  );
+  assert.equal(result.ok, true, result.ok ? "" : JSON.stringify(result.diagnostics));
+  if (!result.ok) throw new Error("unreachable strict policy compile failure");
+  const run = runPolicyCaseCorpus(result.snapshot, corpus, TOKEN);
   assert.equal(run.failed, 0, JSON.stringify(run.cases.filter((entry) => !entry.passed)));
-  assert.equal(run.passed, fixture.cases.length);
+  assert.equal(run.passed, corpus.cases.length);
 });
 
 test("every rule in the shipped default policy has a match and near miss", async () => {
@@ -650,73 +634,28 @@ test("every rule in the shipped default policy has a match and near miss", async
     new URL("../../../policies/default.guard", import.meta.url),
     "utf8",
   );
-  const snapshot = compile(source);
-  const run = runPolicyTestCases(
-    snapshot,
-    [
-      {
-        name: "secret repository path match",
-        action: action({
-          capabilityPackId: "repository",
-          operationId: "read_file",
-          path: "service/.env.local",
-        }),
-        expectedEffect: "deny",
-        expectedWinningPolicyName: "deny-secret-repository-reads",
-      },
-      {
-        name: "secret repository path near miss",
-        action: action({
-          capabilityPackId: "repository",
-          operationId: "read_file",
-          path: "service/config.env",
-        }),
-        expectedEffect: "deny",
-        expectedWinningPolicyName: null,
-      },
-      {
-        name: "dependency install match",
-        action: action({
-          capabilityPackId: "process",
-          operationId: "run_process",
-          intent: "install_dependency",
-        }),
-        expectedEffect: "require_approval",
-        expectedWinningPolicyName: "approve-dependency-installation",
-      },
-      {
-        name: "dependency install near miss",
-        action: action({
-          capabilityPackId: "process",
-          operationId: "run_process",
-          intent: "run_build",
-        }),
-        expectedEffect: "deny",
-        expectedWinningPolicyName: null,
-      },
-      {
-        name: "sandboxed tests match",
-        action: action({
-          capabilityPackId: "process",
-          operationId: "run_tests",
-        }),
-        expectedEffect: "allow",
-        expectedWinningPolicyName: "allow-sandboxed-tests",
-      },
-      {
-        name: "sandboxed tests near miss",
-        action: action({
-          capabilityPackId: "process",
-          operationId: "run_tests",
-          sandboxed: false,
-        }),
-        expectedEffect: "deny",
-        expectedWinningPolicyName: null,
-      },
-    ],
-    TOKEN,
+  const result = compilePolicySnapshot(
+    {
+      policyVersionId: POLICY_ID_2,
+      source,
+      sourceId: "policies/default.guard",
+      defaultEffect: "deny",
+    },
+    {},
+    CATALOGS,
   );
+  assert.equal(result.ok, true, result.ok ? "" : JSON.stringify(result.diagnostics));
+  if (!result.ok) throw new Error("unreachable default policy compile failure");
+  const fixture: unknown = JSON.parse(
+    await readFile(
+      new URL("../testdata/default-policy-cases-v1.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const corpus = parsePolicyCaseCorpus(fixture);
+  const run = runPolicyCaseCorpus(result.snapshot, corpus, TOKEN);
   assert.equal(run.failed, 0, JSON.stringify(run.cases.filter((entry) => !entry.passed)));
+  assert.equal(run.passed, 6);
 });
 
 function compile(

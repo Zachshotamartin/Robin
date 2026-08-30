@@ -1,0 +1,224 @@
+{
+  "schemaVersion": 1,
+  "policyContentHash": "b18702277a392a9349d1ccdf643372351950ea7a5370acc9e6717b937985dbea",
+  "cases": [
+    {
+      "schemaVersion": 1,
+      "caseId": "secret-repository-path-match",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000001",
+        "capabilityPackId": "repository",
+        "capabilityPackVersion": 1,
+        "operationId": "read_file",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "internal",
+          "path": "service/.env.local"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "read_file"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-secret-repository-reads"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "secret-repository-path-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000002",
+        "capabilityPackId": "repository",
+        "capabilityPackVersion": 1,
+        "operationId": "read_file",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "internal",
+          "path": "service/config.env"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "read_file"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "dependency-install-match",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000003",
+        "capabilityPackId": "process",
+        "capabilityPackVersion": 1,
+        "operationId": "run_process",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "internal"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "install_dependency"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "require_approval",
+      "expectedWinningPolicyName": "approve-dependency-installation"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "dependency-install-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000004",
+        "capabilityPackId": "process",
+        "capabilityPackVersion": 1,
+        "operationId": "run_process",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "internal"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "run_build"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "sandboxed-tests-match",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000005",
+        "capabilityPackId": "process",
+        "capabilityPackVersion": 1,
+        "operationId": "run_tests",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "internal"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "run_tests"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-sandboxed-tests"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "sandboxed-tests-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000006",
+        "capabilityPackId": "process",
+        "capabilityPackVersion": 1,
+        "operationId": "run_tests",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "internal"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": false,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "run_tests"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null
+    }
+  ]
+}
