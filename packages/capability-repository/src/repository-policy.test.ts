@@ -10,6 +10,7 @@ import {
   evaluatePolicySnapshot,
   parsePolicyCaseCorpus,
   runPolicyCaseCorpus,
+  simulatePolicyPage,
 } from "@guard/policy-engine";
 
 import { REPOSITORY_POLICY_ATTRIBUTE_CATALOG } from "./policy-catalog.js";
@@ -17,12 +18,20 @@ import { normalizeRepositoryPath } from "./repository-path.js";
 
 const POLICY_VERSION_ID = "pol_018f05a0-7b01-7000-8000-0000000003a1";
 const EXPECTED_POLICY_CONTENT_HASH =
-  "4bd3d9c74ed673859c62551fe929f57d417939826f8aaf6719fb3764dfd5dfa3";
+  "1d678439d9219a1154077c09a46100d1c5c1e9823e7e3a3a12734342da2442b1";
 const EXPECTED_CONTEXT_POLICY_CONTENT_HASH =
   "df76cdaae6c1f43127c740ea183fc5267c14e3a99d8d3a879d24c0f53ad5869e";
+const MAXIMUM_DEFAULT_POLICY_CASES = 12;
+const MAXIMUM_CONTEXT_POLICY_CASES = 8;
 const CORRELATION_TOKEN = "repository-default-policy-corpus-token-0001";
 const DEFAULT_REASON =
   "No policy matched; the immutable snapshot default effect applies.";
+const FAIL_CLOSED_ROLLOUT_BASELINE = `policy "baseline-no-installed-policy" priority 1 {
+  when action.pack == "guard.baseline-no-installed-policy"
+  deny
+  reason "No reviewed policy was installed in the fail-closed baseline."
+}
+`;
 
 test("production default policy is bound to guard.repo and its owned strict corpus", async () => {
   const source = await readFile(
@@ -77,7 +86,7 @@ test("production default policy is bound to guard.repo and its owned strict corp
   );
   const corpus = parsePolicyCaseCorpus(fixture, {
     maximumBytes: 128 * 1024,
-    maximumCases: 10,
+    maximumCases: MAXIMUM_DEFAULT_POLICY_CASES,
   });
   assert.equal(corpus.policyContentHash, EXPECTED_POLICY_CONTENT_HASH);
   assert.deepEqual(
@@ -93,6 +102,8 @@ test("production default policy is bound to guard.repo and its owned strict corp
       "dependency-install-near-miss",
       "sandboxed-tests-match",
       "sandboxed-tests-near-miss",
+      "sandboxed-tests-external-side-effect-near-miss",
+      "sandboxed-tests-outbound-network-near-miss",
     ],
   );
   for (const policy of compiled.snapshot.policies) {
@@ -109,7 +120,7 @@ test("production default policy is bound to guard.repo and its owned strict corp
     );
   }
   const nearMisses = corpus.cases.filter((entry) => entry.name.endsWith("near-miss"));
-  assert.equal(nearMisses.length, compiled.snapshot.policies.length + 1);
+  assert.equal(nearMisses.length, 6);
   for (const nearMiss of nearMisses) {
     assert.equal(nearMiss.expectedEffect, "deny");
     assert.equal(nearMiss.expectedWinningPolicyName, null);
@@ -126,7 +137,7 @@ test("production default policy is bound to guard.repo and its owned strict corp
     0,
     JSON.stringify(run.cases.filter((entry) => !entry.passed)),
   );
-  assert.equal(run.passed, 10);
+  assert.equal(run.passed, MAXIMUM_DEFAULT_POLICY_CASES);
 });
 
 test("production default policy has a reviewed Operations Plan section 8.7 matrix", async () => {
@@ -158,7 +169,7 @@ test("production default policy has a reviewed Operations Plan section 8.7 matri
   );
   const corpus = parsePolicyCaseCorpus(fixture, {
     maximumBytes: 128 * 1024,
-    maximumCases: 10,
+    maximumCases: MAXIMUM_DEFAULT_POLICY_CASES,
   });
 
   const overlap = corpus.cases.find(
@@ -193,6 +204,37 @@ test("production default policy has a reviewed Operations Plan section 8.7 matri
   assert.match(
     source,
     /policy "allow-sandboxed-tests"[\s\S]*?action\.pack == "process"/u,
+  );
+  const processAllowPolicy = compiled.snapshot.policies.find(
+    (policy) => policy.rule.name.value === "allow-sandboxed-tests",
+  );
+  assert.ok(processAllowPolicy);
+  assert.deepEqual(
+    processAllowPolicy.comparisons.map((comparison) => ({
+      attribute: comparison.attribute.name,
+      operator: comparison.expression.operator,
+      expected:
+        comparison.expression.right.kind === "list"
+          ? comparison.expression.right.items.map((item) =>
+              item.kind === "list" ? "nested-list" : item.value,
+            )
+          : comparison.expression.right.value,
+    })),
+    [
+      { attribute: "action.pack", operator: "==", expected: "process" },
+      {
+        attribute: "action.operation",
+        operator: "==",
+        expected: "run_tests",
+      },
+      { attribute: "action.side_effect", operator: "==", expected: "none" },
+      { attribute: "environment.sandboxed", operator: "==", expected: true },
+      {
+        attribute: "environment.network_profile",
+        operator: "==",
+        expected: "disabled",
+      },
+    ],
   );
   const repositoryDeny = corpus.cases.find(
     (entry) => entry.name === "secret-repository-path-match",
@@ -275,7 +317,7 @@ test("production default policy has a reviewed Operations Plan section 8.7 matri
   assert.throws(() =>
     parsePolicyCaseCorpus(legacyFixture, {
       maximumBytes: 128 * 1024,
-      maximumCases: 10,
+      maximumCases: MAXIMUM_DEFAULT_POLICY_CASES,
     }),
   );
 
@@ -368,7 +410,7 @@ test("production repository context policy owns an exact guard.repo v3 corpus", 
   );
   const corpus = parsePolicyCaseCorpus(fixture, {
     maximumBytes: 128 * 1024,
-    maximumCases: 8,
+    maximumCases: MAXIMUM_CONTEXT_POLICY_CASES,
   });
   assert.equal(corpus.policyContentHash, EXPECTED_CONTEXT_POLICY_CONTENT_HASH);
   assert.deepEqual(
@@ -406,7 +448,7 @@ test("production repository context policy owns an exact guard.repo v3 corpus", 
     0,
     JSON.stringify(run.cases.filter((entry) => !entry.passed)),
   );
-  assert.equal(run.passed, 8);
+  assert.equal(run.passed, MAXIMUM_CONTEXT_POLICY_CASES);
 });
 
 test("repository context policy has a reviewed Operations Plan section 8.7 matrix", async () => {
@@ -438,7 +480,7 @@ test("repository context policy has a reviewed Operations Plan section 8.7 matri
   );
   const corpus = parsePolicyCaseCorpus(fixture, {
     maximumBytes: 128 * 1024,
-    maximumCases: 8,
+    maximumCases: MAXIMUM_CONTEXT_POLICY_CASES,
   });
 
   // A single deny-only rule cannot overlap an allow or approval and cannot tie.
@@ -511,7 +553,7 @@ test("repository context policy has a reviewed Operations Plan section 8.7 matri
   assert.throws(() =>
     parsePolicyCaseCorpus(legacyFixture, {
       maximumBytes: 128 * 1024,
-      maximumCases: 8,
+      maximumCases: MAXIMUM_CONTEXT_POLICY_CASES,
     }),
   );
 
@@ -566,4 +608,175 @@ test("repository context policy has a reviewed Operations Plan section 8.7 matri
       "old action schema compatibility or explicit failure",
     ],
   );
+});
+
+test("production repository policies have exact fail-closed initial-rollout simulations", async () => {
+  const catalogs = composePolicyAttributeCatalogs([
+    BASE_POLICY_ATTRIBUTE_CATALOG,
+    REPOSITORY_POLICY_ATTRIBUTE_CATALOG,
+  ]);
+  const baselineCompiled = compilePolicySnapshot(
+    {
+      policyVersionId: "pol_018f05a0-7b01-7000-8000-0000000003a4",
+      source: FAIL_CLOSED_ROLLOUT_BASELINE,
+      sourceId: "repository-initial-rollout-baseline.guard",
+      defaultEffect: "deny",
+    },
+    {},
+    catalogs,
+  );
+  assert.equal(
+    baselineCompiled.ok,
+    true,
+    canonicalize(baselineCompiled.diagnostics),
+  );
+  if (!baselineCompiled.ok) return;
+  const baseline = baselineCompiled.snapshot;
+  assert.equal(baseline.defaultEffect, "deny");
+  assert.deepEqual(
+    baseline.policies.map((policy) => ({
+      name: policy.rule.name.value,
+      priority: policy.rule.priority.value,
+      effect: policy.rule.effect.value,
+      comparisons: policy.comparisons.map((comparison) => ({
+        attribute: comparison.attribute.name,
+        operator: comparison.expression.operator,
+        expected:
+          comparison.expression.right.kind === "string"
+            ? comparison.expression.right.value
+            : null,
+      })),
+    })),
+    [
+      {
+        name: "baseline-no-installed-policy",
+        priority: 1,
+        effect: "deny",
+        comparisons: [
+          {
+            attribute: "action.pack",
+            operator: "==",
+            expected: "guard.baseline-no-installed-policy",
+          },
+        ],
+      },
+    ],
+  );
+
+  const defaultSource = await readFile(
+    new URL("../../../policies/default.guard", import.meta.url),
+    "utf8",
+  );
+  const defaultCompiled = compilePolicySnapshot(
+    {
+      policyVersionId: "pol_018f05a0-7b01-7000-8000-0000000003a5",
+      source: defaultSource,
+      sourceId: "policies/default.guard",
+      defaultEffect: "deny",
+    },
+    {},
+    catalogs,
+  );
+  assert.equal(defaultCompiled.ok, true, canonicalize(defaultCompiled.diagnostics));
+  if (!defaultCompiled.ok) return;
+  const defaultFixture: unknown = JSON.parse(
+    await readFile(
+      new URL("../testdata/default-policy-cases-v1.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const defaultCorpus = parsePolicyCaseCorpus(defaultFixture, {
+    maximumBytes: 128 * 1024,
+    maximumCases: MAXIMUM_DEFAULT_POLICY_CASES,
+  });
+
+  const contextSource = await readFile(
+    new URL("../policies/context.guard", import.meta.url),
+    "utf8",
+  );
+  const contextCompiled = compilePolicySnapshot(
+    {
+      policyVersionId: "pol_018f05a0-7b01-7000-8000-0000000003a6",
+      source: contextSource,
+      sourceId: "packages/capability-repository/policies/context.guard",
+      defaultEffect: "allow",
+    },
+    {},
+    catalogs,
+  );
+  assert.equal(contextCompiled.ok, true, canonicalize(contextCompiled.diagnostics));
+  if (!contextCompiled.ok) return;
+  const contextFixture: unknown = JSON.parse(
+    await readFile(
+      new URL("../testdata/context-policy-cases-v3.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const contextCorpus = parsePolicyCaseCorpus(contextFixture, {
+    maximumBytes: 128 * 1024,
+    maximumCases: MAXIMUM_CONTEXT_POLICY_CASES,
+  });
+
+  const rollouts = [
+    {
+      label: "root default",
+      snapshot: defaultCompiled.snapshot,
+      corpus: defaultCorpus,
+      counts: {
+        newly_allowed: 1,
+        newly_denied: 0,
+        newly_approval_gated: 2,
+        approval_removed: 0,
+        same_effect_different_explanation: 9,
+        unchanged: 0,
+        evaluation_error: 0,
+      },
+    },
+    {
+      label: "repository context",
+      snapshot: contextCompiled.snapshot,
+      corpus: contextCorpus,
+      counts: {
+        newly_allowed: 4,
+        newly_denied: 0,
+        newly_approval_gated: 0,
+        approval_removed: 0,
+        same_effect_different_explanation: 4,
+        unchanged: 0,
+        evaluation_error: 0,
+      },
+    },
+  ] as const;
+  for (const rollout of rollouts) {
+    for (const entry of rollout.corpus.cases) {
+      const baselineDecision = evaluatePolicySnapshot(baseline, entry.action, {
+        secretCorrelationToken: `${rollout.label}-baseline-token-0001`,
+      });
+      assert.equal(baselineDecision.effect, "deny");
+      assert.equal(baselineDecision.winningPolicyName, null);
+      assert.deepEqual(baselineDecision.matchedPolicyNames, []);
+    }
+    const simulation = simulatePolicyPage({
+      from: baseline,
+      to: rollout.snapshot,
+      actions: rollout.corpus.cases.map((entry) => entry.action),
+      secretCorrelationToken: `${rollout.label}-simulation-token-0001`,
+      cursor: null,
+      pageSize: 1000,
+    });
+    assert.deepEqual(simulation.counts, rollout.counts, rollout.label);
+    assert.equal(simulation.entries.length, rollout.corpus.cases.length);
+    assert.equal(simulation.nextCursor, null);
+    const newlyAllowed = simulation.entries.filter(
+      (entry) => entry.category === "newly_allowed",
+    );
+    assert.equal(newlyAllowed.length, rollout.counts.newly_allowed);
+    for (const entry of newlyAllowed) {
+      const action = rollout.corpus.cases.find(
+        (candidate) => candidate.action.actionId === entry.actionId,
+      )?.action;
+      assert.ok(action);
+      assert.equal(action.sideEffectClass, "none");
+    }
+  }
 });

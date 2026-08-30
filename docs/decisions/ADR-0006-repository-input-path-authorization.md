@@ -68,7 +68,7 @@ authorization while preserving gateway locator binding.
 `guard.repo` v3 has canonical catalog content hash
 `885645ba63117122b4d1d62a95e366ebfa5cb43db9a6f8bd67b7f70eeba68096`.
 The compiled production `policies/default.guard` snapshot has content hash
-`4bd3d9c74ed673859c62551fe929f57d417939826f8aaf6719fb3764dfd5dfa3`.
+`1d678439d9219a1154077c09a46100d1c5c1e9823e7e3a3a12734342da2442b1`.
 The repository context policy compiled against v3 has content hash
 `df76cdaae6c1f43127c740ea183fc5267c14e3a99d8d3a879d24c0f53ad5869e`.
 

@@ -12,7 +12,11 @@ policy "approve-dependency-installation" priority 700 {
 }
 
 policy "allow-sandboxed-tests" priority 500 {
-  when action.pack == "process" and action.operation == "run_tests" and environment.sandboxed == true
+  when action.pack == "process"
+    and action.operation == "run_tests"
+    and action.side_effect == "none"
+    and environment.sandboxed == true
+    and environment.network_profile == "disabled"
   allow
   reason "Pinned test recipes may run inside the selected sandbox profile"
 }

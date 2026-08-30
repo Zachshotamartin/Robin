@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "policyContentHash": "4bd3d9c74ed673859c62551fe929f57d417939826f8aaf6719fb3764dfd5dfa3",
+  "policyContentHash": "1d678439d9219a1154077c09a46100d1c5c1e9823e7e3a3a12734342da2442b1",
   "cases": [
     {
       "schemaVersion": 1,
@@ -367,6 +367,80 @@
           "profileId": "fixture",
           "sandboxed": false,
           "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "run_tests"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null,
+      "expectedReason": "No policy matched; the immutable snapshot default effect applies."
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "sandboxed-tests-external-side-effect-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000011",
+        "capabilityPackId": "process",
+        "capabilityPackVersion": 1,
+        "operationId": "run_tests",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "internal"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "run_tests"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "external",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null,
+      "expectedReason": "No policy matched; the immutable snapshot default effect applies."
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "sandboxed-tests-outbound-network-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000012",
+        "capabilityPackId": "process",
+        "capabilityPackVersion": 1,
+        "operationId": "run_tests",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "internal"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "outbound",
           "trustLevel": "trusted_fixture"
         },
         "request": {

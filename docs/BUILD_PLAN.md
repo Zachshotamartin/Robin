@@ -318,7 +318,9 @@ policy "approve-dependencies" priority 70 {
 policy "tests-in-sandbox" priority 50 {
   when action.pack == "process"
     and action.operation == "run_tests"
+    and action.side_effect == "none"
     and environment.sandboxed == true
+    and environment.network_profile == "disabled"
   allow
   reason "Pinned test recipes may run inside the selected sandbox profile"
 }
