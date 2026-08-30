@@ -1,5 +1,6 @@
 policy "deny-secret-repository-context-paths" priority 950 {
-  when action.pack == "guard.context" and repo.path matches "**/.env*"
+  when action.pack == "guard.context"
+    and (repo.path matches "**/.env*" or repo.paths matches "**/.env*")
   deny
   reason "Secret-bearing repository paths cannot enter agent context"
 }

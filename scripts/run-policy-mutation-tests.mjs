@@ -148,6 +148,12 @@ const mutations = Object.freeze([
     "characters[characterIndex + offset] === character",
     "characters[characterIndex + offset] !== character",
   ),
+  mutation(
+    "path-list-any-to-all",
+    "evaluator.js",
+    "return actual.some((path) => matchAnchoredPathGlob(glob, path))",
+    "return actual.every((path) => matchAnchoredPathGlob(glob, path))",
+  ),
 ]);
 
 validateConfig(config, mutations);
@@ -338,6 +344,40 @@ policy "exists" priority 2 { when exists(request.intent) allow reason "exists" }
   const star = module.compileAnchoredPathGlob("src/*.ts");
   assert.equal(module.matchAnchoredPathGlob(star, "src/a.ts"), true);
   assert.equal(module.matchAnchoredPathGlob(star, "src/a.js"), false);
+
+  const pathList = compileWithPathListCatalog(
+    module,
+    `policy "deny-environment-output" priority 10 { when repo.paths matches "**/.env*" deny reason "deny" }
+policy "allow-safe-output" priority 1 { when action.side_effect == "none" allow reason "allow" }`,
+    "pol_018f05a0-7b01-7000-8000-0000000000a7",
+  );
+  for (const [ordinal, outputPaths] of [
+    [10, ["service/.env", "src/a.ts", "src/z.ts"]],
+    [11, ["src/a.ts", "service/.env.local", "src/z.ts"]],
+    [12, ["src/a.ts", "src/z.ts", "service/.env.test"]],
+  ]) {
+    expectDecision(
+      module,
+      pathList,
+      action("context.release", "none", ordinal, outputPaths),
+      token,
+      "deny",
+      "deny-environment-output",
+    );
+  }
+  for (const [ordinal, outputPaths] of [
+    [13, ["src/a.ts", "service/config.env"]],
+    [14, []],
+  ]) {
+    expectDecision(
+      module,
+      pathList,
+      action("context.release", "none", ordinal, outputPaths),
+      token,
+      "allow",
+      "allow-safe-output",
+    );
+  }
 }
 
 function compile(module, source, policyVersionId) {
@@ -347,6 +387,43 @@ function compile(module, source, policyVersionId) {
     sourceId: "mutation.guard",
     defaultEffect: "deny",
   });
+  assert.equal(result.ok, true, result.ok ? "" : JSON.stringify(result.diagnostics));
+  return result.snapshot;
+}
+
+function compileWithPathListCatalog(module, source, policyVersionId) {
+  const pathCatalog = module.createPolicyAttributeCatalog({
+    catalogId: "mutation.repository",
+    schemaVersion: 1,
+    attributes: [
+      {
+        name: "repo.paths",
+        type: "list<string>",
+        optional: true,
+        secretClassification: "repository_paths",
+        matchKind: "canonical_path",
+        source: {
+          kind: "object_field",
+          section: "resource",
+          field: "outputPaths",
+        },
+      },
+    ],
+  });
+  const catalogs = module.composePolicyAttributeCatalogs([
+    module.BASE_POLICY_ATTRIBUTE_CATALOG,
+    pathCatalog,
+  ]);
+  const result = module.compilePolicySnapshot(
+    {
+      policyVersionId,
+      source,
+      sourceId: "mutation-path-list.guard",
+      defaultEffect: "deny",
+    },
+    {},
+    catalogs,
+  );
   assert.equal(result.ok, true, result.ok ? "" : JSON.stringify(result.diagnostics));
   return result.snapshot;
 }
@@ -370,7 +447,7 @@ function expectDecision(
   assert.equal(decision.winningPolicyName, expectedWinner);
 }
 
-function action(operationId, sideEffectClass, ordinal) {
+function action(operationId, sideEffectClass, ordinal, outputPaths) {
   return parseNormalizedAction({
     schemaVersion: 1,
     actionId: ActionIdKind.parse(
@@ -385,6 +462,7 @@ function action(operationId, sideEffectClass, ordinal) {
       scheme: "memory",
       sourceId: "fixture",
       classification: "public",
+      ...(outputPaths === undefined ? {} : { outputPaths }),
     },
     environment: {
       sandboxed: true,

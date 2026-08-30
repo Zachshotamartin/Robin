@@ -52,6 +52,18 @@ const PACK_CATALOG = createPolicyAttributeCatalog({
       source: { kind: "object_field", section: "resource", field: "path" },
     },
     {
+      name: "repo.paths",
+      type: "list<string>",
+      optional: true,
+      secretClassification: "repository_paths",
+      matchKind: "canonical_path",
+      source: {
+        kind: "object_field",
+        section: "resource",
+        field: "outputPaths",
+      },
+    },
+    {
       name: "repo.branch",
       type: "string",
       optional: true,
@@ -206,6 +218,125 @@ test("anchored path globs are case-sensitive and separator-independent", () => {
       maximumSegments: 64,
       maximumWildcards: 64,
     }),
+  );
+});
+
+test("canonical-path list matches are existential, bounded by presence, and secret-safe", () => {
+  const scalarSnapshot = compile(`policy "deny-scalar-environment-path" priority 10 {
+  when repo.path matches "**/.env*"
+  deny
+  reason "Scalar canonical-path matching remains unchanged."
+}
+policy "allow-safe-scalar-path" priority 1 {
+  when action.side_effect == "none"
+  allow
+  reason "A safe scalar path remains allowed."
+}`);
+  for (const [path, effect, winner] of [
+    ["service/.env.local", "deny", "deny-scalar-environment-path"],
+    ["service/config.env", "allow", "allow-safe-scalar-path"],
+  ] as const) {
+    const decision = evaluatePolicySnapshot(
+      scalarSnapshot,
+      action({ operationId: "context.release", path }),
+      { secretCorrelationToken: TOKEN },
+    );
+    assert.equal(decision.effect, effect, path);
+    assert.equal(decision.winningPolicyName, winner, path);
+  }
+
+  const snapshot = compile(`policy "deny-environment-output-paths" priority 100 {
+  when repo.paths matches "**/.env*"
+  deny
+  reason "Any emitted environment path denies the complete output."
+}
+policy "allow-reviewed-output-paths" priority 1 {
+  when action.side_effect == "none"
+  allow
+  reason "Reviewed effect-free output is allowed."
+}`);
+  const cases = [
+    {
+      name: "first",
+      outputPaths: ["service/.env", "src/a.ts", "src/z.ts"],
+      effect: "deny",
+      winner: "deny-environment-output-paths",
+    },
+    {
+      name: "middle",
+      outputPaths: ["src/a.ts", "service/.env.local", "src/z.ts"],
+      effect: "deny",
+      winner: "deny-environment-output-paths",
+    },
+    {
+      name: "last",
+      outputPaths: ["src/a.ts", "src/z.ts", "service/.env.test"],
+      effect: "deny",
+      winner: "deny-environment-output-paths",
+    },
+    {
+      name: "none",
+      outputPaths: ["src/a.ts", "service/config.env", "src/z.ts"],
+      effect: "allow",
+      winner: "allow-reviewed-output-paths",
+    },
+    {
+      name: "empty",
+      outputPaths: [],
+      effect: "allow",
+      winner: "allow-reviewed-output-paths",
+    },
+    {
+      name: "missing",
+      effect: "allow",
+      winner: "allow-reviewed-output-paths",
+    },
+  ] as const;
+  for (const [index, entry] of cases.entries()) {
+    const decision = evaluatePolicySnapshot(
+      snapshot,
+      action({
+        actionOrdinal: 100 + index,
+        operationId: "context.release",
+        ...("outputPaths" in entry
+          ? { outputPaths: entry.outputPaths }
+          : {}),
+      }),
+      { secretCorrelationToken: TOKEN },
+    );
+    assert.equal(decision.effect, entry.effect, entry.name);
+    assert.equal(decision.winningPolicyName, entry.winner, entry.name);
+  }
+
+  const canaryPaths = ["service/.env", "src/not-secret.ts"] as const;
+  const trace = JSON.stringify(
+    evaluatePolicySnapshot(
+      snapshot,
+      action({
+        actionOrdinal: 200,
+        operationId: "context.release",
+        outputPaths: canaryPaths,
+      }),
+      { secretCorrelationToken: TOKEN },
+    ).trace,
+  );
+  for (const path of canaryPaths) {
+    assert.equal(trace.includes(path), false);
+    assert.equal(trace.includes(canonicalSha256Hex(path)), false);
+  }
+  assert.match(trace, /repository_paths/u);
+  assert.match(trace, /"count":2/u);
+
+  assert.throws(() =>
+    evaluatePolicySnapshot(
+      snapshot,
+      action({
+        actionOrdinal: 201,
+        operationId: "context.release",
+        outputPaths: ["src/a.ts", 1] as unknown as readonly string[],
+      }),
+      { secretCorrelationToken: TOKEN },
+    ),
   );
 });
 
@@ -753,6 +884,7 @@ function action(options: {
   readonly sideEffectClass?: "none" | "local_reversible" | "local_irreversible" | "external";
   readonly classification?: string;
   readonly path?: string;
+  readonly outputPaths?: readonly string[];
   readonly executable?: string;
   readonly argv?: readonly string[];
   readonly intent?: string;
@@ -768,6 +900,9 @@ function action(options: {
     classification: options.classification ?? "internal",
   };
   if (options.path !== undefined) resource["path"] = options.path;
+  if (options.outputPaths !== undefined) {
+    resource["outputPaths"] = [...options.outputPaths];
+  }
   const request: Record<string, unknown> = {};
   if (options.omitIntent !== true) {
     request["intent"] = options.intent ?? options.operationId;

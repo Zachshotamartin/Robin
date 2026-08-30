@@ -1,0 +1,267 @@
+{
+  "schemaVersion": 1,
+  "policyContentHash": "6771a4c80442b73dcb592ee3a3f1d6f04cff2b71a22a291982148eff07b0a5de",
+  "cases": [
+    {
+      "schemaVersion": 1,
+      "caseId": "secret-scalar-path-match",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000401",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.read",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime", "driverId": "context-broker" },
+        "resource": {
+          "scheme": "repo",
+          "sourceId": "virtual-repository",
+          "classification": "fixture",
+          "path": "service/.env.local"
+        },
+        "environment": {
+          "profileId": "guard.context",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "untrusted"
+        },
+        "request": { "intent": "context.read" },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-secret-repository-context-paths",
+      "expectedReason": "Secret-bearing repository paths cannot enter agent context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "secret-scalar-path-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000402",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.read",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime", "driverId": "context-broker" },
+        "resource": {
+          "scheme": "repo",
+          "sourceId": "virtual-repository",
+          "classification": "fixture",
+          "path": "service/config.env"
+        },
+        "environment": {
+          "profileId": "guard.context",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "untrusted"
+        },
+        "request": { "intent": "context.read" },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": null,
+      "expectedReason": "No policy matched; the immutable snapshot default effect applies."
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "secret-output-path-first-match",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000403",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.release",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime", "driverId": "context-broker" },
+        "resource": {
+          "scheme": "repo",
+          "sourceId": "virtual-repository",
+          "classification": "fixture",
+          "path": "src",
+          "outputPaths": [".env", "src/a.ts", "src/z.ts"]
+        },
+        "environment": {
+          "profileId": "guard.context",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "untrusted"
+        },
+        "request": { "intent": "context.release" },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-secret-repository-context-paths",
+      "expectedReason": "Secret-bearing repository paths cannot enter agent context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "secret-output-path-middle-match",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000404",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.release",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime", "driverId": "context-broker" },
+        "resource": {
+          "scheme": "repo",
+          "sourceId": "virtual-repository",
+          "classification": "fixture",
+          "path": "src",
+          "outputPaths": ["a/file.ts", "m/.env.local", "z/file.ts"]
+        },
+        "environment": {
+          "profileId": "guard.context",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "untrusted"
+        },
+        "request": { "intent": "context.release" },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-secret-repository-context-paths",
+      "expectedReason": "Secret-bearing repository paths cannot enter agent context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "secret-output-path-last-match",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000405",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.release",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime", "driverId": "context-broker" },
+        "resource": {
+          "scheme": "repo",
+          "sourceId": "virtual-repository",
+          "classification": "fixture",
+          "path": "src",
+          "outputPaths": ["a/file.ts", "m/file.ts", "z/.env.test"]
+        },
+        "environment": {
+          "profileId": "guard.context",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "untrusted"
+        },
+        "request": { "intent": "context.release" },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-secret-repository-context-paths",
+      "expectedReason": "Secret-bearing repository paths cannot enter agent context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "safe-output-paths-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000406",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.release",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime", "driverId": "context-broker" },
+        "resource": {
+          "scheme": "repo",
+          "sourceId": "virtual-repository",
+          "classification": "fixture",
+          "path": "src",
+          "outputPaths": ["service/config.env", "src/a.ts"]
+        },
+        "environment": {
+          "profileId": "guard.context",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "untrusted"
+        },
+        "request": { "intent": "context.release" },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": null,
+      "expectedReason": "No policy matched; the immutable snapshot default effect applies."
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "empty-output-paths-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000407",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.release",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime", "driverId": "context-broker" },
+        "resource": {
+          "scheme": "repo",
+          "sourceId": "virtual-repository",
+          "classification": "fixture",
+          "path": "src",
+          "outputPaths": []
+        },
+        "environment": {
+          "profileId": "guard.context",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "untrusted"
+        },
+        "request": { "intent": "context.release" },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": null,
+      "expectedReason": "No policy matched; the immutable snapshot default effect applies."
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "missing-output-paths-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000408",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.release",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime", "driverId": "context-broker" },
+        "resource": {
+          "scheme": "repo",
+          "sourceId": "virtual-repository",
+          "classification": "fixture",
+          "path": "src"
+        },
+        "environment": {
+          "profileId": "guard.context",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "untrusted"
+        },
+        "request": { "intent": "context.release" },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": null,
+      "expectedReason": "No policy matched; the immutable snapshot default effect applies."
+    }
+  ]
+}

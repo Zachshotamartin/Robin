@@ -7,7 +7,7 @@ import { createPolicyAttributeCatalog } from "@guard/policy-engine";
 export const REPOSITORY_POLICY_ATTRIBUTE_CATALOG =
   createPolicyAttributeCatalog({
     catalogId: "guard.repo",
-    schemaVersion: 1,
+    schemaVersion: 2,
     attributes: [
       {
         name: "repo.path",
@@ -19,6 +19,18 @@ export const REPOSITORY_POLICY_ATTRIBUTE_CATALOG =
           kind: "object_field",
           section: "resource",
           field: "path",
+        },
+      },
+      {
+        name: "repo.paths",
+        type: "list<string>",
+        optional: true,
+        secretClassification: "repository_paths",
+        matchKind: "canonical_path",
+        source: {
+          kind: "object_field",
+          section: "resource",
+          field: "outputPaths",
         },
       },
       {

@@ -297,8 +297,13 @@ function parseDefinition(input: unknown): PolicyAttributeDefinition {
   if (!(matchKind === "none" || matchKind === "canonical_path")) {
     throw new TypeError("A policy attribute match kind is invalid.");
   }
-  if (matchKind === "canonical_path" && type !== "string") {
-    throw new TypeError("Only string attributes can be canonical path match targets.");
+  if (
+    matchKind === "canonical_path" &&
+    !(type === "string" || type === "list<string>")
+  ) {
+    throw new TypeError(
+      "Only string or list<string> attributes can be canonical path match targets.",
+    );
   }
   return Object.freeze({
     name,

@@ -95,7 +95,22 @@ syntax acceptance does not make an attribute valid.
 
 `matches` is syntactic at this layer. The policy engine compiles its string
 operand once as a bounded, anchored, case-sensitive path glob over canonical
-forward-slash paths. Runtime regular expressions are not a v1 feature.
+forward-slash paths. A catalogued canonical-path target may be either `string`
+or `list<string>`. A scalar target keeps the original single-path behavior. A
+list target uses existential semantics: the comparison is true when any member
+matches, false when no member matches (including an empty list), and unknown
+when the optional attribute is absent. Every member must already be a valid
+typed catalog value; a wrong runtime type fails policy evaluation closed.
+Runtime regular expressions are not a v1 feature.
+
+The `guard.repo` v2 catalog uses `repo.path` for one canonical repository path
+and `repo.paths` for the bounded set of canonical path identifiers emitted by a
+repository capability result. The latter is sourced from the broker projection
+field `resource.outputPaths`. `outputPaths` is internal release metadata, not a
+new agent-view or capability-input field. Repository packs derive it from the
+actual released result, deduplicate it, sort it by UTF-8 bytes, enforce count
+and aggregate-byte limits, and bind it to the exact action, raw result, and
+agent view. Repeated matches in a search still contribute only one policy path.
 
 ## Canonical form
 
@@ -157,6 +172,15 @@ evaluator.
 ```guard
 policy "deny-secret-repository-reads" priority 1000 {
   when action.pack == "repository" and action.operation == "read_file" and repo.path matches "**/.env*"
+  deny
+  reason "Secret-bearing repository paths cannot enter agent context"
+}
+```
+
+```guard
+policy "deny-secret-repository-output-paths" priority 950 {
+  when action.pack == "guard.context"
+    and (repo.path matches "**/.env*" or repo.paths matches "**/.env*")
   deny
   reason "Secret-bearing repository paths cannot enter agent context"
 }

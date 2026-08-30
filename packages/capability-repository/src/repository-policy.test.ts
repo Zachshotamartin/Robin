@@ -15,7 +15,9 @@ import { REPOSITORY_POLICY_ATTRIBUTE_CATALOG } from "./policy-catalog.js";
 
 const POLICY_VERSION_ID = "pol_018f05a0-7b01-7000-8000-0000000003a1";
 const EXPECTED_POLICY_CONTENT_HASH =
-  "c24c9b084464a66862dd83a0676b1b0b20677d4a423be65d5f814c658a14d4ba";
+  "ba5e8a14f4f9dae1d4634deacccf3b9815f8d6118d52680e73590a133de909cd";
+const EXPECTED_CONTEXT_POLICY_CONTENT_HASH =
+  "6771a4c80442b73dcb592ee3a3f1d6f04cff2b71a22a291982148eff07b0a5de";
 const CORRELATION_TOKEN = "repository-default-policy-corpus-token-0001";
 const DEFAULT_REASON =
   "No policy matched; the immutable snapshot default effect applies.";
@@ -52,7 +54,7 @@ test("production default policy is bound to guard.repo and its owned strict corp
     },
     {
       catalogId: "guard.repo",
-      schemaVersion: 1,
+      schemaVersion: 2,
       contentHash: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
     },
   ]);
@@ -116,4 +118,81 @@ test("production default policy is bound to guard.repo and its owned strict corp
     JSON.stringify(run.cases.filter((entry) => !entry.passed)),
   );
   assert.equal(run.passed, 6);
+});
+
+test("production repository context policy owns an exact guard.repo v2 corpus", async () => {
+  const source = await readFile(
+    new URL("../policies/context.guard", import.meta.url),
+    "utf8",
+  );
+  const catalogs = composePolicyAttributeCatalogs([
+    BASE_POLICY_ATTRIBUTE_CATALOG,
+    REPOSITORY_POLICY_ATTRIBUTE_CATALOG,
+  ]);
+  const compiled = compilePolicySnapshot(
+    {
+      policyVersionId: "pol_018f05a0-7b01-7000-8000-0000000003a2",
+      source,
+      sourceId: "packages/capability-repository/policies/context.guard",
+      defaultEffect: "allow",
+    },
+    {},
+    catalogs,
+  );
+  assert.equal(compiled.ok, true, canonicalize(compiled.diagnostics));
+  if (!compiled.ok) return;
+  assert.equal(compiled.snapshot.contentHash, EXPECTED_CONTEXT_POLICY_CONTENT_HASH);
+  assert.deepEqual(compiled.snapshot.attributeCatalogs.manifest.at(-1), {
+    catalogId: "guard.repo",
+    schemaVersion: 2,
+    contentHash: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
+  });
+
+  const fixture: unknown = JSON.parse(
+    await readFile(
+      new URL("../testdata/context-policy-cases-v2.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const corpus = parsePolicyCaseCorpus(fixture, {
+    maximumBytes: 128 * 1024,
+    maximumCases: 8,
+  });
+  assert.equal(corpus.policyContentHash, EXPECTED_CONTEXT_POLICY_CONTENT_HASH);
+  assert.deepEqual(
+    corpus.cases.map((entry) => entry.name),
+    [
+      "secret-scalar-path-match",
+      "secret-scalar-path-near-miss",
+      "secret-output-path-first-match",
+      "secret-output-path-middle-match",
+      "secret-output-path-last-match",
+      "safe-output-paths-near-miss",
+      "empty-output-paths-near-miss",
+      "missing-output-paths-near-miss",
+    ],
+  );
+  assert.equal(
+    corpus.cases.filter(
+      (entry) =>
+        entry.expectedWinningPolicyName ===
+        "deny-secret-repository-context-paths",
+    ).length,
+    4,
+  );
+  assert.equal(
+    corpus.cases.filter((entry) => entry.expectedWinningPolicyName === null).length,
+    4,
+  );
+  const run = runPolicyCaseCorpus(
+    compiled.snapshot,
+    corpus,
+    "repository-context-policy-corpus-token-0001",
+  );
+  assert.equal(
+    run.failed,
+    0,
+    JSON.stringify(run.cases.filter((entry) => !entry.passed)),
+  );
+  assert.equal(run.passed, 8);
 });

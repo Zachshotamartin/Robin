@@ -2,6 +2,8 @@ import { isProxy } from "node:util/types";
 
 import {
   CONTRACT_SCHEMA_VERSION,
+  canonicalBytes,
+  canonicalSha256Hex,
   createDomainError,
   sha256Hex,
 } from "@guard/contracts";
@@ -111,6 +113,11 @@ const DEFAULT_LIMITS: ResolvedVirtualRepositoryPackLimits = Object.freeze({
   maximumDiffLines: 10_000,
   maximumDiffOutputBytes: 512 * 1024,
 });
+
+const MAXIMUM_RELEASE_PATH_IDENTIFIERS = 1_024;
+const MAXIMUM_RELEASE_PATH_BYTES = 64 * 1024;
+/** Mirrors context-broker parsePolicyProjection's hard canonical-byte ceiling. */
+const CONTEXT_BROKER_POLICY_PROJECTION_MAXIMUM_BYTES = 64 * 1024;
 
 function agentContextReleaseDefinition(
   reason: string,
@@ -315,6 +322,13 @@ function searchOperation(
         matchedCount: raw["matchedCount"]!,
         truncated: raw["truncated"]!,
       };
+      const outputPaths = emittedSearchPaths(
+        raw,
+        agent,
+        action,
+        limits.maximumSearchMatches,
+        limits.maximumSearchPaths,
+      );
       return {
         audit: {
           querySha256: action.request["querySha256"]!,
@@ -338,6 +352,7 @@ function searchOperation(
           action,
           raw,
           agent,
+          outputPaths,
         ),
       };
     },
@@ -422,6 +437,12 @@ function listOperation(
       const files = raw["files"]!;
       const truncated = raw["truncated"]!;
       const agent: JsonObject = { files, truncated };
+      const outputPaths = emittedListPaths(
+        raw,
+        agent,
+        action,
+        limits.maximumListResults,
+      );
       return {
         audit: {
           root: action.normalizedInput["root"]!,
@@ -440,6 +461,7 @@ function listOperation(
           action,
           raw,
           agent,
+          outputPaths,
         ),
       };
     },
@@ -553,6 +575,7 @@ function readOperation(
         content: raw["content"]!,
         truncated: raw["truncated"]!,
       };
+      assertScalarEmittedPath(raw, agent, action, "read_file");
       return {
         audit: {
           path: raw["path"]!,
@@ -675,6 +698,7 @@ function patchOperation(
     },
     release(raw, action) {
       const agent: JsonObject = { path: raw["path"]!, patch: raw["patch"]! };
+      assertScalarEmittedPath(raw, agent, action, "propose_patch");
       return {
         audit: {
           path: raw["path"]!,
@@ -809,6 +833,12 @@ function inspectDiffOperation(
         byteLength: raw["byteLength"]!,
         patch: raw["patch"]!,
       };
+      const outputPaths = emittedInspectDiffPaths(
+        raw,
+        agent,
+        action,
+        limits.maximumDiffPaths,
+      );
       return {
         audit: {
           paths: raw["paths"]!,
@@ -832,10 +862,240 @@ function inspectDiffOperation(
           action,
           raw,
           agent,
+          outputPaths,
         ),
       };
     },
   };
+}
+
+function emittedListPaths(
+  raw: JsonObject,
+  agent: JsonObject,
+  action: NormalizedAction,
+  maximumPaths: number,
+): readonly string[] {
+  const rawPaths = capturePathArray(
+    raw["files"],
+    maximumPaths,
+    false,
+    "list_files raw paths",
+  );
+  const agentPaths = capturePathArray(
+    agent["files"],
+    maximumPaths,
+    false,
+    "list_files agent paths",
+  );
+  assertSamePathSequence(rawPaths, agentPaths, "list_files");
+  const root = exactCanonicalPath(action.resource["path"], true, "list_files root");
+  const prefix = root.length === 0 ? "" : `${root}/`;
+  if (
+    rawPaths.some(
+      (path) => root.length > 0 && path !== root && !path.startsWith(prefix),
+    )
+  ) {
+    throw invalidInput("list_files emitted a path outside its normalized root.");
+  }
+  return rawPaths;
+}
+
+function emittedSearchPaths(
+  raw: JsonObject,
+  agent: JsonObject,
+  action: NormalizedAction,
+  maximumMatches: number,
+  maximumPaths: number,
+): readonly string[] {
+  const rawPaths = captureMatchPaths(
+    raw["matches"],
+    maximumMatches,
+    "search_text raw matches",
+  );
+  const agentPaths = captureMatchPaths(
+    agent["matches"],
+    maximumMatches,
+    "search_text agent matches",
+  );
+  assertSamePathSequence(rawPaths, agentPaths, "search_text");
+  const outputPaths = canonicalUniquePathSet(
+    rawPaths,
+    maximumPaths,
+    true,
+    "search_text output paths",
+  );
+  const selectedPaths = capturePathArray(
+    action.resource["paths"],
+    maximumPaths,
+    false,
+    "search_text selected paths",
+  );
+  const selected = new Set(selectedPaths);
+  if (outputPaths.some((path) => !selected.has(path))) {
+    throw invalidInput("search_text emitted a path outside its normalized selection.");
+  }
+  return outputPaths;
+}
+
+function emittedInspectDiffPaths(
+  raw: JsonObject,
+  agent: JsonObject,
+  action: NormalizedAction,
+  maximumPaths: number,
+): readonly string[] {
+  const rawPaths = capturePathArray(
+    raw["paths"],
+    maximumPaths,
+    false,
+    "inspect_diff raw paths",
+  );
+  const agentPaths = capturePathArray(
+    agent["paths"],
+    maximumPaths,
+    false,
+    "inspect_diff agent paths",
+  );
+  assertSamePathSequence(rawPaths, agentPaths, "inspect_diff");
+  const normalizedPaths = capturePathArray(
+    action.resource["paths"],
+    maximumPaths,
+    false,
+    "inspect_diff normalized paths",
+  );
+  if (canonicalSha256Hex(rawPaths) !== canonicalSha256Hex(normalizedPaths)) {
+    throw invalidInput(
+      "inspect_diff emitted paths do not exactly match its normalized inspection.",
+    );
+  }
+  return rawPaths;
+}
+
+function assertScalarEmittedPath(
+  raw: JsonObject,
+  agent: JsonObject,
+  action: NormalizedAction,
+  operation: "read_file" | "propose_patch",
+): void {
+  const normalized = exactCanonicalPath(
+    action.resource["path"],
+    false,
+    `${operation} normalized path`,
+  );
+  const rawPath = exactCanonicalPath(raw["path"], false, `${operation} raw path`);
+  const agentPath = exactCanonicalPath(
+    agent["path"],
+    false,
+    `${operation} agent path`,
+  );
+  if (rawPath !== normalized || agentPath !== normalized) {
+    throw invalidInput(`${operation} emitted a path other than its normalized path.`);
+  }
+}
+
+function captureMatchPaths(
+  value: unknown,
+  maximumMatches: number,
+  label: string,
+): readonly string[] {
+  const captured = snapshotBoundaryObject({ matches: value }, label)["matches"];
+  const maximum = boundedReleasePathCount(maximumMatches);
+  if (!Array.isArray(captured) || captured.length > maximum) {
+    throw invalidInput(`${label} exceeds its hard match-count bound.`);
+  }
+  const paths: string[] = [];
+  for (const candidate of captured) {
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      Array.isArray(candidate)
+    ) {
+      throw invalidInput(`${label} contains a malformed match.`);
+    }
+    const path = exactCanonicalPath(
+      (candidate as Readonly<Record<string, unknown>>)["path"],
+      false,
+      `${label} path`,
+    );
+    paths.push(path);
+  }
+  return Object.freeze(paths);
+}
+
+function capturePathArray(
+  value: unknown,
+  maximumPaths: number,
+  allowRepeated: boolean,
+  label: string,
+): readonly string[] {
+  const captured = snapshotBoundaryObject({ paths: value }, label)["paths"];
+  if (!Array.isArray(captured)) {
+    throw invalidInput(`${label} must be an array.`);
+  }
+  return canonicalUniquePathSet(captured, maximumPaths, allowRepeated, label);
+}
+
+function canonicalUniquePathSet(
+  values: readonly unknown[],
+  maximumPaths: number,
+  allowRepeated: boolean,
+  label: string,
+): readonly string[] {
+  const maximum = boundedReleasePathCount(maximumPaths);
+  if (!allowRepeated && values.length > maximum) {
+    throw invalidInput(`${label} exceeds its hard path-count bound.`);
+  }
+  const unique = new Set<string>();
+  let aggregateBytes = 0;
+  for (const value of values) {
+    const path = exactCanonicalPath(value, false, label);
+    if (unique.has(path)) {
+      if (!allowRepeated) {
+        throw invalidInput(`${label} contains a duplicate path.`);
+      }
+      continue;
+    }
+    unique.add(path);
+    if (unique.size > maximum) {
+      throw invalidInput(`${label} exceeds its hard unique-path bound.`);
+    }
+    aggregateBytes += Buffer.byteLength(path, "utf8");
+    if (aggregateBytes > MAXIMUM_RELEASE_PATH_BYTES) {
+      throw invalidInput(`${label} exceeds its hard aggregate byte bound.`);
+    }
+  }
+  return Object.freeze([...unique].sort(compareUtf8));
+}
+
+function boundedReleasePathCount(installedMaximum: number): number {
+  if (
+    !Number.isSafeInteger(installedMaximum) ||
+    installedMaximum < 1
+  ) {
+    throw invalidInput("A release path-count bound is invalid.");
+  }
+  return Math.min(installedMaximum, MAXIMUM_RELEASE_PATH_IDENTIFIERS);
+}
+
+function exactCanonicalPath(
+  value: unknown,
+  allowRoot: boolean,
+  label: string,
+): string {
+  const canonical = normalizeRepositoryPath(value, { allowRoot });
+  if (value !== canonical) {
+    throw invalidInput(`${label} is not in exact canonical form.`);
+  }
+  return canonical;
+}
+
+function assertSamePathSequence(
+  left: readonly string[],
+  right: readonly string[],
+  operation: string,
+): void {
+  if (canonicalSha256Hex(left) !== canonicalSha256Hex(right)) {
+    throw invalidInput(`${operation} raw and agent path identifiers disagree.`);
+  }
 }
 
 function repositoryAgentContextRelease(
@@ -843,12 +1103,33 @@ function repositoryAgentContextRelease(
   action: NormalizedAction,
   raw: JsonObject,
   agent: JsonObject,
+  outputPaths?: readonly string[],
 ) {
-  const path = action.resource["path"] as string;
-  const paths = action.resource["paths"];
-  const locator: JsonObject = Array.isArray(paths)
-    ? { path, paths }
-    : { path };
+  const path = exactCanonicalPath(action.resource["path"], true, "release scope");
+  const locator: JsonObject = outputPaths === undefined
+    ? { path }
+    : { path, outputPaths };
+  const resourceAttributes: JsonObject = outputPaths === undefined
+    ? { path }
+    : path.length === 0
+      ? { outputPaths }
+      : { path, outputPaths };
+  const policyProjection = {
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    catalogId: definition.catalogId,
+    catalogVersion: definition.catalogVersion,
+    catalogContentHash: definition.catalogContentHash,
+    resourceAttributes,
+    requestAttributes: {},
+  } as const;
+  if (
+    canonicalBytes(policyProjection).byteLength >
+    CONTEXT_BROKER_POLICY_PROJECTION_MAXIMUM_BYTES
+  ) {
+    throw invalidInput(
+      "Repository release policy projection exceeds the broker canonical-byte bound.",
+    );
+  }
   return bindCapabilityAgentContextRelease(
     {
       schemaVersion: CONTRACT_SCHEMA_VERSION,
@@ -861,14 +1142,7 @@ function repositoryAgentContextRelease(
         mediaType: "application/json",
         classification: definition.classification,
       },
-      policyProjection: {
-        schemaVersion: CONTRACT_SCHEMA_VERSION,
-        catalogId: definition.catalogId,
-        catalogVersion: definition.catalogVersion,
-        catalogContentHash: definition.catalogContentHash,
-        resourceAttributes: { path },
-        requestAttributes: {},
-      },
+      policyProjection,
       classification: definition.classification,
       reason: definition.reason,
     },

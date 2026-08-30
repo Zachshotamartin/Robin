@@ -245,10 +245,18 @@ function compare(
         ? "true"
         : "false";
     case "matches":
-      if (glob === null || typeof actual !== "string") {
+      if (glob === null || typeof expected !== "string") {
         throw denied("A compiled path-glob comparison is invalid.");
       }
-      return matchAnchoredPathGlob(glob, actual) ? "true" : "false";
+      if (typeof actual === "string") {
+        return matchAnchoredPathGlob(glob, actual) ? "true" : "false";
+      }
+      if (Array.isArray(actual)) {
+        return actual.some((path) => matchAnchoredPathGlob(glob, path))
+          ? "true"
+          : "false";
+      }
+      throw denied("A compiled path-glob comparison has an invalid target.");
   }
 }
 

@@ -474,8 +474,12 @@ function checkComparison(
     compatible = rightType === definition.type;
   } else if (expression.operator === "in") {
     compatible = listElementType(rightType) === definition.type;
-  } else {
+  } else if (expression.operator === "starts_with") {
     compatible = definition.type === "string" && rightType === "string";
+  } else {
+    compatible =
+      (definition.type === "string" || definition.type === "list<string>") &&
+      rightType === "string";
   }
   if (!compatible) {
     diagnostics.push(

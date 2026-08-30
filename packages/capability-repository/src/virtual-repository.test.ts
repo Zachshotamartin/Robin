@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -9,7 +10,21 @@ import {
 } from "@guard/contracts";
 import type { JsonObject, NormalizedAction } from "@guard/contracts";
 import { CapabilityGateway, CapabilityPackRegistry } from "@guard/capability-gateway";
-import type { PinnedPolicyEvaluator, PolicyDecision } from "@guard/policy-engine";
+import {
+  BASE_POLICY_ATTRIBUTE_CATALOG,
+  compilePolicySnapshotSet,
+  composePolicyAttributeCatalogs,
+  createPinnedPolicyEvaluator,
+  type PinnedPolicyEvaluator,
+  type PolicyDecision,
+} from "@guard/policy-engine";
+import {
+  BrokerContextSourceRegistry,
+  CONTEXT_POLICY_ATTRIBUTE_CATALOG,
+  createContextBrokerIntegrationFactory,
+  createContextReleasePolicySnapshot,
+  createPinnedContextPolicyAdapter,
+} from "@guard/context-broker";
 
 import {
   VIRTUAL_REPOSITORY_REFERENCES,
@@ -189,6 +204,35 @@ test("lists virtual fixture paths in stable order with a hard result bound", asy
     result.agentContextRelease,
     "src",
     "capability.list_files.output",
+    ["src/alpha.ts"],
+  );
+});
+
+test("list release paths use deterministic UTF-8 ordering", async () => {
+  const source = new VirtualRepository(
+    {
+      "\u{10000}.txt": "supplementary\n",
+      "\ue000.txt": "private-use\n",
+    },
+    { maximumFiles: 4, maximumFileBytes: 64 },
+  );
+  const { gateway, advertisement } = harness({}, source);
+  const prepared = await gateway.normalize(
+    {
+      schemaVersion: 1,
+      ...VIRTUAL_REPOSITORY_REFERENCES.list,
+      input: { root: "", maxResults: 4 },
+    },
+    context(ACTION_IDS.list),
+    advertisement,
+  );
+  const result = await gateway.execute(gateway.evaluate(prepared), {
+    signal: new AbortController().signal,
+  });
+  assert.deepEqual(result.raw["files"], ["\ue000.txt", "\u{10000}.txt"]);
+  assert.deepEqual(
+    result.agentContextRelease.policyProjection.resourceAttributes["outputPaths"],
+    ["\ue000.txt", "\u{10000}.txt"],
   );
 });
 
@@ -745,6 +789,205 @@ test("inspects a canonical unified diff without applying it", async () => {
   );
 });
 
+test("list, search, and diff environment-path metadata is denied by the real broker policy", async () => {
+  const source = new VirtualRepository(
+    {
+      ".env.local": "needle\n",
+      "safe.txt": "needle\n",
+    },
+    { maximumFiles: 4, maximumFileBytes: 64 },
+  );
+  const { gateway, advertisement } = harness({}, source);
+  const results = [];
+
+  for (const [operation, input] of [
+    ["list", { root: "", maxResults: 4 }],
+    [
+      "search",
+      {
+        query: "needle",
+        paths: ["safe.txt", ".env.local"],
+        maxMatches: 4,
+        maxSnippetBytes: 32,
+        maxOutputBytes: 1_024,
+      },
+    ],
+    [
+      "inspectDiff",
+      {
+        patch: [
+          "--- a/.env.local",
+          "+++ b/.env.local",
+          "@@ -1,1 +1,1 @@",
+          "-needle",
+          "+updated",
+          "--- a/safe.txt",
+          "+++ b/safe.txt",
+          "@@ -1,1 +1,1 @@",
+          "-needle",
+          "+updated",
+          "",
+        ].join("\n"),
+      },
+    ],
+  ] as const) {
+    const prepared = await gateway.normalize(
+      {
+        schemaVersion: 1,
+        ...VIRTUAL_REPOSITORY_REFERENCES[operation],
+        input,
+      },
+      context(ACTION_IDS[operation]),
+      advertisement,
+    );
+    assert.equal(prepared.action.resource["path"], "");
+    results.push(
+      await gateway.execute(gateway.evaluate(prepared), {
+        signal: new AbortController().signal,
+      }),
+    );
+  }
+
+  const repositoryContextPolicy = await readFile(
+    new URL("../policies/context.guard", import.meta.url),
+    "utf8",
+  );
+  const compiled = compilePolicySnapshotSet(
+    {
+      policyVersionId: PolicyVersionIdKind.parse(
+        "pol_018f05a0-7b01-7000-8000-000000000096",
+      ),
+      sources: [
+        {
+          sourceId: "allow-reviewed-context.guard",
+          source: `policy "allow-reviewed-context-release" priority 1 {
+  when action.pack == "guard.context" and action.operation == "context.release" and action.side_effect == "none"
+  allow
+  reason "Reviewed context release is allowed."
+}`,
+        },
+        {
+          sourceId: "packages/capability-repository/policies/context.guard",
+          source: repositoryContextPolicy,
+        },
+      ],
+      defaultEffect: "deny",
+    },
+    {},
+    composePolicyAttributeCatalogs([
+      BASE_POLICY_ATTRIBUTE_CATALOG,
+      CONTEXT_POLICY_ATTRIBUTE_CATALOG,
+      REPOSITORY_POLICY_ATTRIBUTE_CATALOG,
+    ]),
+  );
+  assert.equal(compiled.ok, true, compiled.ok ? "" : JSON.stringify(compiled.diagnostics));
+  if (!compiled.ok) return;
+  const releasePolicy = createContextReleasePolicySnapshot({
+    releasePolicyId: "repository.output-path-test",
+    releasePolicyVersion: 1,
+    secretDisposition: "redact",
+    promptInjectionDisposition: "tag",
+    truncatedDisposition: "deny",
+  });
+  const broker = createContextBrokerIntegrationFactory({
+    policySnapshotId: compiled.snapshot.policyVersionId,
+    releasePolicy,
+    sources: new BrokerContextSourceRegistry([]),
+    policy: createPinnedContextPolicyAdapter({
+      evaluator: createPinnedPolicyEvaluator(compiled.snapshot, {
+        secretCorrelationToken: "repository-output-path-test-token",
+      }),
+      releasePolicy,
+    }),
+    budgets: {
+      maximumResourceBytes: 16 * 1_024,
+      maximumRequestBytes: 16 * 1_024,
+      maximumItemsPerTurn: 8,
+      maximumBytesPerTurn: 64 * 1_024,
+      maximumItemsPerRun: 16,
+      maximumBytesPerRun: 128 * 1_024,
+      maximumControlCharacterRatio: 0.05,
+    },
+  }).createForRun({ runId: "run.repository-output-path-test" });
+
+  for (const [index, result] of results.entries()) {
+    assert.equal(
+      Object.hasOwn(
+        result.agentContextRelease.policyProjection.resourceAttributes,
+        "path",
+      ),
+      false,
+      "the empty repository root is a locator scope, not a canonical path attribute",
+    );
+    assert.deepEqual(
+      result.agentContextRelease.policyProjection.resourceAttributes["outputPaths"],
+      [".env.local", "safe.txt"],
+    );
+    const release = await broker.releaseCapabilityAgentView({
+      turnId: `turn.repository-output-path-test.${String(index)}`,
+      sourceVersion: result.agentContextRelease.sourceVersion,
+      resource: result.agentContextRelease.resource,
+      policyProjection: result.agentContextRelease.policyProjection,
+      output: result.agent,
+      classification: result.agentContextRelease.classification,
+      reason: result.agentContextRelease.reason,
+    });
+    assert.equal(release.status, "denied");
+    assert.equal(release.manifest.reason, "context.policy.metadata_denied");
+    assert.equal(release.manifest.releasedContentHash, null);
+  }
+
+  const brokerBoundaryResource = {
+    schemaVersion: 1 as const,
+    scheme: "repo",
+    sourceId: "virtual-repository",
+    locator: { path: "safe.txt" },
+    mediaType: "application/json",
+    classification: "fixture",
+  };
+  const exactBrokerPaths = outputPathsForProjectionBytes(64 * 1024);
+  const exactBrokerProjection = {
+    schemaVersion: 1 as const,
+    catalogId: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.catalogId,
+    catalogVersion: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion,
+    catalogContentHash: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
+    resourceAttributes: { outputPaths: exactBrokerPaths },
+    requestAttributes: {},
+  };
+  assert.equal(canonicalBytes(exactBrokerProjection).byteLength, 64 * 1024);
+  const exactBrokerResult = await broker.releaseCapabilityAgentView({
+    turnId: "turn.repository-output-path-test.exact-projection-bound",
+    sourceVersion: 1,
+    resource: brokerBoundaryResource,
+    policyProjection: exactBrokerProjection,
+    output: { reviewed: true },
+    classification: "fixture",
+    reason: "capability.projection-bound-test",
+  });
+  assert.equal(
+    exactBrokerResult.status,
+    "denied",
+    "the broker must parse the exact bound before applying default-deny policy",
+  );
+
+  const overBrokerPaths = outputPathsForProjectionBytes(64 * 1024 + 1);
+  await assert.rejects(
+    broker.releaseCapabilityAgentView({
+      turnId: "turn.repository-output-path-test.over-projection-bound",
+      sourceVersion: 1,
+      resource: brokerBoundaryResource,
+      policyProjection: {
+        ...exactBrokerProjection,
+        resourceAttributes: { outputPaths: overBrokerPaths },
+      },
+      output: { reviewed: true },
+      classification: "fixture",
+      reason: "capability.projection-bound-test",
+    }),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+});
+
 test("policy denial prevents inspect-diff handler reads and release", async () => {
   const source = new CountingVirtualRepository({ "safe.txt": "before\n" });
   const patch = [
@@ -1034,9 +1277,12 @@ function assertRepositoryAgentContextRelease(
   descriptor: Awaited<ReturnType<CapabilityGateway["execute"]>>["agentContextRelease"],
   path: string,
   reason: string,
-  paths?: readonly string[],
+  outputPaths?: readonly string[],
 ): void {
-  const locator = paths === undefined ? { path } : { path, paths };
+  const locator = outputPaths === undefined ? { path } : { path, outputPaths };
+  const resourceAttributes = outputPaths === undefined
+    ? { path }
+    : { path, outputPaths };
   assert.deepEqual(descriptor, {
     schemaVersion: 1,
     sourceVersion: 1,
@@ -1053,7 +1299,7 @@ function assertRepositoryAgentContextRelease(
       catalogId: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.catalogId,
       catalogVersion: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion,
       catalogContentHash: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
-      resourceAttributes: { path },
+      resourceAttributes,
       requestAttributes: {},
     },
     classification: "fixture",
@@ -1063,6 +1309,423 @@ function assertRepositoryAgentContextRelease(
   assert.equal(Object.isFrozen(descriptor.policyProjection), true);
   assert.equal(Object.isFrozen(descriptor.policyProjection.resourceAttributes), true);
 }
+
+test("release projections fail closed on redirected, duplicate, noncanonical, and oversized paths", async () => {
+  const source = repository();
+  const pack = createVirtualRepositoryPack(source, {
+    maximumListResults: 8,
+    maximumReadBytes: 128,
+    maximumPatchBytes: 512,
+  });
+  const registry = new CapabilityPackRegistry([pack]);
+  const gateway = new CapabilityGateway(registry, allowEvaluator());
+  const advertisement = registry.createAdvertisement(
+    Object.values(VIRTUAL_REPOSITORY_REFERENCES),
+  );
+  const list = pack.operations.find(
+    (operation) => operation.definition.operationId === "list_files",
+  );
+  const read = pack.operations.find(
+    (operation) => operation.definition.operationId === "read_file",
+  );
+  const search = pack.operations.find(
+    (operation) => operation.definition.operationId === "search_text",
+  );
+  const inspectDiff = pack.operations.find(
+    (operation) => operation.definition.operationId === "inspect_diff",
+  );
+  assert.notEqual(list, undefined);
+  assert.notEqual(read, undefined);
+  assert.notEqual(search, undefined);
+  assert.notEqual(inspectDiff, undefined);
+  if (
+    list === undefined ||
+    read === undefined ||
+    search === undefined ||
+    inspectDiff === undefined
+  ) return;
+
+  const listPrepared = await gateway.normalize(
+    {
+      schemaVersion: 1,
+      ...VIRTUAL_REPOSITORY_REFERENCES.list,
+      input: { root: "src", maxResults: 8 },
+    },
+    context(ACTION_IDS.list),
+    advertisement,
+  );
+  for (const files of [
+    ["src/alpha.ts", "src/alpha.ts"],
+    ["src/../secret"],
+    Array.from({ length: 9 }, (_value, index) => `src/${String(index)}.ts`),
+  ]) {
+    assert.throws(
+      () =>
+        list.release(
+          { files, matchedCount: files.length, truncated: false },
+          listPrepared.action,
+        ),
+      (error: unknown) => isDomainCode(error, "invalid_input"),
+    );
+  }
+
+  const readPrepared = await gateway.normalize(
+    {
+      schemaVersion: 1,
+      ...VIRTUAL_REPOSITORY_REFERENCES.read,
+      input: { path: "src/alpha.ts", startLine: 1, endLine: 1, maxBytes: 32 },
+    },
+    context(ACTION_IDS.read),
+    advertisement,
+  );
+  assert.throws(
+    () =>
+      read.release(
+        {
+          path: "src/beta.ts",
+          content: "redirected",
+          byteLength: 10,
+          sourceSha256: "a".repeat(64),
+          truncated: false,
+        },
+        readPrepared.action,
+      ),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+
+  const searchPrepared = await gateway.normalize(
+    {
+      schemaVersion: 1,
+      ...VIRTUAL_REPOSITORY_REFERENCES.search,
+      input: {
+        query: "one",
+        paths: ["src/alpha.ts"],
+        maxMatches: 2,
+        maxSnippetBytes: 16,
+        maxOutputBytes: 512,
+      },
+    },
+    context(ACTION_IDS.search),
+    advertisement,
+  );
+  assert.throws(
+    () =>
+      search.release(
+        {
+          matches: [
+            { path: "src/beta.ts", line: 1, column: 1, snippet: "redirected" },
+          ],
+          matchedCount: 1,
+          truncated: false,
+        },
+        searchPrepared.action,
+      ),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+
+  const inspectedPatch = [
+    "--- a/README.md",
+    "+++ b/README.md",
+    "@@ -1,1 +1,1 @@",
+    "-# Fixture",
+    "+# Reviewed",
+    "--- a/src/alpha.ts",
+    "+++ b/src/alpha.ts",
+    "@@ -1,3 +1,3 @@",
+    " one",
+    "-two",
+    "+TWO",
+    " three",
+    "",
+  ].join("\n");
+  const inspectPrepared = await gateway.normalize(
+    {
+      schemaVersion: 1,
+      ...VIRTUAL_REPOSITORY_REFERENCES.inspectDiff,
+      input: { patch: inspectedPatch },
+    },
+    context(ACTION_IDS.inspectDiff),
+    advertisement,
+  );
+  assert.throws(
+    () =>
+      inspectDiff.release(
+        {
+          paths: ["README.md"],
+          hunkCount: 2,
+          additions: 2,
+          deletions: 2,
+          lineCount: 12,
+          byteLength: Buffer.byteLength(inspectedPatch, "utf8"),
+          patch: inspectedPatch,
+        },
+        inspectPrepared.action,
+      ),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+
+  const aggregatePack = createVirtualRepositoryPack(source, {
+    maximumListResults: 300,
+    maximumReadBytes: 128,
+    maximumPatchBytes: 512,
+  });
+  const aggregateRegistry = new CapabilityPackRegistry([aggregatePack]);
+  const aggregateGateway = new CapabilityGateway(
+    aggregateRegistry,
+    allowEvaluator(),
+  );
+  const aggregateAdvertisement = aggregateRegistry.createAdvertisement([
+    VIRTUAL_REPOSITORY_REFERENCES.list,
+  ]);
+  const aggregatePrepared = await aggregateGateway.normalize(
+    {
+      schemaVersion: 1,
+      ...VIRTUAL_REPOSITORY_REFERENCES.list,
+      input: { root: "", maxResults: 300 },
+    },
+    context(ACTION_IDS.list),
+    aggregateAdvertisement,
+  );
+  const aggregateList = aggregatePack.operations.find(
+    (operation) => operation.definition.operationId === "list_files",
+  );
+  assert.notEqual(aggregateList, undefined);
+  if (aggregateList === undefined) return;
+  const longPaths = Array.from({ length: 270 }, (_value, pathIndex) =>
+    [
+      ...Array.from(
+        { length: 17 },
+        (_segment, segmentIndex) =>
+          `${String(segmentIndex)}-${"a".repeat(230)}`,
+      ),
+      `${String(pathIndex)}.ts`,
+    ].join("/"),
+  );
+  assert.throws(
+    () =>
+      aggregateList.release(
+        {
+          files: longPaths,
+          matchedCount: longPaths.length,
+          truncated: false,
+        },
+        aggregatePrepared.action,
+      ),
+    (error: unknown) =>
+      isDomainError(error) &&
+      error.code === "invalid_input" &&
+      error.message.includes("aggregate byte bound"),
+  );
+
+  const projectionPack = createVirtualRepositoryPack(source, {
+    maximumListResults: 64,
+    maximumReadBytes: 128,
+    maximumPatchBytes: 512,
+  });
+  const projectionRegistry = new CapabilityPackRegistry([projectionPack]);
+  const projectionGateway = new CapabilityGateway(
+    projectionRegistry,
+    allowEvaluator(),
+  );
+  const projectionAdvertisement = projectionRegistry.createAdvertisement([
+    VIRTUAL_REPOSITORY_REFERENCES.list,
+  ]);
+  const projectionPrepared = await projectionGateway.normalize(
+    {
+      schemaVersion: 1,
+      ...VIRTUAL_REPOSITORY_REFERENCES.list,
+      input: { root: "", maxResults: 64 },
+    },
+    context(ACTION_IDS.list),
+    projectionAdvertisement,
+  );
+  const projectionList = projectionPack.operations.find(
+    (operation) => operation.definition.operationId === "list_files",
+  );
+  assert.notEqual(projectionList, undefined);
+  if (projectionList === undefined) return;
+  const exactProjectionPaths = outputPathsForProjectionBytes(64 * 1024);
+  const exactProjectionViews = await projectionList.release(
+    {
+      files: exactProjectionPaths,
+      matchedCount: exactProjectionPaths.length,
+      truncated: false,
+    },
+    projectionPrepared.action,
+  );
+  assert.equal(
+    canonicalBytes(exactProjectionViews.agentContextRelease.descriptor.policyProjection)
+      .byteLength,
+    64 * 1024,
+  );
+
+  const overProjectionPaths = outputPathsForProjectionBytes(64 * 1024 + 1);
+  await assert.rejects(
+    async () =>
+      projectionList.release(
+        {
+          files: overProjectionPaths,
+          matchedCount: overProjectionPaths.length,
+          truncated: false,
+        },
+        projectionPrepared.action,
+      ),
+    (error: unknown) =>
+      isDomainError(error) &&
+      error.code === "invalid_input" &&
+      error.message.includes("broker canonical-byte bound"),
+  );
+
+  const countPack = createVirtualRepositoryPack(source, {
+    maximumListResults: 1_025,
+    maximumReadBytes: 128,
+    maximumPatchBytes: 512,
+  });
+  const countRegistry = new CapabilityPackRegistry([countPack]);
+  const countGateway = new CapabilityGateway(countRegistry, allowEvaluator());
+  const countAdvertisement = countRegistry.createAdvertisement([
+    VIRTUAL_REPOSITORY_REFERENCES.list,
+  ]);
+  const countPrepared = await countGateway.normalize(
+    {
+      schemaVersion: 1,
+      ...VIRTUAL_REPOSITORY_REFERENCES.list,
+      input: { root: "", maxResults: 1_025 },
+    },
+    context(ACTION_IDS.list),
+    countAdvertisement,
+  );
+  const countList = countPack.operations.find(
+    (operation) => operation.definition.operationId === "list_files",
+  );
+  assert.notEqual(countList, undefined);
+  if (countList === undefined) return;
+  const tooManyPaths = Array.from(
+    { length: 1_025 },
+    (_value, index) => `p/${String(index)}.txt`,
+  );
+  assert.throws(
+    () =>
+      countList.release(
+        {
+          files: tooManyPaths,
+          matchedCount: tooManyPaths.length,
+          truncated: false,
+        },
+        countPrepared.action,
+      ),
+    (error: unknown) =>
+      isDomainError(error) &&
+      error.code === "invalid_input" &&
+      error.message.includes("path-count bound"),
+  );
+});
+
+function outputPathsForProjectionBytes(targetBytes: number): readonly string[] {
+  const paths: string[] = [];
+  while (true) {
+    const currentBytes = repositoryPolicyProjectionBytes(paths);
+    const jsonStringOverhead = paths.length === 0 ? 2 : 3;
+    const requiredPathBytes = targetBytes - currentBytes - jsonStringOverhead;
+    if (requiredPathBytes >= 2 && requiredPathBytes <= 4_096) {
+      paths.push(canonicalAsciiPath(paths.length, requiredPathBytes));
+      assert.equal(repositoryPolicyProjectionBytes(paths), targetBytes);
+      return Object.freeze(paths);
+    }
+    assert.ok(requiredPathBytes > 4_096, "projection target is constructible");
+    paths.push(canonicalAsciiPath(paths.length, 4_000));
+  }
+}
+
+function repositoryPolicyProjectionBytes(outputPaths: readonly string[]): number {
+  return canonicalBytes({
+    schemaVersion: 1,
+    catalogId: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.catalogId,
+    catalogVersion: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion,
+    catalogContentHash: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
+    resourceAttributes: { outputPaths },
+    requestAttributes: {},
+  }).byteLength;
+}
+
+function canonicalAsciiPath(index: number, targetBytes: number): string {
+  let path = `p${String(index)}`;
+  while (path.length < targetBytes) {
+    const remaining = targetBytes - path.length;
+    if (remaining === 1) {
+      path += "x";
+      continue;
+    }
+    path += `/${"a".repeat(Math.min(254, remaining - 1))}`;
+  }
+  assert.equal(Buffer.byteLength(path, "utf8"), targetBytes);
+  return path;
+}
+
+test("gateway binding rejects an outputPaths descriptor omission after release", async () => {
+  const original = createVirtualRepositoryPack(repository(), {
+    maximumListResults: 8,
+    maximumReadBytes: 128,
+    maximumPatchBytes: 512,
+  });
+  const forged = {
+    ...original,
+    operations: original.operations.map((operation) =>
+      operation.definition.operationId !== "list_files"
+        ? operation
+        : {
+            ...operation,
+            async release(raw: JsonObject, action: NormalizedAction) {
+              const views = await operation.release(raw, action);
+              const claim = views.agentContextRelease;
+              return {
+                ...views,
+                agentContextRelease: {
+                  descriptor: {
+                    ...claim.descriptor,
+                    resource: {
+                      ...claim.descriptor.resource,
+                      locator: {
+                        ...claim.descriptor.resource.locator,
+                        outputPaths: ["src/alpha.ts"],
+                      },
+                    },
+                    policyProjection: {
+                      ...claim.descriptor.policyProjection,
+                      resourceAttributes: {
+                        ...claim.descriptor.policyProjection.resourceAttributes,
+                        outputPaths: ["src/alpha.ts"],
+                      },
+                    },
+                  },
+                  binding: claim.binding,
+                },
+              };
+            },
+          },
+    ),
+  };
+  const registry = new CapabilityPackRegistry([forged]);
+  const gateway = new CapabilityGateway(registry, allowEvaluator());
+  const advertisement = registry.createAdvertisement([
+    VIRTUAL_REPOSITORY_REFERENCES.list,
+  ]);
+  const prepared = await gateway.normalize(
+    {
+      schemaVersion: 1,
+      ...VIRTUAL_REPOSITORY_REFERENCES.list,
+      input: { root: "src", maxResults: 8 },
+    },
+    context(ACTION_IDS.list),
+    advertisement,
+  );
+  await assert.rejects(
+    gateway.execute(gateway.evaluate(prepared), {
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+});
 
 test("rejects traversal, absolute, drive, UNC, encoded, and ambiguous paths before execution", async () => {
   const invalidPaths = [

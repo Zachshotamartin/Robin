@@ -339,7 +339,7 @@ policy "tests-in-sandbox" priority 50 {
 
 - Every clause evaluates to `true`, `false`, or `unknown`. Missing optional attributes produce `unknown`; negating `unknown` remains `unknown`; only a complete `true` expression matches.
 - Use `exists(attribute)` to test presence. Do not infer presence with negated comparisons.
-- `matches` means an anchored path glob compiled at policy-load time over canonical forward-slash paths. Runtime regular expressions are not part of v1.
+- `matches` means an anchored path glob compiled at policy-load time over canonical forward-slash paths. It accepts catalogued canonical-path `string` and `list<string>` targets. Lists use existential any-match semantics; empty is false and an absent optional list is unknown. Runtime regular expressions are not part of v1.
 - Any matching `deny` wins, regardless of priority.
 - Otherwise, any matching `require_approval` wins.
 - Otherwise, a matching `allow` permits the action.
@@ -894,6 +894,7 @@ Build:
 - Generic resource, provenance, release-policy, and context-budget pipeline
 - Coding source adapter with canonical repository paths and include/exclude/secret filtering
 - Coding operations for file listing, search, bounded reading, patch proposal, and diff inspection
+- Exact bounded release metadata for every canonical path identifier those operations actually emit; multi-path metadata is unique, UTF-8 ordered, set-equal to the emitted identifiers, and evaluated through `guard.repo` v2 `repo.paths` rather than inferred from a common input root
 - Strict operation schemas, semantic normalizers, and output classifiers
 
 Exit criteria:

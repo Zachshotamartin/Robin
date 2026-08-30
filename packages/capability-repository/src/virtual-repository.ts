@@ -59,7 +59,7 @@ export class VirtualRepository {
     }
 
     this.#files = stored;
-    this.#paths = Object.freeze([...stored.keys()].sort());
+    this.#paths = Object.freeze([...stored.keys()].sort(compareUtf8));
     this.snapshotHash = canonicalSha256Hex(Object.fromEntries(stored));
     Object.freeze(this);
   }
@@ -89,6 +89,10 @@ export class VirtualRepository {
   contentHash(path: string): string {
     return sha256Hex(this.read(path));
   }
+}
+
+function compareUtf8(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
 }
 
 function isWellFormedUnicode(value: string): boolean {

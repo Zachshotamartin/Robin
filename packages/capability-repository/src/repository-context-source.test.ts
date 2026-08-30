@@ -226,7 +226,7 @@ test("composes repository context policy before media classification or content 
     },
     {
       catalogId: "guard.repo",
-      schemaVersion: 1,
+      schemaVersion: 2,
       contentHash: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
     },
   ]);
@@ -374,11 +374,15 @@ test("canonicalizes repository paths and rejects hostile alternate forms", () =>
 
 test("exports the versioned secret-safe guard.repo policy vocabulary", () => {
   assert.equal(REPOSITORY_POLICY_ATTRIBUTE_CATALOG.catalogId, "guard.repo");
-  assert.equal(REPOSITORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion, 1);
-  assert.match(REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash, /^[a-f0-9]{64}$/u);
+  assert.equal(REPOSITORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion, 2);
+  assert.equal(
+    REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
+    "8fc8e73ec11aa524659588abcf360cf86f0ac34dbf3f2922fffeef590d8bb24e",
+  );
   assert.deepEqual(
     REPOSITORY_POLICY_ATTRIBUTE_CATALOG.attributes.map((attribute) => ({
       name: attribute.name,
+      type: attribute.type,
       optional: attribute.optional,
       classification: attribute.secretClassification,
       matchKind: attribute.matchKind,
@@ -387,6 +391,7 @@ test("exports the versioned secret-safe guard.repo policy vocabulary", () => {
     [
       {
         name: "repo.path",
+        type: "string",
         optional: true,
         classification: "repository_path",
         matchKind: "canonical_path",
@@ -397,7 +402,20 @@ test("exports the versioned secret-safe guard.repo policy vocabulary", () => {
         },
       },
       {
+        name: "repo.paths",
+        type: "list<string>",
+        optional: true,
+        classification: "repository_paths",
+        matchKind: "canonical_path",
+        source: {
+          kind: "object_field",
+          section: "resource",
+          field: "outputPaths",
+        },
+      },
+      {
         name: "repo.branch",
+        type: "string",
         optional: true,
         classification: "repository_branch",
         matchKind: "none",
@@ -579,7 +597,7 @@ test("releases repository content through broker policy projection and provider-
         preconditionVersion: 1,
         attributes: {
           catalogId: "guard.repo",
-          catalogVersion: 1,
+          catalogVersion: 2,
           contentHash: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
         },
       },
