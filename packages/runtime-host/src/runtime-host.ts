@@ -117,6 +117,11 @@ interface AgentObservationRecord {
   readonly itemIds: readonly string[];
 }
 
+/** Runtime-owned metadata used when a capability view did not cross the broker. */
+interface CapabilityOutputDisposition extends JsonObject {
+  readonly agentViewStatus: "denied" | "failed";
+}
+
 interface PreallocatedAgentAttempt {
   readonly turn: number;
   readonly attemptId: AgentAttemptId;
@@ -182,6 +187,11 @@ const RUNTIME_ACTOR: ActorIdentity = Object.freeze({
   kind: "runtime",
   id: "guard.runtime-host",
 });
+
+const DENIED_CAPABILITY_OUTPUT_DISPOSITION: CapabilityOutputDisposition =
+  Object.freeze({ agentViewStatus: "denied" });
+const FAILED_CAPABILITY_OUTPUT_DISPOSITION: CapabilityOutputDisposition =
+  Object.freeze({ agentViewStatus: "failed" });
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 
@@ -1657,17 +1667,23 @@ export class SynchronousRuntimeHost {
   } {
     const observationId = this.#nextObservationId();
     const occurredAt = this.#now();
+    const safeDisposition =
+      disposition.status === "succeeded"
+        ? null
+        : capabilityOutputDisposition(disposition.status);
     const observation = parseObservation({
       schemaVersion: CONTRACT_SCHEMA_VERSION,
       observationId,
       actionId: action.actionId,
       status: "succeeded",
-      audit: result.audit,
+      audit: safeDisposition ?? result.audit,
       human: [
         this.#jsonContentBlock(
-          result.human,
+          safeDisposition ?? result.human,
           null,
-          capabilityActor(action.capabilityPackId),
+          safeDisposition === null
+            ? capabilityActor(action.capabilityPackId)
+            : RUNTIME_ACTOR,
           "internal",
         ),
       ],
@@ -2760,6 +2776,14 @@ function agentErrorProjection(
     message: error.message,
     retry: error.retry,
   });
+}
+
+function capabilityOutputDisposition(
+  status: CapabilityOutputDisposition["agentViewStatus"],
+): CapabilityOutputDisposition {
+  return status === "denied"
+    ? DENIED_CAPABILITY_OUTPUT_DISPOSITION
+    : FAILED_CAPABILITY_OUTPUT_DISPOSITION;
 }
 
 function invalidInput(message: string): DomainError {

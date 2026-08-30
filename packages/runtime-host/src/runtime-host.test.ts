@@ -41,6 +41,7 @@ import {
   canonicalize,
   createDomainError,
   isDomainError,
+  sha256Hex,
 } from "@guard/contracts";
 import type {
   ActionId,
@@ -64,6 +65,7 @@ import {
   createPinnedPolicyEvaluator,
   createPolicyAttributeCatalog,
   createPolicySnapshotManifest,
+  type PinnedPolicyEvaluator,
   type PolicySnapshot,
 } from "@guard/policy-engine";
 
@@ -77,6 +79,12 @@ const NOW = "2026-08-30T12:00:00.000Z";
 const RAW_CANARY = "RAW_RESULT_MUST_NEVER_ENTER_THE_LEDGER";
 const AUDIT_CANARY = "AUDIT_VIEW_MUST_NEVER_ENTER_THE_DRIVER";
 const HUMAN_CANARY = "HUMAN_VIEW_MUST_NEVER_ENTER_THE_DRIVER";
+const DENIED_VIEW_SECRET = "violet-fox-17";
+const DENIED_VIEW_SECRET_HASH = sha256Hex(DENIED_VIEW_SECRET);
+const DENIED_VIEW_PATH = "private/fixture-output.txt";
+const DENIED_VIEW_PACK_TEXT = "pack-owned output classification detail";
+const BROKER_RELEASE_FAILURE_CANARY =
+  "broker capability release private failure canary";
 const RAW_PLANNER_LOCATOR = "RAW_PLANNER_LOCATOR_MUST_NOT_BE_REQUESTED";
 const PACK_ID = "fixture.transform";
 const OPERATION_ID = "transform";
@@ -173,7 +181,9 @@ interface FixtureOptions {
   readonly sideEffectClass?: "none" | "local_reversible";
   readonly handlerFails?: boolean;
   readonly contextFails?: boolean;
+  readonly capabilityReleaseInfrastructureFails?: boolean;
   readonly denyContextPolicy?: boolean;
+  readonly leakingCapabilityViews?: boolean;
   readonly allowContextSecrets?: boolean;
   readonly preserveCapabilityValue?: boolean;
   readonly customSplitSecretClassifier?: boolean;
@@ -479,6 +489,24 @@ test("provider-free context/action/outcome run is exact, command-barriered, and 
     /^[0-9a-f]{64}$/u,
   );
 
+  const successfulObservation = findEvent(execution.history, "ObservationReleased")
+    .payload.observation;
+  assert.deepEqual(successfulObservation.audit, {
+    released: true,
+    privateAudit: AUDIT_CANARY,
+  });
+  assert.equal(successfulObservation.human.length, 1);
+  const successfulHuman = successfulObservation.human[0]!;
+  assert.equal(successfulHuman.modality, "json");
+  if (successfulHuman.modality !== "json") {
+    assert.fail("the successful capability human view changed modality");
+  }
+  assert.deepEqual(successfulHuman.value, { summary: HUMAN_CANARY });
+  assert.deepEqual(successfulHuman.provenance.producer, {
+    kind: "capability_worker",
+    id: PACK_ID,
+  });
+
   const serialized = canonicalize(execution.history);
   assert.equal(serialized.includes(RAW_CANARY), false);
   assert.equal(serialized.includes(AUDIT_CANARY), true);
@@ -690,7 +718,10 @@ test("genuine broker deduplication preserves one stable item in assembled input"
 });
 
 test("capability output denial preserves action success and gives the driver a denied empty projection", async () => {
-  const fixture = createFixture({ denyContextPolicy: true });
+  const fixture = createFixture({
+    denyContextPolicy: true,
+    leakingCapabilityViews: true,
+  });
   const execution = await fixture.host.run(fixture.objective);
 
   assert.equal(execution.state.status, "completed");
@@ -699,6 +730,20 @@ test("capability output denial preserves action success and gives the driver a d
   const ledgerObservation = findEvent(execution.history, "ObservationReleased");
   assert.equal(ledgerObservation.payload.observation.status, "succeeded");
   assert.deepEqual(ledgerObservation.payload.observation.agent, []);
+  assert.deepEqual(ledgerObservation.payload.observation.audit, {
+    agentViewStatus: "denied",
+  });
+  assert.equal(ledgerObservation.payload.observation.human.length, 1);
+  const human = ledgerObservation.payload.observation.human[0]!;
+  assert.equal(human.modality, "json");
+  if (human.modality !== "json") {
+    assert.fail("the denied capability disposition changed modality");
+  }
+  assert.deepEqual(human.value, { agentViewStatus: "denied" });
+  assert.deepEqual(human.provenance.producer, {
+    kind: "runtime",
+    id: "guard.runtime-host",
+  });
   const driverObservation = fixture.driver.requests[1]!.observations[0]!;
   assert.equal(driverObservation.status, "denied");
   assert.deepEqual(driverObservation.content, []);
@@ -708,6 +753,85 @@ test("capability output denial preserves action success and gives the driver a d
     "ContextManifestRecorded",
   ).find((event) => event.payload.manifestKind === "release");
   assert.equal(releaseManifest?.payload.manifest["status"], "denied");
+  const serializedObservation = canonicalize(ledgerObservation);
+  for (const forbidden of [
+    DENIED_VIEW_SECRET,
+    DENIED_VIEW_SECRET_HASH,
+    DENIED_VIEW_PATH,
+    DENIED_VIEW_PACK_TEXT,
+    AUDIT_CANARY,
+    HUMAN_CANARY,
+  ]) {
+    assert.equal(serializedObservation.includes(forbidden), false, forbidden);
+  }
+  const countersBeforeReplay = canonicalize(fixture.counters);
+  const replayed = await fixture.host.replayRun(execution.runId);
+  assert.equal(canonicalize(replayed.history), canonicalize(execution.history));
+  assert.equal(canonicalize(replayed.state), canonicalize(execution.state));
+  assert.equal(canonicalize(replay(execution.history)), canonicalize(execution.state));
+  assert.equal(canonicalize(fixture.counters), countersBeforeReplay);
+});
+
+test("capability output broker failure suppresses pack views while preserving action success", async () => {
+  const fixture = createFixture({
+    capabilityReleaseInfrastructureFails: true,
+    leakingCapabilityViews: true,
+  });
+  const execution = await fixture.host.run(fixture.objective);
+
+  assert.equal(execution.state.status, "completed");
+  const succeeded = findEvent(execution.history, "ActionSucceeded");
+  assert.equal(eventTypes(execution.history).includes("ActionFailed"), false);
+  assert.equal(
+    eventsOfType(execution.history, "ContextManifestRecorded").some(
+      (event) =>
+        event.payload.manifestKind === "release" &&
+        event.payload.referenceId === succeeded.payload.actionId,
+    ),
+    false,
+  );
+  const ledgerObservation = findEvent(execution.history, "ObservationReleased");
+  assert.equal(ledgerObservation.payload.observation.status, "succeeded");
+  assert.deepEqual(ledgerObservation.payload.observation.agent, []);
+  assert.deepEqual(ledgerObservation.payload.observation.audit, {
+    agentViewStatus: "failed",
+  });
+  assert.equal(ledgerObservation.payload.observation.human.length, 1);
+  const human = ledgerObservation.payload.observation.human[0]!;
+  assert.equal(human.modality, "json");
+  if (human.modality !== "json") {
+    assert.fail("the failed capability disposition changed modality");
+  }
+  assert.deepEqual(human.value, { agentViewStatus: "failed" });
+  assert.deepEqual(human.provenance.producer, {
+    kind: "runtime",
+    id: "guard.runtime-host",
+  });
+  const driverObservation = fixture.driver.requests[1]!.observations[0]!;
+  assert.equal(driverObservation.status, "failed");
+  assert.deepEqual(driverObservation.content, []);
+  assert.equal(driverObservation.error?.code, "infrastructure_failed");
+  const serialized = canonicalize({
+    history: execution.history,
+    driverRequests: fixture.driver.requests,
+  });
+  for (const forbidden of [
+    DENIED_VIEW_SECRET,
+    DENIED_VIEW_SECRET_HASH,
+    DENIED_VIEW_PATH,
+    DENIED_VIEW_PACK_TEXT,
+    AUDIT_CANARY,
+    HUMAN_CANARY,
+    BROKER_RELEASE_FAILURE_CANARY,
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, forbidden);
+  }
+  const countersBeforeReplay = canonicalize(fixture.counters);
+  const replayed = await fixture.host.replayRun(execution.runId);
+  assert.equal(canonicalize(replayed.history), canonicalize(execution.history));
+  assert.equal(canonicalize(replayed.state), canonicalize(execution.state));
+  assert.equal(canonicalize(replay(execution.history)), canonicalize(execution.state));
+  assert.equal(canonicalize(fixture.counters), countersBeforeReplay);
 });
 
 test("split secrets across prior broker observations stop assembly before a third driver call", async () => {
@@ -1037,14 +1161,19 @@ function createFixture(options: FixtureOptions = {}): Fixture {
     promptInjectionDisposition: "tag",
     truncatedDisposition: "deny",
   });
+  const contextPolicyEvaluator = createPinnedPolicyEvaluator(policySnapshot, {
+    secretCorrelationToken: "runtime-host-context-policy-token-0001",
+  });
+  const brokerPolicyEvaluator =
+    options.capabilityReleaseInfrastructureFails === true
+      ? capabilityReleaseFailingEvaluator(contextPolicyEvaluator)
+      : contextPolicyEvaluator;
   const contextBrokerFactory = createContextBrokerIntegrationFactory({
     policySnapshotId: POLICY_VERSION_ID,
     releasePolicy,
     sources: new BrokerContextSourceRegistry(withContext ? [source] : []),
     policy: createPinnedContextPolicyAdapter({
-      evaluator: createPinnedPolicyEvaluator(policySnapshot, {
-        secretCorrelationToken: "runtime-host-context-policy-token-0001",
-      }),
+      evaluator: brokerPolicyEvaluator,
       releasePolicy,
     }),
     budgets: brokerBudgets,
@@ -1241,9 +1370,29 @@ function capabilityPackFixture(
             classification: CAPABILITY_RELEASE_DEFINITION.classification,
             reason: CAPABILITY_RELEASE_DEFINITION.reason,
           } as const;
+          const audit =
+            options.leakingCapabilityViews === true
+              ? {
+                  outputValue: DENIED_VIEW_SECRET,
+                  outputSha256: DENIED_VIEW_SECRET_HASH,
+                  path: DENIED_VIEW_PATH,
+                  detail: DENIED_VIEW_PACK_TEXT,
+                  privateAudit: AUDIT_CANARY,
+                }
+              : { released: true, privateAudit: AUDIT_CANARY };
+          const human =
+            options.leakingCapabilityViews === true
+              ? {
+                  summary: HUMAN_CANARY,
+                  outputValue: DENIED_VIEW_SECRET,
+                  outputSha256: DENIED_VIEW_SECRET_HASH,
+                  path: DENIED_VIEW_PATH,
+                  detail: DENIED_VIEW_PACK_TEXT,
+                }
+              : { summary: HUMAN_CANARY };
           return {
-            audit: { released: true, privateAudit: AUDIT_CANARY },
-            human: { summary: HUMAN_CANARY },
+            audit,
+            human,
             agent,
             agentContextRelease: bindCapabilityAgentContextRelease(
               descriptor,
@@ -1256,6 +1405,23 @@ function capabilityPackFixture(
       },
     ],
   };
+}
+
+function capabilityReleaseFailingEvaluator(
+  delegate: PinnedPolicyEvaluator,
+): PinnedPolicyEvaluator {
+  return Object.freeze({
+    policyVersionId: delegate.policyVersionId,
+    evaluate(action: Parameters<PinnedPolicyEvaluator["evaluate"]>[0]) {
+      if (
+        action.capabilityPackId === "guard.context" &&
+        action.operationId === "context.release"
+      ) {
+        throw new Error(BROKER_RELEASE_FAILURE_CANARY);
+      }
+      return delegate.evaluate(action);
+    },
+  });
 }
 
 function compileFixturePolicy(source: string): PolicySnapshot {
