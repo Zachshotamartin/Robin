@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+!.env.example
+artifacts/
+runs/
+.guarded-agent/
+.vscode-test/
+*.log
+*.pid
+*.sock
+postgres-data/
