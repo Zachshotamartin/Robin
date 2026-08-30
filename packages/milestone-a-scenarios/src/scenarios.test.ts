@@ -24,6 +24,7 @@ import {
   runSyntheticTransformScenario,
   type SyntheticScenarioExecution,
 } from "./synthetic-scenario.js";
+import { FixedRuntimeHostIdFactory } from "./scenario-support.js";
 
 const SYNTHETIC_EVENT_ORDER = [
   "RunCreated",
@@ -193,6 +194,89 @@ test("every proposed and normalized action retains the exact advertised pack and
     exactReference(VIRTUAL_REPOSITORY_REFERENCES.patch, "proposed"),
     exactReference(VIRTUAL_REPOSITORY_REFERENCES.patch, "normalized"),
   ]);
+});
+
+test("both scenarios bind real compiler manifests and full allow traces", async () => {
+  const [syntheticResult, codingResult] = await Promise.all([synthetic(), coding()]);
+  for (const [result, expectedWinner, expectedDecisionCount] of [
+    [syntheticResult, "allow-synthetic-transform", 1],
+    [codingResult, "allow-virtual-repository-operations", 3],
+  ] as const) {
+    const pinned = result.execution.history.find(
+      (event) => event.eventType === "TaskProfilePinned",
+    );
+    assert.notEqual(pinned, undefined);
+    if (pinned?.eventType !== "TaskProfilePinned") {
+      throw new Error("The scenario did not pin its task profile.");
+    }
+    const manifest = pinned.payload.taskProfile.policyProfile.configuration;
+    assert.equal(manifest["schemaVersion"], 1);
+    assert.equal(manifest["languageVersion"], "1");
+    assert.equal(manifest["defaultEffect"], "deny");
+    assert.match(manifest["policyContentHash"] as string, /^[a-f0-9]{64}$/u);
+
+    const decisions = result.execution.history.filter(
+      (event) => event.eventType === "PolicyEvaluated",
+    );
+    assert.equal(decisions.length, expectedDecisionCount);
+    for (const decision of decisions) {
+      if (decision.eventType !== "PolicyEvaluated") continue;
+      assert.equal(decision.payload.decision, "allow");
+      assert.equal(
+        decision.payload.policyVersionId,
+        manifest["policyVersionId"],
+      );
+      assert.equal(decision.payload.trace["languageVersion"], "1");
+      assert.equal(
+        decision.payload.trace["policyContentHash"],
+        manifest["policyContentHash"],
+      );
+      assert.deepEqual(
+        decision.payload.trace["attributeCatalogs"],
+        manifest["attributeCatalogs"],
+      );
+      assert.equal(decision.payload.trace["defaultEffect"], "deny");
+      assert.equal(decision.payload.trace["combiningAlgorithm"], "deny_overrides");
+      assert.equal(decision.payload.trace["result"], "allow");
+      assert.equal(decision.payload.trace["winningPolicyName"], expectedWinner);
+      assert.equal(Object.hasOwn(decision.payload.trace, "policyComponentId"), false);
+      assert.equal(Object.hasOwn(decision.payload.trace, "rule"), false);
+    }
+  }
+});
+
+test("normalized scenario actions populate the complete generic base catalog", async () => {
+  const [syntheticResult, codingResult] = await Promise.all([synthetic(), coding()]);
+  for (const result of [syntheticResult, codingResult]) {
+    const normalized = result.execution.history.filter(
+      (event) => event.eventType === "ActionNormalized",
+    );
+    assert.ok(normalized.length > 0);
+    for (const event of normalized) {
+      if (event.eventType !== "ActionNormalized") continue;
+      const { action } = event.payload;
+      assert.equal(action.subject["kind"], "scripted");
+      assert.equal(typeof action.subject["driverId"], "string");
+      assert.equal(typeof action.resource["scheme"], "string");
+      assert.equal(typeof action.resource["sourceId"], "string");
+      assert.equal(typeof action.resource["classification"], "string");
+      assert.equal(action.environment["sandboxed"], true);
+      assert.equal(action.environment["networkProfile"], "disabled");
+      assert.equal(action.environment["trustLevel"], "trusted_fixture");
+    }
+  }
+});
+
+test("the deterministic ID source owns a distinct approval sequence", () => {
+  const ids = new FixedRuntimeHostIdFactory(1);
+  assert.equal(
+    ids.nextApprovalId(),
+    "apr_018f0001-0000-7000-8000-0b0000000001",
+  );
+  assert.equal(
+    ids.nextApprovalId(),
+    "apr_018f0001-0000-7000-8000-0b0000000002",
+  );
 });
 
 test("event history contains released views only, and agent observations remain deliberately narrow", async () => {

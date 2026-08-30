@@ -8,6 +8,7 @@ import {
   CapabilityPackRegistry,
 } from "@guard/capability-gateway";
 import {
+  SYNTHETIC_POLICY_SNAPSHOT,
   SYNTHETIC_TASK_PROFILE,
   SYNTHETIC_TRANSFORM_REFERENCE,
   createSyntheticContextSource,
@@ -23,6 +24,7 @@ import {
   type TaskProfile,
 } from "@guard/contracts";
 import { InMemoryEventStore } from "@guard/event-store";
+import { createPinnedPolicyEvaluator } from "@guard/policy-engine";
 import { InMemoryTaskProfileRegistry } from "@guard/profile-registry";
 import {
   SynchronousRuntimeHost,
@@ -39,7 +41,6 @@ import {
   fixedContentBlockId,
   fixedObservationId,
   fixedOutcomeId,
-  fixedPolicyVersionId,
   fixedProposalId,
   fixedRunId,
   immutable,
@@ -200,7 +201,12 @@ export async function runSyntheticTransformScenario(): Promise<SyntheticScenario
   const profileRegistry = new InMemoryTaskProfileRegistry();
   profileRegistry.register(SYNTHETIC_TASK_PROFILE);
   const eventStore = new InMemoryEventStore({ now: () => SCENARIO_RECORDED_AT });
-  const gateway = new CapabilityGateway(packRegistry);
+  const gateway = new CapabilityGateway(
+    packRegistry,
+    createPinnedPolicyEvaluator(SYNTHETIC_POLICY_SNAPSHOT, {
+      secretCorrelationToken: "synthetic-scenario-policy-token-0001",
+    }),
+  );
   const contextPlanner: RuntimeContextPlanner = Object.freeze({
     plan({ objective: plannedObjective }: {
       readonly objective: ObjectiveEnvelope;
@@ -227,13 +233,21 @@ export async function runSyntheticTransformScenario(): Promise<SyntheticScenario
     capabilityPacks: packRegistry,
     capabilityGateway: gateway,
     contextPlanner,
-    phaseAPolicy: {
+    installedPolicy: {
       componentId: "synthetic-safe-default",
       componentVersion: 1,
-      policyVersionId: fixedPolicyVersionId(namespace),
+      snapshot: SYNTHETIC_POLICY_SNAPSHOT,
     },
-    normalizationSubject: { kind: "fixture", id: "milestone-a" },
-    normalizationEnvironment: { mode: "deterministic", network: "disabled" },
+    normalizationSubject: {
+      kind: "scripted",
+      driverId: "driver:milestone-a-synthetic",
+    },
+    normalizationEnvironment: {
+      profileId: SYNTHETIC_TASK_PROFILE.profileId,
+      sandboxed: true,
+      networkProfile: "disabled",
+      trustLevel: "trusted_fixture",
+    },
     clock: Object.freeze({ now: () => SCENARIO_OCCURRED_AT }),
     ids: new FixedRuntimeHostIdFactory(namespace),
   });

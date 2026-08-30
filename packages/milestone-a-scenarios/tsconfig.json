@@ -13,6 +13,7 @@
     { "path": "../capability-gateway" },
     { "path": "../capability-synthetic" },
     { "path": "../capability-repository" },
+    { "path": "../policy-engine" },
     { "path": "../profile-registry" },
     { "path": "../runtime-host" }
   ]

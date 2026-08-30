@@ -14,6 +14,7 @@ import {
   CONTRACT_SCHEMA_VERSION,
   ActionIdKind,
   AgentAttemptIdKind,
+  ApprovalIdKind,
   DriverProposalIdKind,
   EventIdKind,
   PolicyVersionIdKind,
@@ -25,6 +26,7 @@ import {
   parseObservation,
   type ActionId,
   type AgentAttemptId,
+  type ApprovalId,
   type DriverProposalId,
   type EventId,
   type JsonContentBlock,
@@ -36,6 +38,11 @@ import {
 } from "@guard/contracts";
 import type { EventStore } from "@guard/event-store";
 import type { TaskProfileRegistry } from "@guard/profile-registry";
+import {
+  compilePolicySnapshot,
+  createPinnedPolicyEvaluator,
+  type PolicySnapshot,
+} from "@guard/policy-engine";
 import {
   SynchronousRuntimeHost,
   type RuntimeHostExecution,
@@ -58,7 +65,10 @@ const CATEGORY = Object.freeze({
   proposal: 0x08,
   policy: 0x09,
   outcome: 0x0a,
+  approval: 0x0b,
 });
+
+const REPLAY_POLICY_SNAPSHOT = compileReplayPolicy();
 
 export interface ScenarioExecution {
   readonly execution: RuntimeHostExecution;
@@ -79,6 +89,7 @@ export class FixedRuntimeHostIdFactory implements RuntimeHostIdFactory {
   #eventOrdinal = 0;
   #attemptOrdinal = 0;
   #actionOrdinal = 0;
+  #approvalOrdinal = 0;
   #contextOrdinal = 0;
   #blockOrdinal = 0;
   #observationOrdinal = 0;
@@ -114,6 +125,11 @@ export class FixedRuntimeHostIdFactory implements RuntimeHostIdFactory {
     return fixedActionId(this.#namespace, this.#actionOrdinal);
   }
 
+  public nextApprovalId(): ApprovalId {
+    this.#approvalOrdinal += 1;
+    return fixedApprovalId(this.#namespace, this.#approvalOrdinal);
+  }
+
   public nextContextRequestId(): string {
     this.#contextOrdinal += 1;
     return `ctx_${fixedUuid(this.#namespace, CATEGORY.context, this.#contextOrdinal)}`;
@@ -146,6 +162,12 @@ export function fixedAttemptId(namespace: number, turn: number): AgentAttemptId 
 
 export function fixedActionId(namespace: number, ordinal: number): ActionId {
   return ActionIdKind.parse(`act_${fixedUuid(namespace, CATEGORY.action, ordinal)}`);
+}
+
+export function fixedApprovalId(namespace: number, ordinal: number): ApprovalId {
+  return ApprovalIdKind.parse(
+    `apr_${fixedUuid(namespace, CATEGORY.approval, ordinal)}`,
+  );
 }
 
 export function fixedProposalId(namespace: number, ordinal: number): DriverProposalId {
@@ -325,13 +347,18 @@ export async function replayWithFailOnEffectPorts(
         return fail("context-planner.plan");
       },
     }),
-    phaseAPolicy: {
+    installedPolicy: {
       componentId: "replay-effect-spy",
       componentVersion: 1,
-      policyVersionId: fixedPolicyVersionId(0xfffe),
+      snapshot: REPLAY_POLICY_SNAPSHOT,
     },
-    normalizationSubject: {},
-    normalizationEnvironment: {},
+    normalizationSubject: { kind: "replay" },
+    normalizationEnvironment: {
+      profileId: "replay-effect-spy",
+      sandboxed: true,
+      networkProfile: "disabled",
+      trustLevel: "trusted_fixture",
+    },
     clock: Object.freeze({
       now() {
         return fail("runtime-clock.now");
@@ -451,7 +478,12 @@ class FailOnCallCapabilityGateway extends CapabilityGateway {
     registry: CapabilityPackRegistry,
     fail: EffectFailure,
   ) {
-    super(registry);
+    super(
+      registry,
+      createPinnedPolicyEvaluator(REPLAY_POLICY_SNAPSHOT, {
+        secretCorrelationToken: "scenario-replay-policy-token-0001",
+      }),
+    );
     EFFECT_FAILURES.set(this, fail);
   }
 
@@ -465,6 +497,12 @@ class FailOnCallCapabilityGateway extends CapabilityGateway {
     ..._arguments: Parameters<CapabilityGateway["execute"]>
   ): ReturnType<CapabilityGateway["execute"]> {
     return failEffect(this, "capability-gateway.execute");
+  }
+
+  public override evaluate(
+    ..._arguments: Parameters<CapabilityGateway["evaluate"]>
+  ): ReturnType<CapabilityGateway["evaluate"]> {
+    return failEffect(this, "capability-gateway.evaluate");
   }
 }
 
@@ -492,6 +530,10 @@ class FailOnCallRuntimeHostIdFactory implements RuntimeHostIdFactory {
     return failEffect(this, "runtime-id-factory.nextActionId");
   }
 
+  public nextApprovalId(): ReturnType<RuntimeHostIdFactory["nextApprovalId"]> {
+    return failEffect(this, "runtime-id-factory.nextApprovalId");
+  }
+
   public nextContextRequestId(): ReturnType<
     RuntimeHostIdFactory["nextContextRequestId"]
   > {
@@ -517,4 +559,26 @@ function deepFreeze<T>(value: T): T {
   }
   for (const child of Object.values(value)) deepFreeze(child);
   return Object.freeze(value);
+}
+
+function compileReplayPolicy(): PolicySnapshot {
+  const result = compilePolicySnapshot({
+    policyVersionId: fixedPolicyVersionId(0xfffe),
+    source: `policy "allow-replay-fixture" priority 1 {
+  when action.side_effect == "none"
+  allow
+  reason "The replay fixture never evaluates policy or performs effects."
+}
+`,
+    sourceId: "scenario-replay.guard",
+    defaultEffect: "deny",
+  });
+  if (!result.ok) {
+    throw new Error(
+      `The deterministic replay policy did not compile: ${JSON.stringify(
+        result.diagnostics,
+      )}`,
+    );
+  }
+  return result.snapshot;
 }

@@ -23,6 +23,12 @@ import {
   type TaskProfile,
 } from "@guard/contracts";
 import { InMemoryEventStore } from "@guard/event-store";
+import {
+  compilePolicySnapshot,
+  createPinnedPolicyEvaluator,
+  createPolicySnapshotManifest,
+  type PolicySnapshot,
+} from "@guard/policy-engine";
 import { InMemoryTaskProfileRegistry } from "@guard/profile-registry";
 import { SynchronousRuntimeHost } from "@guard/runtime-host";
 
@@ -44,6 +50,17 @@ import {
 } from "./scenario-support.js";
 
 export const CODING_SCENARIO_NAMESPACE = 2;
+
+const CODING_POLICY_SOURCE = `policy "allow-virtual-repository-operations" priority 100 {
+  when action.pack == "coding.virtual-repository"
+    and action.operation in ["list_files", "read_file", "propose_patch"]
+    and action.side_effect == "none"
+  allow
+  reason "The virtual repository operations are bounded and effect-free."
+}
+`;
+
+const CODING_VIRTUAL_POLICY_SNAPSHOT = compileCodingPolicy();
 
 const GREETING_PATH = "src/greet.ts";
 const ORIGINAL_GREETING = [
@@ -105,7 +122,7 @@ export const CODING_VIRTUAL_TASK_PROFILE: TaskProfile = immutable({
   policyProfile: {
     componentId: "coding-fixture-safe-default",
     componentVersion: 1,
-    configuration: {},
+    configuration: createPolicySnapshotManifest(CODING_VIRTUAL_POLICY_SNAPSHOT),
   },
   outcomeSchema: {
     schemaId: "coding.virtual.outcome",
@@ -320,6 +337,12 @@ export async function runCodingVirtualRepositoryScenario(): Promise<CodingScenar
   const profileRegistry = new InMemoryTaskProfileRegistry();
   profileRegistry.register(CODING_VIRTUAL_TASK_PROFILE);
   const eventStore = new InMemoryEventStore({ now: () => SCENARIO_RECORDED_AT });
+  const gateway = new CapabilityGateway(
+    packRegistry,
+    createPinnedPolicyEvaluator(CODING_VIRTUAL_POLICY_SNAPSHOT, {
+      secretCorrelationToken: "coding-scenario-policy-token-0001",
+    }),
+  );
   const host = new SynchronousRuntimeHost({
     eventStore,
     profileRegistry,
@@ -330,15 +353,23 @@ export async function runCodingVirtualRepositoryScenario(): Promise<CodingScenar
     },
     contextSources: new ContextSourceRegistry([]),
     capabilityPacks: packRegistry,
-    capabilityGateway: new CapabilityGateway(packRegistry),
+    capabilityGateway: gateway,
     contextPlanner: Object.freeze({ plan: () => [] }),
-    phaseAPolicy: {
+    installedPolicy: {
       componentId: "coding-fixture-safe-default",
       componentVersion: 1,
-      policyVersionId: fixedPolicyVersionId(namespace),
+      snapshot: CODING_VIRTUAL_POLICY_SNAPSHOT,
     },
-    normalizationSubject: { kind: "fixture", id: "milestone-a" },
-    normalizationEnvironment: { mode: "deterministic", network: "disabled" },
+    normalizationSubject: {
+      kind: "scripted",
+      driverId: "driver:milestone-a-coding",
+    },
+    normalizationEnvironment: {
+      profileId: CODING_VIRTUAL_TASK_PROFILE.profileId,
+      sandboxed: true,
+      networkProfile: "disabled",
+      trustLevel: "trusted_fixture",
+    },
     clock: Object.freeze({ now: () => SCENARIO_OCCURRED_AT }),
     ids: new FixedRuntimeHostIdFactory(namespace),
   });
@@ -427,4 +458,21 @@ function logicalLines(content: string): string[] {
   const lines = content.split("\n");
   if (content.endsWith("\n")) lines.pop();
   return lines;
+}
+
+function compileCodingPolicy(): PolicySnapshot {
+  const result = compilePolicySnapshot({
+    policyVersionId: fixedPolicyVersionId(CODING_SCENARIO_NAMESPACE),
+    source: CODING_POLICY_SOURCE,
+    sourceId: "coding-virtual-fixture.guard",
+    defaultEffect: "deny",
+  });
+  if (!result.ok) {
+    throw new Error(
+      `The deterministic coding scenario policy did not compile: ${JSON.stringify(
+        result.diagnostics,
+      )}`,
+    );
+  }
+  return result.snapshot;
 }
