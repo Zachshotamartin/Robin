@@ -22,6 +22,7 @@
   "dependencies": {
     "@guard/capability-gateway": "0.0.0",
     "@guard/context-broker": "0.0.0",
-    "@guard/contracts": "0.0.0"
+    "@guard/contracts": "0.0.0",
+    "@guard/policy-engine": "0.0.0"
   }
 }

@@ -8,6 +8,11 @@ import type { JsonObject, TaskProfile } from "@guard/contracts";
 
 import { InMemoryContextSource } from "@guard/context-broker";
 import type { CapabilityOperationReference, CapabilityPack } from "@guard/capability-gateway";
+import {
+  compilePolicySnapshot,
+  createPolicySnapshotManifest,
+  type PolicySnapshot,
+} from "@guard/policy-engine";
 
 export const SYNTHETIC_TRANSFORM_REFERENCE: CapabilityOperationReference =
   Object.freeze({
@@ -18,6 +23,15 @@ export const SYNTHETIC_TRANSFORM_REFERENCE: CapabilityOperationReference =
   });
 
 const MAXIMUM_TRANSFORM_BYTES = 256;
+
+const SYNTHETIC_POLICY_SOURCE = `policy "allow-synthetic-transform" priority 100 {
+  when action.pack == "synthetic.transform" and action.operation == "transform_text" and action.side_effect == "none"
+  allow
+  reason "The bounded synthetic transform is a pure operation."
+}
+`;
+
+export const SYNTHETIC_POLICY_SNAPSHOT: PolicySnapshot = compileSyntheticPolicy();
 
 export function createSyntheticContextSource(): InMemoryContextSource {
   return new InMemoryContextSource({
@@ -200,7 +214,7 @@ export const SYNTHETIC_TASK_PROFILE: TaskProfile = immutableProfile({
   policyProfile: {
     componentId: "synthetic-safe-default",
     componentVersion: 1,
-    configuration: {},
+    configuration: createPolicySnapshotManifest(SYNTHETIC_POLICY_SNAPSHOT),
   },
   outcomeSchema: {
     schemaId: "synthetic.transform.outcome",
@@ -241,4 +255,20 @@ function deepFreeze<T>(value: T): T {
 
 function invalidInput(message: string) {
   return createDomainError({ code: "invalid_input", message });
+}
+
+function compileSyntheticPolicy(): PolicySnapshot {
+  const result = compilePolicySnapshot({
+    policyVersionId: "pol_018f05a0-7b01-7000-8000-000000000081",
+    source: SYNTHETIC_POLICY_SOURCE,
+    sourceId: "synthetic-transform.guard",
+    defaultEffect: "deny",
+  });
+  if (!result.ok) {
+    throw createDomainError({
+      code: "invariant_violated",
+      message: "The built-in synthetic policy did not compile.",
+    });
+  }
+  return result.snapshot;
 }

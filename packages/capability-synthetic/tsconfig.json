@@ -8,6 +8,7 @@
   "references": [
     { "path": "../contracts" },
     { "path": "../context-broker" },
-    { "path": "../capability-gateway" }
+    { "path": "../capability-gateway" },
+    { "path": "../policy-engine" }
   ]
 }

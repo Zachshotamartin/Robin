@@ -4,9 +4,11 @@ import test from "node:test";
 import { ActionIdKind, canonicalize, isDomainError } from "@guard/contracts";
 
 import { CapabilityGateway, CapabilityPackRegistry } from "@guard/capability-gateway";
+import { createPinnedPolicyEvaluator } from "@guard/policy-engine";
 
 import {
   SYNTHETIC_TASK_PROFILE,
+  SYNTHETIC_POLICY_SNAPSHOT,
   SYNTHETIC_TRANSFORM_REFERENCE,
   createSyntheticContextSource,
   createSyntheticTransformPack,
@@ -51,7 +53,7 @@ test("provides a bounded in-memory source fixture through the generic source por
 
 test("normalizes and executes a deterministic transform through the generic gateway", async () => {
   const registry = new CapabilityPackRegistry([createSyntheticTransformPack()]);
-  const gateway = new CapabilityGateway(registry);
+  const gateway = gatewayFor(registry);
   const advertisement = registry.createAdvertisement([
     SYNTHETIC_TRANSFORM_REFERENCE,
   ]);
@@ -64,11 +66,17 @@ test("normalizes and executes a deterministic transform through the generic gate
     {
       actionId: ACTION_ID,
       subject: { kind: "scripted", driverId: "driver:synthetic" },
-      environment: { profileId: "synthetic-transform", sandboxed: false },
+      environment: {
+        profileId: "synthetic-transform",
+        sandboxed: true,
+        networkProfile: "disabled",
+        trustLevel: "trusted_fixture",
+      },
     },
     advertisement,
   );
-  const result = await gateway.execute(prepared, {
+  const evaluated = gateway.evaluate(prepared);
+  const result = await gateway.execute(evaluated, {
     signal: new AbortController().signal,
   });
 
@@ -92,7 +100,7 @@ test("normalizes and executes a deterministic transform through the generic gate
 
 test("applies handwritten semantic bounds after schema validation", async () => {
   const registry = new CapabilityPackRegistry([createSyntheticTransformPack()]);
-  const gateway = new CapabilityGateway(registry);
+  const gateway = gatewayFor(registry);
   const advertisement = registry.createAdvertisement([
     SYNTHETIC_TRANSFORM_REFERENCE,
   ]);
@@ -149,3 +157,12 @@ test("applies handwritten semantic bounds after schema validation", async () => 
     (error: unknown) => isDomainCode(error, "invalid_input"),
   );
 });
+
+function gatewayFor(registry: CapabilityPackRegistry): CapabilityGateway {
+  return new CapabilityGateway(
+    registry,
+    createPinnedPolicyEvaluator(SYNTHETIC_POLICY_SNAPSHOT, {
+      secretCorrelationToken: "synthetic-capability-policy-token-0001",
+    }),
+  );
+}
