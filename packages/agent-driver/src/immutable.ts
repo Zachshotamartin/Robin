@@ -5,8 +5,8 @@ export function validatePlainData(value: unknown): void {
 }
 
 export function cloneAndFreeze<T>(value: T): T {
-  validatePlainData(value);
-  return deepFreeze(structuredClone(value));
+  const detached = JSON.parse(canonicalize(value)) as T;
+  return deepFreeze(detached);
 }
 
 function deepFreeze<T>(value: T): T {

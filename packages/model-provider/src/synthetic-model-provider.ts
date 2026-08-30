@@ -83,8 +83,9 @@ export class SyntheticModelProvider implements ModelProvider {
   #nextStep = 0;
 
   public constructor(script: SyntheticModelScript) {
-    validateScript(script);
-    this.#script = cloneAndFreeze(script);
+    const snapshot = cloneAndFreeze(script);
+    validateScript(snapshot);
+    this.#script = snapshot;
   }
 
   public get remainingSteps(): number {
@@ -117,7 +118,8 @@ export class SyntheticModelProvider implements ModelProvider {
     signal: AbortSignal,
   ): AsyncGenerator<ModelProviderEvent, void, undefined> {
     throwIfCancelled(signal);
-    validateRequest(request, "request");
+    const requestSnapshot = cloneAndFreeze(request);
+    validateRequest(requestSnapshot, "request");
 
     const step = this.#script.steps[this.#nextStep];
     if (step === undefined) {
@@ -132,7 +134,7 @@ export class SyntheticModelProvider implements ModelProvider {
     }
 
     const expectedCanonical = canonicalize(step.expectedRequest);
-    const actualCanonical = canonicalize(request);
+    const actualCanonical = canonicalize(requestSnapshot);
     if (actualCanonical !== expectedCanonical) {
       throw createDomainError({
         code: "invariant_violated",
@@ -141,7 +143,7 @@ export class SyntheticModelProvider implements ModelProvider {
           scriptId: this.#script.scriptId,
           requestIndex: this.#nextStep,
           expectedRequestHash: canonicalSha256Hex(step.expectedRequest),
-          actualRequestHash: canonicalSha256Hex(request),
+          actualRequestHash: canonicalSha256Hex(requestSnapshot),
         }),
       });
     }

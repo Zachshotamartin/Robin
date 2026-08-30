@@ -272,6 +272,67 @@ test("asserts every turn input and emits deterministic immutable generic events"
   driver.assertExhausted();
 });
 
+test("snapshots scripts before validation without invoking proxy get traps", async () => {
+  const secret = "agent-driver-proxy-get-canary";
+  let getCalls = 0;
+  const proxied = new Proxy(driverScript(), {
+    get() {
+      getCalls += 1;
+      throw new Error(secret);
+    },
+  });
+
+  const driver = new ScriptedAgentDriver(proxied);
+  assert.equal(getCalls, 0);
+  assert.deepEqual(
+    await collect(driver.advance(turn(1), new AbortController().signal)),
+    FIRST_EVENTS,
+  );
+  assert.equal(getCalls, 0);
+});
+
+test("turn requests are detached before validation and hostile proxies fail safely", async () => {
+  const secret = "agent-driver-hostile-request-canary";
+  let getCalls = 0;
+  const proxiedRequest = new Proxy(turn(1), {
+    get() {
+      getCalls += 1;
+      throw new Error(secret);
+    },
+  });
+  const driver = new ScriptedAgentDriver(driverScript());
+  assert.deepEqual(
+    await collect(driver.advance(proxiedRequest, new AbortController().signal)),
+    FIRST_EVENTS,
+  );
+  assert.equal(getCalls, 0);
+
+  const revocable = Proxy.revocable(driverScript(), {});
+  revocable.revoke();
+  assert.throws(
+    () => new ScriptedAgentDriver(revocable.proxy),
+    (error: unknown) => {
+      assert.equal(isDomainCode(error, "invalid_input"), true);
+      assert.equal(JSON.stringify(error).includes(secret), false);
+      return true;
+    },
+  );
+
+  const hostile = new Proxy(driverScript(), {
+    ownKeys() {
+      throw createDomainError({ code: "driver_failed", message: secret });
+    },
+  });
+  assert.throws(
+    () => new ScriptedAgentDriver(hostile),
+    (error: unknown) => {
+      assert.equal(isDomainCode(error, "invalid_input"), true);
+      assert.equal(JSON.stringify(error).includes(secret), false);
+      return true;
+    },
+  );
+});
+
 test("fails closed for divergence in turn, objective, operations, context, or observations", async () => {
   const expected = turn(1);
   const differentPackId = structuredClone(expected);

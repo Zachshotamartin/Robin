@@ -73,8 +73,9 @@ export class ScriptedAgentDriver implements AgentDriver {
   #nextTurn = 0;
 
   public constructor(script: ScriptedAgentDriverScript) {
-    validateScript(script);
-    this.#script = cloneAndFreeze(script);
+    const snapshot = cloneAndFreeze(script);
+    validateScript(snapshot);
+    this.#script = snapshot;
   }
 
   public get remainingTurns(): number {
@@ -107,7 +108,8 @@ export class ScriptedAgentDriver implements AgentDriver {
     signal: AbortSignal,
   ): AsyncGenerator<AgentDriverEvent, void, undefined> {
     throwIfCancelled(signal);
-    validateRequest(request, "request");
+    const requestSnapshot = cloneAndFreeze(request);
+    validateRequest(requestSnapshot, "request");
 
     const turn = this.#script.turns[this.#nextTurn];
     if (turn === undefined) {
@@ -121,7 +123,7 @@ export class ScriptedAgentDriver implements AgentDriver {
       });
     }
 
-    if (canonicalize(request) !== canonicalize(turn.expectedRequest)) {
+    if (canonicalize(requestSnapshot) !== canonicalize(turn.expectedRequest)) {
       throw createDomainError({
         code: "invariant_violated",
         message: `Scripted agent request diverged at turn ${this.#nextTurn}.`,
@@ -129,7 +131,7 @@ export class ScriptedAgentDriver implements AgentDriver {
           scriptId: this.#script.scriptId,
           requestIndex: this.#nextTurn,
           expectedRequestHash: canonicalSha256Hex(turn.expectedRequest),
-          actualRequestHash: canonicalSha256Hex(request),
+          actualRequestHash: canonicalSha256Hex(requestSnapshot),
         }),
       });
     }

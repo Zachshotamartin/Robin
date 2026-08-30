@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   AgentAttemptIdKind,
   canonicalize,
+  createDomainError,
   isDomainError,
 } from "@guard/contracts";
 import type { ContentBlock } from "@guard/contracts";
@@ -151,6 +152,67 @@ test("replays an exact request as a deterministic immutable event sequence", asy
   assert.equal(Object.isFrozen(provider.descriptor), true);
   assert.equal(Object.isFrozen(provider.descriptor.capabilities), true);
   provider.assertExhausted();
+});
+
+test("snapshots scripts before validation without invoking proxy get traps", async () => {
+  const secret = "model-provider-proxy-get-canary";
+  let getCalls = 0;
+  const proxied = new Proxy(script(), {
+    get() {
+      getCalls += 1;
+      throw new Error(secret);
+    },
+  });
+
+  const provider = new SyntheticModelProvider(proxied);
+  assert.equal(getCalls, 0);
+  assert.deepEqual(
+    await collect(provider.respond(request(), new AbortController().signal)),
+    SUCCESS_EVENTS,
+  );
+  assert.equal(getCalls, 0);
+});
+
+test("requests are detached before validation and hostile proxies fail safely", async () => {
+  const secret = "model-provider-hostile-request-canary";
+  let getCalls = 0;
+  const proxiedRequest = new Proxy(request(), {
+    get() {
+      getCalls += 1;
+      throw new Error(secret);
+    },
+  });
+  const provider = new SyntheticModelProvider(script());
+  assert.deepEqual(
+    await collect(provider.respond(proxiedRequest, new AbortController().signal)),
+    SUCCESS_EVENTS,
+  );
+  assert.equal(getCalls, 0);
+
+  const revocable = Proxy.revocable(script(), {});
+  revocable.revoke();
+  assert.throws(
+    () => new SyntheticModelProvider(revocable.proxy),
+    (error: unknown) => {
+      assert.equal(isDomainCode(error, "invalid_input"), true);
+      assert.equal(JSON.stringify(error).includes(secret), false);
+      return true;
+    },
+  );
+
+  const hostile = new Proxy(script(), {
+    ownKeys() {
+      throw createDomainError({ code: "provider_failed", message: secret });
+    },
+  });
+  assert.throws(
+    () => new SyntheticModelProvider(hostile),
+    (error: unknown) => {
+      assert.equal(isDomainCode(error, "invalid_input"), true);
+      assert.equal(JSON.stringify(error).includes(secret), false);
+      return true;
+    },
+  );
 });
 
 test("fails closed on exact-request divergence without consuming the step", async () => {
