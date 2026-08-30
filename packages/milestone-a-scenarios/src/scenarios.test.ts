@@ -7,6 +7,7 @@ import {
   type AgentTurnRequest,
 } from "@guard/agent-driver";
 import {
+  REPOSITORY_POLICY_ATTRIBUTE_CATALOG,
   VIRTUAL_REPOSITORY_REFERENCES,
 } from "@guard/capability-repository";
 import {
@@ -27,9 +28,12 @@ import {
   type Observation,
 } from "@guard/contracts";
 import { InMemoryEventStore } from "@guard/event-store";
+import { InMemoryTaskProfileRegistry } from "@guard/profile-registry";
 
 import {
+  CODING_VIRTUAL_BROKER_TASK_PROFILE_V2,
   CODING_VIRTUAL_TASK_PROFILE,
+  CODING_VIRTUAL_TASK_PROFILE_V1,
   runCodingVirtualRepositoryScenario,
   type CodingScenarioExecution,
 } from "./coding-scenario.js";
@@ -173,6 +177,127 @@ test("coding broker-current scenario uses list/read/propose_patch without mutati
     "export function greet(name: string): string {\n  return `hello ${name}`;\n}\n",
   );
   assert.deepEqual(result.execution.state.validatedOutcome, result.outcome);
+});
+
+test("live scenario effects occur exactly once inside the event-ledger run", async () => {
+  const [syntheticResult, codingResult] = await Promise.all([synthetic(), coding()]);
+  assert.deepEqual(syntheticResult.liveEffectCalls, {
+    sourceNormalize: 1,
+    sourceInspect: 1,
+    sourceOpen: 1,
+    capabilityNormalize: 1,
+    capabilityExecute: 1,
+    capabilityRelease: 1,
+    repositoryList: 0,
+    repositoryRead: 0,
+  });
+  assert.deepEqual(codingResult.liveEffectCalls, {
+    sourceNormalize: 0,
+    sourceInspect: 0,
+    sourceOpen: 0,
+    capabilityNormalize: 3,
+    capabilityExecute: 3,
+    capabilityRelease: 3,
+    repositoryList: 1,
+    repositoryRead: 2,
+  });
+
+  for (const result of [syntheticResult, codingResult]) {
+    const normalized = result.execution.history.filter(
+      (event) => event.eventType === "ActionNormalized",
+    ).length;
+    const started = result.execution.history.filter(
+      (event) => event.eventType === "ActionStarted",
+    ).length;
+    const succeeded = result.execution.history.filter(
+      (event) => event.eventType === "ActionSucceeded",
+    ).length;
+    assert.equal(result.liveEffectCalls.capabilityNormalize, normalized);
+    assert.equal(result.liveEffectCalls.capabilityExecute, started);
+    assert.equal(result.liveEffectCalls.capabilityRelease, succeeded);
+  }
+  assert.equal(
+    syntheticResult.liveEffectCalls.sourceNormalize,
+    syntheticResult.execution.history.filter(
+      (event) => event.eventType === "ContextRequested",
+    ).length,
+  );
+});
+
+test("coding v2 normalization authorizes paths before any repository content read", async () => {
+  const result = await coding();
+  const actions = result.execution.history.flatMap((event) =>
+    event.eventType === "ActionNormalized" ? [event.payload.action] : [],
+  );
+  assert.equal(actions.length, 3);
+  for (const action of actions) assert.deepEqual(action.preconditions, []);
+  assert.deepEqual(Object.keys(actions[0]!.normalizedInput).sort(), [
+    "maxResults",
+    "root",
+  ]);
+  assert.deepEqual(Object.keys(actions[1]!.normalizedInput).sort(), [
+    "endLine",
+    "maxBytes",
+    "path",
+    "startLine",
+  ]);
+  assert.deepEqual(Object.keys(actions[2]!.normalizedInput).sort(), [
+    "maximumPatchBytes",
+    "path",
+    "replacement",
+    "replacementBytes",
+    "replacementSha256",
+  ]);
+  assert.equal(Object.hasOwn(actions[2]!.normalizedInput, "patch"), false);
+  assert.equal(Object.hasOwn(actions[2]!.normalizedInput, "preimageSha256"), false);
+  assert.equal(result.liveEffectCalls.repositoryList, 1);
+  assert.equal(result.liveEffectCalls.repositoryRead, 2);
+});
+
+test("coding profile v1 remains an exact registry-resolvable compatibility pin while live runs use v2", async () => {
+  const legacyProfile = pinnedProfile(
+    await readHistory("coding-virtual-repository.history.json"),
+  );
+  assert.strictEqual(CODING_VIRTUAL_TASK_PROFILE, CODING_VIRTUAL_TASK_PROFILE_V1);
+  assert.equal(CODING_VIRTUAL_TASK_PROFILE.profileVersion, 1);
+  assert.equal(CODING_VIRTUAL_BROKER_TASK_PROFILE_V2.profileVersion, 2);
+  assert.equal(
+    canonicalize(CODING_VIRTUAL_TASK_PROFILE_V1),
+    canonicalize(legacyProfile),
+  );
+
+  const registry = new InMemoryTaskProfileRegistry();
+  registry.register(CODING_VIRTUAL_TASK_PROFILE_V1);
+  registry.register(CODING_VIRTUAL_BROKER_TASK_PROFILE_V2);
+  const legacyPin = registry.pin(
+    CODING_VIRTUAL_TASK_PROFILE_V1.profileId,
+    CODING_VIRTUAL_TASK_PROFILE_V1.profileVersion,
+  );
+  assert.equal(legacyPin.fingerprint, canonicalSha256Hex(legacyProfile));
+  assert.equal(canonicalize(legacyPin.profile), canonicalize(legacyProfile));
+  assert.equal(
+    canonicalize(
+      registry.resolve(
+        CODING_VIRTUAL_TASK_PROFILE_V1.profileId,
+        CODING_VIRTUAL_TASK_PROFILE_V1.profileVersion,
+      ),
+    ),
+    canonicalize(legacyProfile),
+  );
+  assert.equal(
+    canonicalize(
+      registry.resolve(
+        CODING_VIRTUAL_BROKER_TASK_PROFILE_V2.profileId,
+        CODING_VIRTUAL_BROKER_TASK_PROFILE_V2.profileVersion,
+      ),
+    ),
+    canonicalize(CODING_VIRTUAL_BROKER_TASK_PROFILE_V2),
+  );
+  assert.equal((await coding()).profile.profileVersion, 2);
+  assert.equal(
+    canonicalize((await coding()).profile),
+    canonicalize(CODING_VIRTUAL_BROKER_TASK_PROFILE_V2),
+  );
 });
 
 test("legacy v1 histories remain byte-identical while v2 live histories use separate broker-current goldens", async () => {
@@ -378,7 +503,25 @@ test("v2 profiles pin new unified policy identities, exact catalogs, and broker 
   assert.equal(SYNTHETIC_TASK_PROFILE.profileVersion, 1);
   assert.equal(SYNTHETIC_TASK_PROFILE.contextSources[0]?.componentVersion, 1);
   assert.equal(SYNTHETIC_TASK_PROFILE.policyProfile.componentVersion, 1);
-  assert.equal(CODING_VIRTUAL_TASK_PROFILE.profileVersion, 2);
+  assert.equal(CODING_VIRTUAL_TASK_PROFILE.profileVersion, 1);
+  assert.equal(CODING_VIRTUAL_TASK_PROFILE_V1.profileVersion, 1);
+  assert.equal(CODING_VIRTUAL_BROKER_TASK_PROFILE_V2.profileVersion, 2);
+  assert.equal(REPOSITORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion, 3);
+  assert.equal(
+    REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
+    "885645ba63117122b4d1d62a95e366ebfa5cb43db9a6f8bd67b7f70eeba68096",
+  );
+  const codingCatalog = (
+    CODING_VIRTUAL_BROKER_TASK_PROFILE_V2.policyProfile.configuration[
+      "attributeCatalogs"
+    ] as readonly JsonObject[]
+  ).find((entry) => entry["catalogId"] === "guard.repo");
+  assert.deepEqual(codingCatalog, {
+    catalogId: "guard.repo",
+    schemaVersion: 3,
+    contentHash:
+      "885645ba63117122b4d1d62a95e366ebfa5cb43db9a6f8bd67b7f70eeba68096",
+  });
 });
 
 test("release and agent-input manifests reconcile every broker block and exact request hash", async () => {

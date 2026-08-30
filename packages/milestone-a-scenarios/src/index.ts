@@ -1,6 +1,8 @@
 export {
   CODING_SCENARIO_NAMESPACE,
+  CODING_VIRTUAL_BROKER_TASK_PROFILE_V2,
   CODING_VIRTUAL_TASK_PROFILE,
+  CODING_VIRTUAL_TASK_PROFILE_V1,
   runCodingVirtualRepositoryScenario,
 } from "./coding-scenario.js";
 export type { CodingScenarioExecution } from "./coding-scenario.js";
@@ -15,3 +17,4 @@ export {
   SCENARIO_RECORDED_AT,
 } from "./scenario-support.js";
 export type { ScenarioExecution } from "./scenario-support.js";
+export type { ScenarioLiveEffectCalls } from "./scenario-support.js";

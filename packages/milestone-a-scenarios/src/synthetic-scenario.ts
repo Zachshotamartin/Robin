@@ -6,7 +6,6 @@ import {
 import {
   CapabilityGateway,
   CapabilityPackRegistry,
-  type CapabilityExecutionResult,
 } from "@guard/capability-gateway";
 import {
   SYNTHETIC_POLICY_SNAPSHOT,
@@ -23,11 +22,11 @@ import {
   createContextReleasePolicySnapshot,
   createPinnedContextPolicyAdapter,
   type ContextBrokerConfigurationDescriptor,
-  type ContextBrokerIntegration,
 } from "@guard/context-broker";
 import {
   CONTRACT_SCHEMA_VERSION,
   canonicalSha256Hex,
+  canonicalize,
   type JsonObject,
   type ObjectiveEnvelope,
   type OutcomeEnvelope,
@@ -54,7 +53,10 @@ import {
   SCENARIO_OCCURRED_AT,
   SCENARIO_RECORDED_AT,
   advertisedOperations,
-  brokerJsonContentBlock,
+  countBrokerSourceEffects,
+  countCapabilityPackEffects,
+  createScenarioLiveEffectCalls,
+  deterministicBrokerJsonContentBlock,
   fixedActionId,
   fixedAttemptId,
   fixedObservationId,
@@ -101,16 +103,19 @@ export interface SyntheticScenarioExecution extends ScenarioExecution {
 
 /**
  * Runs the domain-neutral slice through the broker-native source and release
- * paths. A separate preview broker constructs the exact expected driver
- * transcript; the live runtime owns a different broker instance with the same
- * immutable configuration pins.
+ * paths. An effect-free oracle constructs the exact expected serialized
+ * transcript; only the event-ledger host run may invoke live ports.
  */
 export async function runSyntheticTransformScenario(): Promise<SyntheticScenarioExecution> {
   const namespace = SYNTHETIC_SCENARIO_NAMESPACE;
   const runId = fixedRunId(namespace);
   const firstAttemptId = fixedAttemptId(namespace, 1);
   const secondAttemptId = fixedAttemptId(namespace, 2);
-  const source = createSyntheticBrokerContextSource();
+  const liveEffectCalls = createScenarioLiveEffectCalls();
+  const source = countBrokerSourceEffects(
+    createSyntheticBrokerContextSource(),
+    liveEffectCalls,
+  );
   const sourceRegistry = new BrokerContextSourceRegistry([source]);
   const evaluator = createPinnedPolicyEvaluator(
     SYNTHETIC_CONTEXT_POLICY_SNAPSHOT,
@@ -128,9 +133,6 @@ export async function runSyntheticTransformScenario(): Promise<SyntheticScenario
     budgets: BROKER_BUDGETS,
   } as const;
   const liveBrokerFactory = createContextBrokerIntegrationFactory(factoryOptions);
-  const previewBroker = createContextBrokerIntegrationFactory(
-    factoryOptions,
-  ).createForRun({ runId });
   const profile = syntheticProfile(liveBrokerFactory.configurationDescriptor);
 
   const objective: ObjectiveEnvelope = immutable({
@@ -144,58 +146,84 @@ export async function runSyntheticTransformScenario(): Promise<SyntheticScenario
     submittedAt: SCENARIO_OCCURRED_AT,
   });
 
-  const packRegistry = new CapabilityPackRegistry([createSyntheticTransformPack()]);
+  const packRegistry = new CapabilityPackRegistry([
+    countCapabilityPackEffects(createSyntheticTransformPack(), liveEffectCalls),
+  ]);
   const gateway = new CapabilityGateway(packRegistry, evaluator);
   const advertised = advertisedOperations(packRegistry, [
     SYNTHETIC_TRANSFORM_REFERENCE,
   ]);
-  const gatewayAdvertisement = packRegistry.createAdvertisement([
-    SYNTHETIC_TRANSFORM_REFERENCE,
-  ]);
 
-  const sourceRelease = await previewBroker.releasePlannedSource({
-    turnId: firstAttemptId,
-    sourceId: source.descriptor.sourceId,
-    sourceVersion: source.descriptor.sourceVersion,
-    request: { recordId: "greeting" },
-    maximumBytes: 2_048,
-    reason: "runtime.context.planned",
-    signal: new AbortController().signal,
+  // This oracle is intentionally pure: it derives the exact serialized broker
+  // contract without invoking the live source, gateway, pack, or broker.
+  const sourceResource = immutable({
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    scheme: "memory",
+    sourceId: "synthetic:transform-input",
+    locator: { recordId: "greeting" },
+    mediaType: "application/json",
+    classification: "synthetic",
   });
-  if (sourceRelease.status !== "released") {
-    throw new Error(
-      `The synthetic preview source was denied unexpectedly: ${sourceRelease.manifest.reason}.`,
-      { cause: sourceRelease.error },
-    );
-  }
-  const sourceBlock = brokerJsonContentBlock(
-    sourceRelease.item,
-    sourceRelease.manifest,
-  );
-  await previewBroker.assembleAgentContext({
-    turnId: firstAttemptId,
-    agentRequestId: firstAttemptId,
-    orderedItemIds: [sourceRelease.item.itemId],
+  const sourceBlock = deterministicBrokerJsonContentBlock({
+    runId,
+    releaseOrdinal: 1,
+    resource: sourceResource,
+    mediaType: "application/json",
+    classification: "synthetic",
+    producerKind: "context_source",
+    value: {
+      schemaVersion: CONTRACT_SCHEMA_VERSION,
+      kind: "source_context",
+      untrusted: true,
+      trustLabel: "untrusted_source_content",
+      resource: sourceResource,
+      selector: null,
+      provenance: {
+        sourceId: "synthetic:transform-input",
+        sourceVersion: 2,
+        classification: "synthetic",
+        policyCatalogId: MEMORY_POLICY_ATTRIBUTE_CATALOG.catalogId,
+        policyCatalogVersion: MEMORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion,
+        policyCatalogContentHash: MEMORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
+      },
+      content: canonicalize({ text: SOURCE_TEXT }),
+    },
   });
-
-  const executionResult = await executePreviewTransform(
-    gateway,
-    gatewayAdvertisement,
-  );
-  const outputRelease = await releasePreviewCapabilityOutput(
-    previewBroker,
-    secondAttemptId,
-    executionResult,
-  );
-  const outputBlock = brokerJsonContentBlock(
-    outputRelease.item,
-    outputRelease.manifest,
-  );
-  await previewBroker.assembleAgentContext({
-    turnId: secondAttemptId,
-    agentRequestId: secondAttemptId,
-    orderedItemIds: [sourceRelease.item.itemId, outputRelease.item.itemId],
+  const outputRecordId = `transform:${fixedActionId(namespace, 1)}`;
+  const outputResource = immutable({
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    scheme: "memory",
+    sourceId: "synthetic:transform-input",
+    locator: { recordId: outputRecordId },
+    mediaType: "application/json",
+    classification: "synthetic",
   });
+  const outputBlock = deterministicBrokerJsonContentBlock({
+    runId,
+    releaseOrdinal: 2,
+    resource: outputResource,
+    mediaType: "application/json",
+    classification: "synthetic",
+    producerKind: "capability_worker",
+    value: {
+      schemaVersion: CONTRACT_SCHEMA_VERSION,
+      kind: "capability_output",
+      untrusted: true,
+      trustLabel: "untrusted_capability_output",
+      resource: outputResource,
+      provenance: {
+        sourceId: "synthetic:transform-input",
+        sourceVersion: SYNTHETIC_TRANSFORM_REFERENCE.operationVersion,
+        classification: "synthetic",
+        policyCatalogId: MEMORY_POLICY_ATTRIBUTE_CATALOG.catalogId,
+        policyCatalogVersion: MEMORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion,
+        policyCatalogContentHash: MEMORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
+      },
+      output: { transformed: TRANSFORMED_TEXT },
+    },
+  });
+  const inputBytes = Buffer.byteLength(NORMALIZED_TEXT, "utf8");
+  const outputBytes = Buffer.byteLength(TRANSFORMED_TEXT, "utf8");
 
   const expectedObservation = successfulBrokeredObservation({
     namespace,
@@ -203,8 +231,12 @@ export async function runSyntheticTransformScenario(): Promise<SyntheticScenario
     actionOrdinal: 1,
     humanBlockOrdinal: 1,
     capabilityPackId: SYNTHETIC_TRANSFORM_REFERENCE.packId,
-    audit: executionResult.audit,
-    human: executionResult.human,
+    audit: { inputBytes, mode: "uppercase", outputBytes },
+    human: {
+      summary: `Transformed ${String(inputBytes)} bytes into ${String(
+        outputBytes,
+      )} bytes.`,
+    },
     agentContent: [outputBlock],
   });
   const outcome: OutcomeEnvelope = immutable({
@@ -325,8 +357,19 @@ export async function runSyntheticTransformScenario(): Promise<SyntheticScenario
     ids: new FixedRuntimeHostIdFactory(namespace),
   });
 
+  assertNoLiveEffects(liveEffectCalls);
   const execution = await host.run(objective);
   driver.assertExhausted();
+  assertLiveEffects(liveEffectCalls, {
+    sourceNormalize: 1,
+    sourceInspect: 1,
+    sourceOpen: 1,
+    capabilityNormalize: 1,
+    capabilityExecute: 1,
+    capabilityRelease: 1,
+    repositoryList: 0,
+    repositoryRead: 0,
+  });
   const failClosedReplay = await replayWithFailOnEffectPorts(eventStore, runId);
 
   return Object.freeze({
@@ -336,6 +379,7 @@ export async function runSyntheticTransformScenario(): Promise<SyntheticScenario
     execution,
     replay: failClosedReplay.replay,
     expectedTranscript,
+    liveEffectCalls: immutable(liveEffectCalls),
     replayEffectCalls: failClosedReplay.effectCalls,
     expectedObservationId: fixedObservationId(namespace, 1),
     expectedContextBlockId: sourceBlock.blockId,
@@ -378,54 +422,19 @@ function syntheticProfile(
   });
 }
 
-async function executePreviewTransform(
-  gateway: CapabilityGateway,
-  advertisement: ReturnType<CapabilityPackRegistry["createAdvertisement"]>,
-): Promise<CapabilityExecutionResult> {
-  const prepared = await gateway.normalize(
-    {
-      schemaVersion: CONTRACT_SCHEMA_VERSION,
-      ...SYNTHETIC_TRANSFORM_REFERENCE,
-      input: { text: NORMALIZED_TEXT, mode: "uppercase" },
-    },
-    {
-      actionId: fixedActionId(SYNTHETIC_SCENARIO_NAMESPACE, 1),
-      subject: {
-        kind: "scripted",
-        driverId: "driver:milestone-a-synthetic",
-      },
-      environment: {
-        profileId: SYNTHETIC_TASK_PROFILE.profileId,
-        sandboxed: true,
-        networkProfile: "disabled",
-        trustLevel: "trusted_fixture",
-      },
-    },
-    advertisement,
-  );
-  return gateway.execute(gateway.evaluate(prepared), {
-    signal: new AbortController().signal,
-  });
+function assertNoLiveEffects(calls: ReturnType<typeof createScenarioLiveEffectCalls>): void {
+  if (Object.values(calls).some((count) => count !== 0)) {
+    throw new Error("Synthetic live effects occurred before the recorded host run.");
+  }
 }
 
-async function releasePreviewCapabilityOutput(
-  broker: ContextBrokerIntegration,
-  turnId: string,
-  result: CapabilityExecutionResult,
-) {
-  const release = await broker.releaseCapabilityAgentView({
-    turnId,
-    sourceVersion: result.agentContextRelease.sourceVersion,
-    resource: result.agentContextRelease.resource,
-    policyProjection: result.agentContextRelease.policyProjection,
-    output: result.agent,
-    classification: result.agentContextRelease.classification,
-    reason: result.agentContextRelease.reason,
-  });
-  if (release.status !== "released") {
-    throw new Error("The synthetic preview capability output was denied unexpectedly.");
+function assertLiveEffects(
+  calls: ReturnType<typeof createScenarioLiveEffectCalls>,
+  expected: ReturnType<typeof createScenarioLiveEffectCalls>,
+): void {
+  if (canonicalSha256Hex(calls) !== canonicalSha256Hex(expected)) {
+    throw new Error("Synthetic live effect counts diverged from the event-ledger flow.");
   }
-  return release;
 }
 
 function compileSyntheticContextPolicy(): PolicySnapshot {

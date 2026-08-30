@@ -9,6 +9,7 @@ import { parseAgentObservation } from "@guard/agent-driver";
 import {
   CapabilityGateway,
   CapabilityPackRegistry,
+  type CapabilityPack,
   type CapabilityOperationReference,
 } from "@guard/capability-gateway";
 import {
@@ -17,8 +18,7 @@ import {
   createContextBrokerIntegrationFactory,
   createContextReleasePolicySnapshot,
   createPinnedContextPolicyAdapter,
-  type ContextManifestEntry,
-  type ReleasedContextItem,
+  type BrokerContextSource,
 } from "@guard/context-broker";
 import {
   CONTRACT_SCHEMA_VERSION,
@@ -35,6 +35,7 @@ import {
   parseContentBlock,
   parseObservation,
   parseResourceRef,
+  sha256Hex,
   type ActionId,
   type AgentAttemptId,
   type ApprovalId,
@@ -95,7 +96,8 @@ policy "allow-reviewed-context-releases" priority 600 {
 
 /** Kept byte-identical to capability-repository/policies/context.guard. */
 export const REPOSITORY_CONTEXT_POLICY_SOURCE = `policy "deny-secret-repository-context-paths" priority 950 {
-  when action.pack == "guard.context" and repo.path matches "**/.env*"
+  when action.pack == "guard.context"
+    and (repo.path matches "**/.env*" or repo.paths matches "**/.env*")
   deny
   reason "Secret-bearing repository paths cannot enter agent context"
 }
@@ -121,7 +123,101 @@ export interface ScenarioExecution {
   readonly execution: RuntimeHostExecution;
   readonly replay: RuntimeHostReplay;
   readonly expectedTranscript: readonly AgentTurnRequest[];
+  readonly liveEffectCalls: ScenarioLiveEffectCalls;
   readonly replayEffectCalls: number;
+}
+
+/** Mutable only while composing one live scenario, then copied into its result. */
+export interface ScenarioLiveEffectCalls {
+  readonly sourceNormalize: number;
+  readonly sourceInspect: number;
+  readonly sourceOpen: number;
+  readonly capabilityNormalize: number;
+  readonly capabilityExecute: number;
+  readonly capabilityRelease: number;
+  readonly repositoryList: number;
+  readonly repositoryRead: number;
+}
+
+interface MutableScenarioLiveEffectCalls {
+  sourceNormalize: number;
+  sourceInspect: number;
+  sourceOpen: number;
+  capabilityNormalize: number;
+  capabilityExecute: number;
+  capabilityRelease: number;
+  repositoryList: number;
+  repositoryRead: number;
+}
+
+export function createScenarioLiveEffectCalls(): MutableScenarioLiveEffectCalls {
+  return {
+    sourceNormalize: 0,
+    sourceInspect: 0,
+    sourceOpen: 0,
+    capabilityNormalize: 0,
+    capabilityExecute: 0,
+    capabilityRelease: 0,
+    repositoryList: 0,
+    repositoryRead: 0,
+  };
+}
+
+/**
+ * Counts installed source handlers, including metadata-only work, without
+ * changing their inputs or outputs. A pre-ledger source preview therefore
+ * becomes visible to the scenario regression tests.
+ */
+export function countBrokerSourceEffects(
+  source: BrokerContextSource,
+  calls: MutableScenarioLiveEffectCalls,
+): BrokerContextSource {
+  return {
+    descriptor: source.descriptor,
+    normalizeResourceRequest(input) {
+      calls.sourceNormalize += 1;
+      return source.normalizeResourceRequest(input);
+    },
+    inspectMetadata(request, signal) {
+      calls.sourceInspect += 1;
+      return source.inspectMetadata(request, signal);
+    },
+    openBounded(request, expected, budget, signal) {
+      calls.sourceOpen += 1;
+      return source.openBounded(request, expected, budget, signal);
+    },
+  };
+}
+
+/**
+ * Counts the three capability handler boundaries captured by the real pack
+ * registry. Scenarios reconcile those counts with normalized, started, and
+ * succeeded ledger events, so an unledgered preview cannot remain invisible.
+ */
+export function countCapabilityPackEffects(
+  pack: CapabilityPack,
+  calls: MutableScenarioLiveEffectCalls,
+): CapabilityPack {
+  return {
+    packId: pack.packId,
+    packVersion: pack.packVersion,
+    operations: pack.operations.map((operation) => ({
+      definition: operation.definition,
+      agentContextRelease: operation.agentContextRelease,
+      async normalize(input, context) {
+        calls.capabilityNormalize += 1;
+        return operation.normalize(input, context);
+      },
+      async execute(action, context) {
+        calls.capabilityExecute += 1;
+        return operation.execute(action, context);
+      },
+      async release(raw, action) {
+        calls.capabilityRelease += 1;
+        return operation.release(raw, action);
+      },
+    })),
+  };
 }
 
 /**
@@ -347,62 +443,51 @@ export function successfulObservation(input: {
 }
 
 /**
- * Independently projects a broker item into the exact JSON block shape used by
- * the runtime-host driver boundary. Safe scenarios use this with a preview
- * broker, while the live host builds its own blocks from its run broker.
+ * Effect-free transcript oracle for the broker's public serialized-item
+ * contract. The ScriptedAgentDriver compares this independently constructed
+ * block byte-for-byte with what the live broker gives the runtime host.
  */
-export function brokerJsonContentBlock(
-  item: ReleasedContextItem,
-  manifest: ContextManifestEntry,
-): JsonContentBlock {
-  if (
-    manifest.status !== "released" ||
-    manifest.itemId !== item.itemId ||
-    manifest.releasedContentHash !== item.contentHash ||
-    item.serializedValue !== canonicalize(item.value) ||
-    canonicalBytes(item.value).byteLength !== item.byteLength ||
-    canonicalSha256Hex(item.value) !== item.contentHash
-  ) {
-    throw new Error("Preview broker item and release manifest diverged.");
+export function deterministicBrokerJsonContentBlock(input: {
+  readonly runId: RunId;
+  readonly releaseOrdinal: number;
+  readonly value: JsonObject;
+  readonly resource: ResourceRef;
+  readonly mediaType: string;
+  readonly classification: string;
+  readonly producerKind: "context_source" | "capability_worker";
+}): JsonContentBlock {
+  if (!Number.isSafeInteger(input.releaseOrdinal) || input.releaseOrdinal < 1) {
+    throw new TypeError("A broker transcript release ordinal must be positive.");
   }
-  const valueRecord =
-    typeof item.value === "object" &&
-    item.value !== null &&
-    !Array.isArray(item.value)
-      ? (item.value as JsonObject)
-      : null;
-  const capabilityOutput = valueRecord?.["kind"] === "capability_output";
+  const value = immutable(input.value);
+  const resource = parseResourceRef(input.resource);
+  const contentHash = canonicalSha256Hex(value);
+  const blockId = `ctx_${sha256Hex(
+    `${input.runId}\u0000${String(input.releaseOrdinal)}\u0000${contentHash}`,
+  ).slice(0, 40)}`;
   const parsed = parseContentBlock({
     schemaVersion: CONTRACT_SCHEMA_VERSION,
-    blockId: item.itemId,
+    blockId,
     modality: "json",
-    mediaType: item.mediaType,
-    byteLength: item.byteLength,
-    contentHash: item.contentHash,
-    classification: item.classification,
+    mediaType: input.mediaType,
+    byteLength: canonicalBytes(value).byteLength,
+    contentHash,
+    classification: input.classification,
     provenance: {
-      source: parseResourceRef(item.resource),
+      source: resource,
       producer: {
-        kind: capabilityOutput ? "capability_worker" : "context_source",
-        id: item.resource.sourceId,
+        kind: input.producerKind,
+        id: resource.sourceId,
       },
       capturedAt: SCENARIO_OCCURRED_AT,
     },
     retentionClass: "run",
-    transformation:
-      manifest.redactions.length === 0
-        ? null
-        : {
-            schemaVersion: CONTRACT_SCHEMA_VERSION,
-            transformationId: "context-broker.redaction",
-            transformationVersion: 1,
-            inputContentHashes: [],
-          },
-    value: item.value,
+    transformation: null,
+    value,
     jsonSchema: null,
   });
   if (parsed.modality !== "json") {
-    throw new Error("The preview broker JSON block changed modality.");
+    throw new Error("The deterministic broker JSON block changed modality.");
   }
   return parsed;
 }
