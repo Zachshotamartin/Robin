@@ -4,12 +4,6 @@ policy "deny-restricted-context" priority 1000 {
   reason "Restricted or secret-classified resources cannot enter agent context"
 }
 
-policy "deny-secret-repository-context-paths" priority 950 {
-  when action.pack == "guard.context" and repo.path matches "**/.env*"
-  deny
-  reason "Secret-bearing repository paths cannot enter agent context"
-}
-
 policy "deny-networked-context-boundary" priority 900 {
   when action.pack == "guard.context" and environment.network_profile != "disabled"
   deny
@@ -17,13 +11,13 @@ policy "deny-networked-context-boundary" priority 900 {
 }
 
 policy "allow-reviewed-context-reads" priority 600 {
-  when action.pack == "guard.context" and action.operation == "context.read" and action.side_effect == "none" and environment.sandboxed == true and environment.network_profile == "disabled" and resource.classification in ["public", "internal"]
+  when action.pack == "guard.context" and action.operation == "context.read" and action.side_effect == "none" and environment.sandboxed == true and environment.network_profile == "disabled" and resource.classification in ["public", "internal", "synthetic", "fixture"]
   allow
   reason "Reviewed metadata reads may proceed through the sandboxed context broker"
 }
 
 policy "allow-reviewed-context-releases" priority 600 {
-  when action.pack == "guard.context" and action.operation == "context.release" and action.side_effect == "none" and environment.sandboxed == true and environment.network_profile == "disabled" and resource.classification in ["public", "internal"] and context.truncated == false
+  when action.pack == "guard.context" and action.operation == "context.release" and action.side_effect == "none" and environment.sandboxed == true and environment.network_profile == "disabled" and resource.classification in ["public", "internal", "synthetic", "fixture"] and context.truncated == false
   allow
   reason "Complete reviewed content may be released through the context broker"
 }

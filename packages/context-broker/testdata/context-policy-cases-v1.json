@@ -1,0 +1,258 @@
+{
+  "schemaVersion": 1,
+  "policyContentHash": "4d98dc2769e15f555a1bf18d620f51341112029d51d4332671f303b0a571981b",
+  "cases": [
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-restricted-context-match",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000501",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.read",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime" },
+        "resource": { "scheme": "memory", "sourceId": "memory.notes", "classification": "restricted" },
+        "environment": { "sandboxed": true, "networkProfile": "disabled", "trustLevel": "trusted_context_broker" },
+        "request": { "intent": "context.read", "truncated": false },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-restricted-context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-restricted-context-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000502",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.read",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime" },
+        "resource": { "scheme": "memory", "sourceId": "memory.notes", "classification": "internal" },
+        "environment": { "sandboxed": true, "networkProfile": "disabled", "trustLevel": "trusted_context_broker" },
+        "request": { "intent": "context.read", "truncated": false },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-reviewed-context-reads"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-networked-context-boundary-match",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000503",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.read",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime" },
+        "resource": { "scheme": "memory", "sourceId": "memory.notes", "classification": "internal" },
+        "environment": { "sandboxed": true, "networkProfile": "restricted", "trustLevel": "trusted_context_broker" },
+        "request": { "intent": "context.read", "truncated": false },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-networked-context-boundary"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-networked-context-boundary-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000504",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.read",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime" },
+        "resource": { "scheme": "memory", "sourceId": "memory.notes", "classification": "fixture" },
+        "environment": { "sandboxed": true, "networkProfile": "disabled", "trustLevel": "trusted_context_broker" },
+        "request": { "intent": "context.read", "truncated": false },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-reviewed-context-reads"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-reviewed-context-reads-match",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000505",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.read",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime" },
+        "resource": { "scheme": "memory", "sourceId": "memory.notes", "classification": "public" },
+        "environment": { "sandboxed": true, "networkProfile": "disabled", "trustLevel": "trusted_context_broker" },
+        "request": { "intent": "context.read", "truncated": false },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-reviewed-context-reads"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-reviewed-context-reads-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000506",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.inspect",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime" },
+        "resource": { "scheme": "memory", "sourceId": "memory.notes", "classification": "public" },
+        "environment": { "sandboxed": true, "networkProfile": "disabled", "trustLevel": "trusted_context_broker" },
+        "request": { "intent": "context.inspect", "truncated": false },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-reviewed-context-releases-match",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000507",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.release",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime" },
+        "resource": { "scheme": "memory", "sourceId": "memory.notes", "classification": "synthetic" },
+        "environment": { "sandboxed": true, "networkProfile": "disabled", "trustLevel": "trusted_context_broker" },
+        "request": { "intent": "context.release", "truncated": false },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "allow",
+      "expectedWinningPolicyName": "allow-reviewed-context-releases"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "allow-reviewed-context-releases-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000508",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.release",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime" },
+        "resource": { "scheme": "memory", "sourceId": "memory.notes", "classification": "synthetic" },
+        "environment": { "sandboxed": true, "networkProfile": "disabled", "trustLevel": "trusted_context_broker" },
+        "request": { "intent": "context.release", "truncated": true },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "deny-overrides-eligible-read",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000509",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.read",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime" },
+        "resource": { "scheme": "memory", "sourceId": "memory.notes", "classification": "secret" },
+        "environment": { "sandboxed": true, "networkProfile": "disabled", "trustLevel": "trusted_context_broker" },
+        "request": { "intent": "context.read", "truncated": false },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-restricted-context"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "missing-truncated-default-deny",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000050a",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.release",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime" },
+        "resource": { "scheme": "memory", "sourceId": "memory.notes", "classification": "internal" },
+        "environment": { "sandboxed": true, "networkProfile": "disabled", "trustLevel": "trusted_context_broker" },
+        "request": { "intent": "context.release" },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "unsandboxed-release-default-deny",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000050b",
+        "capabilityPackId": "guard.context",
+        "capabilityPackVersion": 1,
+        "operationId": "context.release",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime" },
+        "resource": { "scheme": "memory", "sourceId": "memory.notes", "classification": "internal" },
+        "environment": { "sandboxed": false, "networkProfile": "disabled", "trustLevel": "trusted_context_broker" },
+        "request": { "intent": "context.release", "truncated": false },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "wrong-pack-default-deny",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-00000000050c",
+        "capabilityPackId": "guard.other",
+        "capabilityPackVersion": 1,
+        "operationId": "context.read",
+        "operationVersion": 1,
+        "subject": { "kind": "runtime" },
+        "resource": { "scheme": "memory", "sourceId": "memory.notes", "classification": "internal" },
+        "environment": { "sandboxed": true, "networkProfile": "disabled", "trustLevel": "trusted_context_broker" },
+        "request": { "intent": "context.read", "truncated": false },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null
+    }
+  ]
+}
