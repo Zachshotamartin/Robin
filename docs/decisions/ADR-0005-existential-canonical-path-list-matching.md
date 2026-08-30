@@ -4,6 +4,10 @@
 - Date: 2026-08-30
 - Related findings or requirements: BUILD_PLAN invariant 4 and Phase 3, DEEP_AUDIT Gate B, IMPLEMENTATION_GUIDE sections 5.4–5.5, THREAT_MODEL source-boundary guarantees
 
+The list-matching and output-binding decision remains current. Its
+branch-internal `guard.repo` v2 catalog identity was superseded before Gate B by
+[ADR-0006](ADR-0006-repository-input-path-authorization.md).
+
 ## Context
 
 Repository capability results can contain more than one path. `list_files`
@@ -85,15 +89,19 @@ when action.pack == "guard.context"
   and (repo.path matches "**/.env*" or repo.paths matches "**/.env*")
 ```
 
-`guard.repo` v2 has canonical catalog content hash
+The branch-internal `guard.repo` v2 catalog had canonical content hash
 `8fc8e73ec11aa524659588abcf360cf86f0ac34dbf3f2922fffeef590d8bb24e`.
+It was never released. The current v3 identity and the separate input-path
+vocabulary are defined by ADR-0006; v3 retains this ADR's `repo.paths` /
+`outputPaths` semantics unchanged.
 
 ## Migration
 
-Replace the branch-internal v1 catalog and recompile all Gate B policy
-snapshots, case corpora, tests, and deterministic evidence against v2. This is a
-pre-Gate-B correction, not a released-snapshot migration. No claim is made that
-persisted v1 snapshots can be loaded or replayed, because none were released.
+The branch first replaced v1 with v2, then replaced v2 with v3 under ADR-0006.
+All Gate B policy snapshots, case corpora, tests, and deterministic evidence are
+recompiled against v3. These are pre-Gate-B corrections, not released-snapshot
+migrations. No claim is made that persisted v1 or v2 snapshots can be loaded or
+replayed, because neither was released.
 After Gate B, future catalog changes require retaining or explicitly migrating
 released versions under the compatibility rules in ADR-0004.
 

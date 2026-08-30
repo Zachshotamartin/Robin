@@ -219,6 +219,15 @@ export function policyAttributesFromAction(
       }
       continue;
     }
+    if (
+      value === "" &&
+      attribute.optional &&
+      attribute.type === "string" &&
+      attribute.matchKind === "canonical_path"
+    ) {
+      // Empty repository root is locator scope, not a canonical path target.
+      continue;
+    }
     values[attribute.name] = validateValue(value, attribute.name, attribute.type);
   }
   return Object.freeze({

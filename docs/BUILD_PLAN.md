@@ -462,6 +462,9 @@ Do not upload the entire repository or use unrestricted hosted file search in v1
 
 - Strict input schema with unknown properties rejected
 - Normalized arguments are the only arguments policy evaluates or execution receives
+- Semantic normalization is provider-byte-free: it may validate canonical
+  locators, strict structure, and bounds, but provider existence, ranges,
+  source hashes, and preimages are checked only by an authorized handler
 - Coding paths are repository-relative in model/agent protocols and canonical internally; other packs own equally strict resource normalization
 - Processes use `executable` plus `argv`; avoid `sh -c`
 - Every call receives a deterministic idempotency key
@@ -894,7 +897,13 @@ Build:
 - Generic resource, provenance, release-policy, and context-budget pipeline
 - Coding source adapter with canonical repository paths and include/exclude/secret filtering
 - Coding operations for file listing, search, bounded reading, patch proposal, and diff inspection
-- Exact bounded release metadata for every canonical path identifier those operations actually emit; multi-path metadata is unique, UTF-8 ordered, set-equal to the emitted identifiers, and evaluated through `guard.repo` v2 `repo.paths` rather than inferred from a common input root
+- Exact bounded authorization metadata for every canonical multi-path input
+  before the repository provider opens, evaluated through `guard.repo` v3
+  `repo.input_paths`; and exact bounded release metadata for every canonical
+  path identifier actually emitted, unique, UTF-8 ordered, set-equal to the
+  emitted identifiers, and evaluated through output-only `repo.paths`
+- Byte-free repository semantic normalization; existence, range, source-hash,
+  and diff-preimage validation occurs only in the authorized handler
 - Strict operation schemas, semantic normalizers, and output classifiers
 
 Exit criteria:

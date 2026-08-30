@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "policyContentHash": "ba5e8a14f4f9dae1d4634deacccf3b9815f8d6118d52680e73590a133de909cd",
+  "policyContentHash": "4bd3d9c74ed673859c62551fe929f57d417939826f8aaf6719fb3764dfd5dfa3",
   "cases": [
     {
       "schemaVersion": 1,
@@ -8,7 +8,7 @@
       "action": {
         "schemaVersion": 1,
         "actionId": "act_018f05a0-7b01-7000-8000-000000000001",
-        "capabilityPackId": "repository",
+        "capabilityPackId": "coding.virtual-repository",
         "capabilityPackVersion": 1,
         "operationId": "read_file",
         "operationVersion": 1,
@@ -19,7 +19,7 @@
         },
         "resource": {
           "scheme": "repo",
-          "sourceId": "coding.repository",
+          "sourceId": "virtual-repository",
           "classification": "internal",
           "branch": "main",
           "path": "service/.env.local"
@@ -38,8 +38,8 @@
         "preconditions": []
       },
       "expectedEffect": "deny",
-      "expectedWinningPolicyName": "deny-secret-repository-reads",
-      "expectedReason": "Secret-bearing repository paths cannot enter agent context"
+      "expectedWinningPolicyName": "deny-secret-repository-actions",
+      "expectedReason": "Secret-bearing repository paths cannot be operated on"
     },
     {
       "schemaVersion": 1,
@@ -47,7 +47,7 @@
       "action": {
         "schemaVersion": 1,
         "actionId": "act_018f05a0-7b01-7000-8000-000000000002",
-        "capabilityPackId": "repository",
+        "capabilityPackId": "coding.virtual-repository",
         "capabilityPackVersion": 1,
         "operationId": "read_file",
         "operationVersion": 1,
@@ -58,7 +58,7 @@
         },
         "resource": {
           "scheme": "repo",
-          "sourceId": "coding.repository",
+          "sourceId": "virtual-repository",
           "classification": "internal",
           "branch": "main",
           "path": "service/config.env"
@@ -82,6 +82,121 @@
     },
     {
       "schemaVersion": 1,
+      "caseId": "secret-repository-input-path-match",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000007",
+        "capabilityPackId": "coding.virtual-repository",
+        "capabilityPackVersion": 1,
+        "operationId": "search_text",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "repo",
+          "sourceId": "virtual-repository",
+          "classification": "internal",
+          "path": "",
+          "paths": ["safe.txt", "z/.env.local"]
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "search_text"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": "deny-secret-repository-actions",
+      "expectedReason": "Secret-bearing repository paths cannot be operated on"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "secret-repository-input-path-near-miss",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000008",
+        "capabilityPackId": "coding.virtual-repository",
+        "capabilityPackVersion": 1,
+        "operationId": "search_text",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "repo",
+          "sourceId": "virtual-repository",
+          "classification": "internal",
+          "path": "",
+          "paths": ["safe.txt", "service/config.env"]
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "search_text"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null,
+      "expectedReason": "No policy matched; the immutable snapshot default effect applies."
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "repository-path-attributes-missing-default",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000009",
+        "capabilityPackId": "coding.virtual-repository",
+        "capabilityPackVersion": 1,
+        "operationId": "search_text",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "repo",
+          "sourceId": "virtual-repository",
+          "classification": "internal"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "search_text"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "deny",
+      "expectedWinningPolicyName": null,
+      "expectedReason": "No policy matched; the immutable snapshot default effect applies."
+    },
+    {
+      "schemaVersion": 1,
       "caseId": "dependency-install-match",
       "action": {
         "schemaVersion": 1,
@@ -89,6 +204,43 @@
         "capabilityPackId": "process",
         "capabilityPackVersion": 1,
         "operationId": "run_process",
+        "operationVersion": 1,
+        "subject": {
+          "kind": "agent",
+          "driverId": "scripted",
+          "compatibilityTier": "A"
+        },
+        "resource": {
+          "scheme": "memory",
+          "sourceId": "fixture.source",
+          "classification": "internal"
+        },
+        "environment": {
+          "profileId": "fixture",
+          "sandboxed": true,
+          "networkProfile": "disabled",
+          "trustLevel": "trusted_fixture"
+        },
+        "request": {
+          "intent": "install_dependency"
+        },
+        "normalizedInput": {},
+        "sideEffectClass": "none",
+        "preconditions": []
+      },
+      "expectedEffect": "require_approval",
+      "expectedWinningPolicyName": "approve-dependency-installation",
+      "expectedReason": "Dependency installation may execute third-party lifecycle code"
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "approval-over-allow-overlap",
+      "action": {
+        "schemaVersion": 1,
+        "actionId": "act_018f05a0-7b01-7000-8000-000000000010",
+        "capabilityPackId": "process",
+        "capabilityPackVersion": 1,
+        "operationId": "run_tests",
         "operationVersion": 1,
         "subject": {
           "kind": "agent",

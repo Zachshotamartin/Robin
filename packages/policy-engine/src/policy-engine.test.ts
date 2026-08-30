@@ -235,6 +235,7 @@ policy "allow-safe-scalar-path" priority 1 {
   for (const [path, effect, winner] of [
     ["service/.env.local", "deny", "deny-scalar-environment-path"],
     ["service/config.env", "allow", "allow-safe-scalar-path"],
+    ["", "allow", "allow-safe-scalar-path"],
   ] as const) {
     const decision = evaluatePolicySnapshot(
       scalarSnapshot,
@@ -244,6 +245,53 @@ policy "allow-safe-scalar-path" priority 1 {
     assert.equal(decision.effect, effect, path);
     assert.equal(decision.winningPolicyName, winner, path);
   }
+  const emptyRootSnapshot = compile(`policy "empty-root-exists" priority 20 {
+  when exists(repo.path)
+  deny
+  reason "An empty locator root must not count as a canonical path."
+}
+policy "empty-root-matches" priority 10 {
+  when repo.path matches "**/.env*"
+  deny
+  reason "An empty locator root must not enter glob matching."
+}
+policy "allow-empty-root-scope" priority 1 {
+  when action.side_effect == "none"
+  allow
+  reason "The locator root is authorized through its other path metadata."
+}`);
+  const emptyRootDecision = evaluatePolicySnapshot(
+    emptyRootSnapshot,
+    action({ operationId: "context.release", path: "" }),
+    { secretCorrelationToken: TOKEN },
+  );
+  assert.equal(emptyRootDecision.effect, "allow");
+  const emptyRootEvaluations = emptyRootDecision.trace["evaluations"] as readonly Record<
+    string,
+    unknown
+  >[];
+  assert.equal(
+    emptyRootEvaluations.find((entry) => entry["policyName"] === "empty-root-exists")?.[
+      "result"
+    ],
+    "false",
+  );
+  const matchTrace = emptyRootEvaluations.find(
+    (entry) => entry["policyName"] === "empty-root-matches",
+  );
+  assert.equal(matchTrace?.["result"], "unknown");
+  assert.match(JSON.stringify(matchTrace?.["condition"]), /"actual":null/u);
+  assert.throws(() =>
+    evaluatePolicySnapshot(
+      scalarSnapshot,
+      action({
+        actionOrdinal: 99,
+        operationId: "context.release",
+        path: 1 as unknown as string,
+      }),
+      { secretCorrelationToken: TOKEN },
+    ),
+  );
 
   const snapshot = compile(`policy "deny-environment-output-paths" priority 100 {
   when repo.paths matches "**/.env*"

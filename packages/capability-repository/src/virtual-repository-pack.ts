@@ -24,7 +24,14 @@ import {
 } from "./literal-search.js";
 import { REPOSITORY_POLICY_ATTRIBUTE_CATALOG } from "./policy-catalog.js";
 import { normalizeRepositoryPath } from "./repository-path.js";
-import { inspectUnifiedDiffProposal } from "./unified-diff-inspection.js";
+import {
+  inspectUnifiedDiffProposal,
+  verifyUnifiedDiffProposalPreimages,
+} from "./unified-diff-inspection.js";
+import type {
+  UnifiedDiffInspection,
+  UnifiedDiffInspectionLimits,
+} from "./unified-diff-inspection.js";
 import { VirtualRepository } from "./virtual-repository.js";
 
 export const VIRTUAL_REPOSITORY_REFERENCES: Readonly<{
@@ -247,7 +254,7 @@ function searchOperation(
       if (rawPaths.length > limits.maximumSearchPaths) {
         throw invalidInput("search_text exceeds the installed path-count bound.");
       }
-      const paths = canonicalSelectedPaths(repository, rawPaths);
+      const paths = canonicalSelectedPaths(rawPaths);
       const maximumMatches = requestedBound(
         input["maxMatches"],
         limits.maximumSearchMatches,
@@ -296,13 +303,7 @@ function searchOperation(
           maximumSnippetBytes,
           maximumOutputBytes,
         },
-        preconditions: [
-          {
-            preconditionType: "virtual.repository.snapshot",
-            preconditionVersion: 1,
-            attributes: { sha256: repository.snapshotHash },
-          },
-        ],
+        preconditions: [],
       };
     },
     execute(action): JsonObject {
@@ -413,13 +414,7 @@ function listOperation(
           classification: "fixture",
         },
         request: { intent: "list_files", maximumResults: maxResults },
-        preconditions: [
-          {
-            preconditionType: "virtual.repository.snapshot",
-            preconditionVersion: 1,
-            attributes: { sha256: repository.snapshotHash },
-          },
-        ],
+        preconditions: [],
       };
     },
     execute(action): JsonObject {
@@ -445,7 +440,6 @@ function listOperation(
       );
       return {
         audit: {
-          root: action.normalizedInput["root"]!,
           matchedCount: raw["matchedCount"]!,
           releasedCount: Array.isArray(files) ? files.length : 0,
           truncated,
@@ -522,12 +516,6 @@ function readOperation(
       if (maxBytes > limits.maximumReadBytes) {
         throw invalidInput("read_file exceeds the installed byte bound.");
       }
-      const content = repository.read(path);
-      const lines = logicalLines(content);
-      if (startLine > Math.max(lines.length, 1)) {
-        throw invalidInput("read_file startLine is beyond the virtual file.");
-      }
-      const sourceSha256 = sha256Hex(content);
       return {
         normalizedInput: { endLine, maxBytes, path, startLine },
         resource: {
@@ -542,13 +530,7 @@ function readOperation(
           endLine,
           maximumBytes: maxBytes,
         },
-        preconditions: [
-          {
-            preconditionType: "virtual.file.sha256",
-            preconditionVersion: 1,
-            attributes: { path, sha256: sourceSha256 },
-          },
-        ],
+        preconditions: [],
       };
     },
     execute(action): JsonObject {
@@ -557,7 +539,11 @@ function readOperation(
       const endLine = action.normalizedInput["endLine"] as number;
       const maxBytes = action.normalizedInput["maxBytes"] as number;
       const source = repository.read(path);
-      const selected = logicalLines(source)
+      const lines = logicalLines(source);
+      if (startLine > Math.max(lines.length, 1)) {
+        throw invalidInput("read_file startLine is beyond the virtual file.");
+      }
+      const selected = lines
         .slice(startLine - 1, endLine)
         .join("\n");
       const bounded = truncateUtf8(selected, maxBytes);
@@ -578,15 +564,12 @@ function readOperation(
       assertScalarEmittedPath(raw, agent, action, "read_file");
       return {
         audit: {
-          path: raw["path"]!,
           byteLength: raw["byteLength"]!,
           sourceSha256: raw["sourceSha256"]!,
           truncated: raw["truncated"]!,
         },
         human: {
-          summary: `Released ${String(raw["byteLength"])} byte(s) from ${String(
-            raw["path"],
-          )}.`,
+          summary: `Released ${String(raw["byteLength"])} byte(s) from one reviewed repository path.`,
         },
         agent,
         agentContextRelease: repositoryAgentContextRelease(
@@ -649,21 +632,18 @@ function patchOperation(
     agentContextRelease: PATCH_AGENT_CONTEXT_RELEASE,
     normalize(input) {
       const path = normalizeRepositoryPath(input["path"], { allowRoot: false });
-      const replacement = (input["replacement"] as string).replace(/\r\n?/gu, "\n");
-      const preimage = repository.read(path);
-      const patch = wholeFilePatch(path, preimage, replacement);
-      const patchBytes = Buffer.byteLength(patch, "utf8");
-      if (patchBytes > limits.maximumPatchBytes) {
-        throw invalidInput("propose_patch exceeds the installed patch byte bound.");
-      }
-      const preimageSha256 = sha256Hex(preimage);
+      const replacement = normalizePatchReplacement(
+        input["replacement"] as string,
+        limits.maximumPatchBytes,
+      );
+      const replacementBytes = Buffer.byteLength(replacement, "utf8");
       const replacementSha256 = sha256Hex(replacement);
       return {
         normalizedInput: {
-          byteLength: patchBytes,
-          patch,
+          maximumPatchBytes: limits.maximumPatchBytes,
           path,
-          preimageSha256,
+          replacement,
+          replacementBytes,
           replacementSha256,
         },
         resource: {
@@ -675,24 +655,28 @@ function patchOperation(
         request: {
           intent: "propose_patch",
           affectedPaths: [path],
-          patchBytes,
+          maximumPatchBytes: limits.maximumPatchBytes,
+          replacementBytes,
           replacementSha256,
         },
-        preconditions: [
-          {
-            preconditionType: "virtual.file.sha256",
-            preconditionVersion: 1,
-            attributes: { path, sha256: preimageSha256 },
-          },
-        ],
+        preconditions: [],
       };
     },
     execute(action): JsonObject {
+      const path = action.normalizedInput["path"] as string;
+      const replacement = action.normalizedInput["replacement"] as string;
+      const maximumPatchBytes = action.normalizedInput["maximumPatchBytes"] as number;
+      const preimage = repository.read(path);
+      const patch = wholeFilePatch(path, preimage, replacement);
+      const byteLength = Buffer.byteLength(patch, "utf8");
+      if (byteLength > maximumPatchBytes) {
+        throw invalidInput("propose_patch exceeds the installed patch byte bound.");
+      }
       return {
-        path: action.normalizedInput["path"]!,
-        patch: action.normalizedInput["patch"]!,
-        byteLength: action.normalizedInput["byteLength"]!,
-        preimageSha256: action.normalizedInput["preimageSha256"]!,
+        path,
+        patch,
+        byteLength,
+        preimageSha256: sha256Hex(preimage),
         replacementSha256: action.normalizedInput["replacementSha256"]!,
       };
     },
@@ -701,16 +685,12 @@ function patchOperation(
       assertScalarEmittedPath(raw, agent, action, "propose_patch");
       return {
         audit: {
-          path: raw["path"]!,
           byteLength: raw["byteLength"]!,
           preimageSha256: raw["preimageSha256"]!,
           replacementSha256: raw["replacementSha256"]!,
         },
         human: {
-          summary: `Proposed a ${String(raw["byteLength"])} byte patch for ${String(
-            raw["path"],
-          )}; no fixture content was changed.`,
-          patch: raw["patch"]!,
+          summary: `Proposed a ${String(raw["byteLength"])} byte patch for one reviewed repository path; no fixture content was changed.`,
         },
         agent,
         agentContextRelease: repositoryAgentContextRelease(
@@ -728,6 +708,13 @@ function inspectDiffOperation(
   repository: VirtualRepository,
   limits: ResolvedVirtualRepositoryPackLimits,
 ): CapabilityOperation {
+  const inspectionLimits: UnifiedDiffInspectionLimits = Object.freeze({
+    maximumPatchBytes: limits.maximumDiffBytes,
+    maximumPaths: limits.maximumDiffPaths,
+    maximumHunks: limits.maximumDiffHunks,
+    maximumLines: limits.maximumDiffLines,
+    maximumOutputBytes: limits.maximumDiffOutputBytes,
+  });
   return {
     definition: {
       operationId: VIRTUAL_REPOSITORY_REFERENCES.inspectDiff.operationId,
@@ -776,14 +763,7 @@ function inspectDiffOperation(
     normalize(input) {
       const inspection = inspectUnifiedDiffProposal(
         input["patch"] as string,
-        repository,
-        {
-          maximumPatchBytes: limits.maximumDiffBytes,
-          maximumPaths: limits.maximumDiffPaths,
-          maximumHunks: limits.maximumDiffHunks,
-          maximumLines: limits.maximumDiffLines,
-          maximumOutputBytes: limits.maximumDiffOutputBytes,
-        },
+        inspectionLimits,
       );
       const path = commonRepositoryScope(inspection.paths);
       return {
@@ -803,25 +783,15 @@ function inspectDiffOperation(
           hunkCount: inspection.hunkCount,
           lineCount: inspection.lineCount,
         },
-        preconditions: [
-          {
-            preconditionType: "virtual.repository.snapshot",
-            preconditionVersion: 1,
-            attributes: { sha256: repository.snapshotHash },
-          },
-        ],
+        preconditions: [],
       };
     },
     execute(action): JsonObject {
-      return {
-        paths: action.normalizedInput["paths"]!,
-        hunkCount: action.normalizedInput["hunkCount"]!,
-        additions: action.normalizedInput["additions"]!,
-        deletions: action.normalizedInput["deletions"]!,
-        lineCount: action.normalizedInput["lineCount"]!,
-        byteLength: action.normalizedInput["byteLength"]!,
-        patch: action.normalizedInput["patch"]!,
-      };
+      return verifyUnifiedDiffProposalPreimages(
+        action.normalizedInput as UnifiedDiffInspection,
+        repository,
+        inspectionLimits,
+      );
     },
     release(raw, action) {
       const agent: JsonObject = {
@@ -841,7 +811,7 @@ function inspectDiffOperation(
       );
       return {
         audit: {
-          paths: raw["paths"]!,
+          pathCount: Array.isArray(raw["paths"]) ? raw["paths"].length : 0,
           hunkCount: raw["hunkCount"]!,
           additions: raw["additions"]!,
           deletions: raw["deletions"]!,
@@ -854,7 +824,6 @@ function inspectDiffOperation(
           summary: `Inspected ${String(raw["hunkCount"])} hunk(s) across ${String(
             Array.isArray(raw["paths"]) ? raw["paths"].length : 0,
           )} path(s); no repository content was changed.`,
-          patch: raw["patch"]!,
         },
         agent,
         agentContextRelease: repositoryAgentContextRelease(
@@ -1105,7 +1074,7 @@ function repositoryAgentContextRelease(
   agent: JsonObject,
   outputPaths?: readonly string[],
 ) {
-  const path = exactCanonicalPath(action.resource["path"], true, "release scope");
+  const path = repositoryActionScope(action);
   const locator: JsonObject = outputPaths === undefined
     ? { path }
     : { path, outputPaths };
@@ -1150,6 +1119,23 @@ function repositoryAgentContextRelease(
     raw,
     agent,
   );
+}
+
+function repositoryActionScope(action: NormalizedAction): string {
+  const value = action.resource["path"];
+  if (value !== undefined) {
+    return exactCanonicalPath(value, true, "release scope");
+  }
+  const paths = capturePathArray(
+    action.resource["paths"],
+    MAXIMUM_RELEASE_PATH_IDENTIFIERS,
+    false,
+    "release input paths",
+  );
+  if (paths.length === 0 || commonRepositoryScope(paths) !== "") {
+    throw invalidInput("A repository release without scalar scope has invalid input paths.");
+  }
+  return "";
 }
 
 function logicalLines(content: string): readonly string[] {
@@ -1239,14 +1225,10 @@ function requestedBound(value: unknown, installed: number, label: string): numbe
   return value;
 }
 
-function canonicalSelectedPaths(
-  repository: VirtualRepository,
-  rawPaths: readonly string[],
-): readonly string[] {
+function canonicalSelectedPaths(rawPaths: readonly string[]): readonly string[] {
   const selected = new Set<string>();
   for (const rawPath of rawPaths) {
     const path = normalizeRepositoryPath(rawPath, { allowRoot: false });
-    repository.read(path);
     selected.add(path);
   }
   const paths = [...selected].sort(compareUtf8);
@@ -1254,6 +1236,20 @@ function canonicalSelectedPaths(
     throw invalidInput("search_text requires at least one selected file.");
   }
   return Object.freeze(paths);
+}
+
+function normalizePatchReplacement(value: string, maximumBytes: number): string {
+  if (!isWellFormedUnicode(value)) {
+    throw invalidInput("propose_patch replacement must be well-formed Unicode text.");
+  }
+  const replacement = value.replace(/\r\n?/gu, "\n");
+  if (
+    Buffer.byteLength(value, "utf8") > maximumBytes ||
+    Buffer.byteLength(replacement, "utf8") > maximumBytes
+  ) {
+    throw invalidInput("propose_patch replacement exceeds the installed byte bound.");
+  }
+  return replacement;
 }
 
 function commonRepositoryScope(paths: readonly string[]): string {

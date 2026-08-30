@@ -112,7 +112,9 @@ Controls:
 
 - All repository/document/dataset/media content and identifiers labeled untrusted
 - Context-broker access only; no implicit whole-source upload
-- Path policy before open
+- Path policy before open. Repository capability normalization is provider-byte-free,
+  exposes every canonical scalar or multi-path input to policy, and defers
+  existence, range, source-hash, and preimage checks until authorized execution.
 - Content classification and budgets
 - Model has no direct capability
 - Capability output crosses broker before agent/model
@@ -122,6 +124,8 @@ Evidence:
 
 - Exact serialized provider-request captures from hostile fixtures
 - Raw, encoded, split, filename, search-output, and transformed synthetic canaries absent from requests and artifacts
+- Counting-provider evidence proves mixed safe/secret search and multi-section
+  diff denial performs zero content opens or reads before handler dispatch
 - Injection text can influence proposals but cannot bypass denied gateway actions
 
 Residual risk:

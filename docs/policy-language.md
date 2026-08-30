@@ -103,14 +103,23 @@ when the optional attribute is absent. Every member must already be a valid
 typed catalog value; a wrong runtime type fails policy evaluation closed.
 Runtime regular expressions are not a v1 feature.
 
-The `guard.repo` v2 catalog uses `repo.path` for one canonical repository path
-and `repo.paths` for the bounded set of canonical path identifiers emitted by a
-repository capability result. The latter is sourced from the broker projection
-field `resource.outputPaths`. `outputPaths` is internal release metadata, not a
-new agent-view or capability-input field. Repository packs derive it from the
-actual released result, deduplicate it, sort it by UTF-8 bytes, enforce count
-and aggregate-byte limits, and bind it to the exact action, raw result, and
-agent view. Repeated matches in a search still contribute only one policy path.
+The `guard.repo` v3 catalog separates authorization inputs from released
+outputs. `repo.path` is one optional canonical repository path.
+`repo.input_paths` is sourced from normalized `resource.paths` and contains the
+exact bounded canonical multi-path input set that policy must authorize before
+the provider opens. `repo.paths` is sourced from broker projection
+`resource.outputPaths` and contains the bounded set of canonical identifiers
+actually emitted by a repository capability result. `resource.paths` and
+`resource.outputPaths` are internal policy projections, not new agent-view
+fields. Repository packs deduplicate and bound both sets; emitted paths are
+sorted by UTF-8 bytes and bound to the exact action, raw result, and agent view.
+Repeated matches in a search still contribute only one output policy path.
+
+An exact empty `repo.path` common-root locator is absent for catalog extraction:
+`exists(repo.path)` is false and `repo.path matches ...` is unknown. This narrow
+rule applies only to an optional scalar canonical-path attribute. It does not
+make empty string a canonical file path or change glob semantics, and wrong
+runtime types still fail closed.
 
 ## Canonical form
 
@@ -171,9 +180,10 @@ evaluator.
 
 ```guard
 policy "deny-secret-repository-reads" priority 1000 {
-  when action.pack == "repository" and action.operation == "read_file" and repo.path matches "**/.env*"
+  when action.pack == "coding.virtual-repository"
+    and (repo.path matches "**/.env*" or repo.input_paths matches "**/.env*")
   deny
-  reason "Secret-bearing repository paths cannot enter agent context"
+  reason "Secret-bearing repository paths cannot be operated on"
 }
 ```
 

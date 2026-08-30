@@ -417,11 +417,11 @@ environment.network_profile   string
 environment.trust_level       string
 ```
 
-Capability packs and context-source adapters add versioned, namespaced catalogs rather than aliases in the generic base. The coding profile can therefore add `repo.path`, `repo.paths`, `repo.branch`, `process.executable`, and `process.argv`; another profile can add unrelated names such as `database.table` without importing coding vocabulary into the kernel. `guard.repo` v2 maps `repo.paths` to the internal context-release projection field `resource.outputPaths`: the exact bounded, unique, UTF-8-ordered set of repository path identifiers actually emitted by the released capability view. This field is broker policy metadata rather than an agent-input or agent-view contract. Every catalog entry declares its value type, optionality, secret-trace classification, match kind, and exact source in the normalized action or broker policy projection. A catalog ID and schema version are permanently bound to a canonical content hash. The immutable policy snapshot hash includes the ordered catalog ID/version/content-hash manifest and the default effect, so a changed projection or classification requires a new catalog version and policy snapshot.
+Capability packs and context-source adapters add versioned, namespaced catalogs rather than aliases in the generic base. The coding profile can therefore add `repo.path`, `repo.input_paths`, `repo.paths`, `repo.branch`, `process.executable`, and `process.argv`; another profile can add unrelated names such as `database.table` without importing coding vocabulary into the kernel. `guard.repo` v3 deliberately separates normalized action inputs from context-release outputs. `repo.input_paths` maps to `resource.paths`, the exact bounded canonical set that must be authorized before a multi-path repository operation opens the provider. `repo.paths` maps to the internal release projection field `resource.outputPaths`, the exact bounded, unique, UTF-8-ordered set of repository identifiers actually emitted by the released capability view. Both fields are policy metadata rather than agent-view contracts. Every catalog entry declares its value type, optionality, secret-trace classification, match kind, and exact source in the normalized action or broker policy projection. A catalog ID and schema version are permanently bound to a canonical content hash. The immutable policy snapshot hash includes the ordered catalog ID/version/content-hash manifest and the default effect, so a changed projection or classification requires a new catalog version and policy snapshot.
 
-The checker rejects unknown attributes, comparisons between incompatible types, heterogeneous lists, invalid glob patterns, and effects without reasons. `exists` accepts any catalogued optional attribute and is a type error for an unknown name. `matches` accepts only `string` or `list<string>` attributes whose catalog entry declares canonical-path matching. Scalar matching is unchanged. List matching is existential: any matching member yields `true`, no matching member (including an empty list) yields `false`, and an absent optional list yields `unknown`. Compile glob patterns once when loading the policy snapshot. The normalized action is the only evaluation input: pack/source adapters project their fields into that object before policy evaluation, and the exact same immutable normalized action proceeds to authorized execution.
+The checker rejects unknown attributes, comparisons between incompatible types, heterogeneous lists, invalid glob patterns, and effects without reasons. `exists` accepts any catalogued optional attribute and is a type error for an unknown name. `matches` accepts only `string` or `list<string>` attributes whose catalog entry declares canonical-path matching. Scalar matching is unchanged except for an exact empty common-root locator: optional scalar `canonical_path` extraction treats `""` as absent, while wrong non-string values still fail closed and glob semantics do not change. List matching is existential: any matching member yields `true`, no matching member (including an empty list) yields `false`, and an absent optional list yields `unknown`. Compile glob patterns once when loading the policy snapshot. The normalized action is the only evaluation input: pack/source adapters project their fields into that object before policy evaluation, and the exact same immutable normalized action proceeds to authorized execution.
 
-This catalog composition supersedes the earlier flat coding-specific list in this section. No legacy aliases are supported because no persisted policy or released schema predates Milestone B. The catalog-composition rationale is recorded in [ADR-0004](decisions/ADR-0004-composable-policy-attribute-catalogs.md); the existential list semantics, exact `outputPaths` binding, and pre-Gate-B `guard.repo` v1-to-v2 correction are recorded in [ADR-0005](decisions/ADR-0005-existential-canonical-path-list-matching.md).
+This catalog composition supersedes the earlier flat coding-specific list in this section. No legacy aliases are supported because no persisted policy or released schema predates Milestone B. The catalog-composition rationale is recorded in [ADR-0004](decisions/ADR-0004-composable-policy-attribute-catalogs.md); existential output-list semantics are recorded in [ADR-0005](decisions/ADR-0005-existential-canonical-path-list-matching.md); and the pre-Gate-B v3 input/output split plus byte-free normalization boundary are recorded in [ADR-0006](decisions/ADR-0006-repository-input-path-authorization.md).
 
 ### 5.5 Evaluation
 
@@ -619,7 +619,10 @@ For every proposed action, regardless of direct-model, ACP, MCP, client, or scri
 2. Look up the exact installed pack/operation/version advertised to that driver turn.
 3. Parse the versioned action envelope and operation input once.
 4. Validate structural schema and reject unknown keys.
-5. Run semantic normalization.
+5. Run semantic normalization without opening provider content. A repository
+   operation may canonicalize paths, deduplicate and bound input sets, and parse
+   a strict structural diff, but existence, line ranges, source hashes, and
+   preimage checks are execution work after policy.
 6. Canonically serialize and hash the normalized action.
 7. Append `ActionNormalized` containing safe metadata and the action hash.
 8. Construct policy attributes only from the normalized action.
@@ -652,6 +655,13 @@ Create four representations:
 - **Human:** readable summary with bounded excerpts
 - **Agent:** minimal policy-released observation needed for the next decision
 
+For repository results, audit and human representations contain only safe
+counts, booleans, byte lengths, artifact references, and allowed evidence
+hashes. Raw roots, filenames, paths, snippets, source/replacement text, and
+patch bytes remain inside the trusted result until broker policy creates the
+agent view. If broker release is denied or fails, runtime persistence suppresses
+the pack audit/human payload as defense in depth.
+
 Large stdout, stderr, diffs, and reports go to the artifact store. Event payloads contain references and bounded previews.
 
 ## 8. File and Patch Tools
@@ -664,17 +674,33 @@ Search should invoke a fixed executable such as `rg` through the process adapter
 
 ### 8.2 Patch proposal
 
-The provider returns unified-diff text. Before policy evaluation:
+The provider returns unified-diff text. Before path-policy evaluation, perform
+only provider-byte-free proposal normalization (ADR-0006):
 
 1. Normalize line endings.
 2. Limit total bytes, files, and hunks.
 3. Parse every file header and hunk header.
 4. Reject absolute paths, traversal, device paths, submodule changes, and binary patches in v1.
 5. Canonicalize old and new paths.
-6. Verify all target paths remain inside the worktree.
-7. Record the exact patch bytes as a content-addressed artifact.
-8. Run `git apply --check` inside the worktree with hooks disabled.
-9. Build policy attributes from affected paths, additions, deletions, and executable-bit changes.
+6. Verify every target is a canonical repository-relative locator without
+   resolving or opening it.
+7. Hash the exact agent-supplied patch bytes and build policy attributes from
+   the complete affected-path set plus structurally derived bounded counts.
+
+After path policy allows the proposal, the authorized handler performs the
+source-dependent validation planned for Milestone C:
+
+1. Resolve every target against the pinned worktree and recheck containment.
+2. Record the exact patch bytes as a content-addressed artifact.
+3. Run `git apply --check` inside the worktree with hooks and external filters
+   disabled.
+4. Derive and validate any preimage, mode, additions, and deletions evidence not
+   established by the structural phase.
+
+Failure in this post-policy stage produces no approval-ready release. The Gate
+B virtual `inspect_diff` operation implements the same split with a strict
+structural AST before policy and exact preimage verification only after allow;
+this section does not move Milestone C patch application into Gate B.
 
 The approval binds the patch artifact hash. The apply step reads those exact bytes; it does not ask the model to regenerate the patch.
 

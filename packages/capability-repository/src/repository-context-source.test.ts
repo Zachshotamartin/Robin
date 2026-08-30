@@ -226,7 +226,7 @@ test("composes repository context policy before media classification or content 
     },
     {
       catalogId: "guard.repo",
-      schemaVersion: 2,
+      schemaVersion: 3,
       contentHash: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
     },
   ]);
@@ -374,10 +374,10 @@ test("canonicalizes repository paths and rejects hostile alternate forms", () =>
 
 test("exports the versioned secret-safe guard.repo policy vocabulary", () => {
   assert.equal(REPOSITORY_POLICY_ATTRIBUTE_CATALOG.catalogId, "guard.repo");
-  assert.equal(REPOSITORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion, 2);
+  assert.equal(REPOSITORY_POLICY_ATTRIBUTE_CATALOG.schemaVersion, 3);
   assert.equal(
     REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
-    "8fc8e73ec11aa524659588abcf360cf86f0ac34dbf3f2922fffeef590d8bb24e",
+    "885645ba63117122b4d1d62a95e366ebfa5cb43db9a6f8bd67b7f70eeba68096",
   );
   assert.deepEqual(
     REPOSITORY_POLICY_ATTRIBUTE_CATALOG.attributes.map((attribute) => ({
@@ -411,6 +411,18 @@ test("exports the versioned secret-safe guard.repo policy vocabulary", () => {
           kind: "object_field",
           section: "resource",
           field: "outputPaths",
+        },
+      },
+      {
+        name: "repo.input_paths",
+        type: "list<string>",
+        optional: true,
+        classification: "repository_input_paths",
+        matchKind: "canonical_path",
+        source: {
+          kind: "object_field",
+          section: "resource",
+          field: "paths",
         },
       },
       {
@@ -597,7 +609,7 @@ test("releases repository content through broker policy projection and provider-
         preconditionVersion: 1,
         attributes: {
           catalogId: "guard.repo",
-          catalogVersion: 2,
+          catalogVersion: 3,
           contentHash: REPOSITORY_POLICY_ATTRIBUTE_CATALOG.contentHash,
         },
       },

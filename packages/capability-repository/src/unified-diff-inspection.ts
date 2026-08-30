@@ -30,6 +30,27 @@ interface ParsedHunkHeader {
   readonly newCount: number;
 }
 
+interface ParsedPreimageLine {
+  readonly index: number;
+  readonly content: string;
+}
+
+interface ParsedHunk {
+  readonly oldPosition: number;
+  readonly oldCount: number;
+  readonly preimageLines: readonly ParsedPreimageLine[];
+}
+
+interface ParsedFileSection {
+  readonly path: string;
+  readonly hunks: readonly ParsedHunk[];
+}
+
+interface ParsedUnifiedDiffProposal {
+  readonly inspection: UnifiedDiffInspection;
+  readonly sections: readonly ParsedFileSection[];
+}
+
 const HUNK_HEADER = /^@@ -(0|[1-9][0-9]*),(0|[1-9][0-9]*) \+(0|[1-9][0-9]*),(0|[1-9][0-9]*) @@$/u;
 
 /**
@@ -39,9 +60,53 @@ const HUNK_HEADER = /^@@ -(0|[1-9][0-9]*),(0|[1-9][0-9]*) \+(0|[1-9][0-9]*),(0|[
  */
 export function inspectUnifiedDiffProposal(
   patch: string,
+  limits: UnifiedDiffInspectionLimits,
+): UnifiedDiffInspection {
+  return parseUnifiedDiffProposal(patch, limits).inspection;
+}
+
+/**
+ * Revalidates the normalized structural inspection and checks current file
+ * preimages. This is intentionally the only phase that opens repository bytes
+ * and must therefore run only after the action has been policy-authorized.
+ */
+export function verifyUnifiedDiffProposalPreimages(
+  inspection: UnifiedDiffInspection,
   repository: VirtualRepository,
   limits: UnifiedDiffInspectionLimits,
 ): UnifiedDiffInspection {
+  const parsed = parseUnifiedDiffProposal(inspection.patch, limits);
+  if (
+    Buffer.compare(
+      canonicalBytes(parsed.inspection),
+      canonicalBytes(inspection),
+    ) !== 0
+  ) {
+    throw invalidInput(
+      "inspect_diff normalized inspection disagrees with its exact patch structure.",
+    );
+  }
+  for (const section of parsed.sections) {
+    const sourceLines = logicalLines(repository.read(section.path));
+    for (const hunk of section.hunks) {
+      if (
+        hunk.oldPosition < 0 ||
+        hunk.oldPosition + hunk.oldCount > sourceLines.length
+      ) {
+        throw invalidInput("inspect_diff hunk range is outside the current file.");
+      }
+      for (const preimage of hunk.preimageLines) {
+        assertSourceLine(sourceLines, preimage.index, preimage.content);
+      }
+    }
+  }
+  return parsed.inspection;
+}
+
+function parseUnifiedDiffProposal(
+  patch: string,
+  limits: UnifiedDiffInspectionLimits,
+): ParsedUnifiedDiffProposal {
   const byteLength = Buffer.byteLength(patch, "utf8");
   if (byteLength === 0 || byteLength > limits.maximumPatchBytes) {
     throw invalidInput("inspect_diff patch bytes are outside the installed bound.");
@@ -60,6 +125,7 @@ export function inspectUnifiedDiffProposal(
   }
 
   const paths: string[] = [];
+  const sections: ParsedFileSection[] = [];
   let index = 0;
   let hunkCount = 0;
   let additions = 0;
@@ -87,7 +153,7 @@ export function inspectUnifiedDiffProposal(
     if (paths.length > limits.maximumPaths) {
       throw invalidInput("inspect_diff exceeds the installed path-count bound.");
     }
-    const sourceLines = logicalLines(repository.read(oldPath));
+    const hunks: ParsedHunk[] = [];
     let fileHunks = 0;
     let previousOldEnd = -1;
     let previousNewEnd = -1;
@@ -123,9 +189,7 @@ export function inspectUnifiedDiffProposal(
       let newConsumed = 0;
       let hunkChanges = 0;
       const sourceStart = oldPosition;
-      if (sourceStart < 0 || sourceStart + header.oldCount > sourceLines.length) {
-        throw invalidInput("inspect_diff hunk range is outside the current file.");
-      }
+      const preimageLines: ParsedPreimageLine[] = [];
 
       while (
         oldConsumed < header.oldCount ||
@@ -139,12 +203,16 @@ export function inspectUnifiedDiffProposal(
         const content = body.slice(1);
         switch (prefix) {
           case " ":
-            assertSourceLine(sourceLines, sourceStart + oldConsumed, content);
+            preimageLines.push(
+              Object.freeze({ index: sourceStart + oldConsumed, content }),
+            );
             oldConsumed += 1;
             newConsumed += 1;
             break;
           case "-":
-            assertSourceLine(sourceLines, sourceStart + oldConsumed, content);
+            preimageLines.push(
+              Object.freeze({ index: sourceStart + oldConsumed, content }),
+            );
             oldConsumed += 1;
             deletions += 1;
             hunkChanges += 1;
@@ -168,6 +236,13 @@ export function inspectUnifiedDiffProposal(
       if (hunkChanges === 0) {
         throw invalidInput("inspect_diff hunks must contain an addition or deletion.");
       }
+      hunks.push(
+        Object.freeze({
+          oldPosition,
+          oldCount: header.oldCount,
+          preimageLines: Object.freeze(preimageLines),
+        }),
+      );
       cumulativeLineDelta += header.newCount - header.oldCount;
       const next = lines[index];
       if (
@@ -184,6 +259,9 @@ export function inspectUnifiedDiffProposal(
     if (index < lines.length && !lines[index]!.startsWith("--- a/")) {
       throw invalidInput("inspect_diff contains unsupported section metadata.");
     }
+    sections.push(
+      Object.freeze({ path: oldPath, hunks: Object.freeze(hunks) }),
+    );
   }
 
   const result: UnifiedDiffInspection = Object.freeze({
@@ -198,7 +276,10 @@ export function inspectUnifiedDiffProposal(
   if (canonicalBytes(result).byteLength > limits.maximumOutputBytes) {
     throw invalidInput("inspect_diff inspection exceeds the installed output bound.");
   }
-  return result;
+  return Object.freeze({
+    inspection: result,
+    sections: Object.freeze(sections),
+  });
 }
 
 function parseFileHeader(value: string | undefined, prefix: "--- a/" | "+++ b/"): string {

@@ -7,6 +7,7 @@ import {
   PolicyVersionIdKind,
   canonicalBytes,
   isDomainError,
+  sha256Hex,
 } from "@guard/contracts";
 import type { JsonObject, NormalizedAction } from "@guard/contracts";
 import { CapabilityGateway, CapabilityPackRegistry } from "@guard/capability-gateway";
@@ -67,6 +68,44 @@ function allowEvaluator(): PinnedPolicyEvaluator {
 
 function denyEvaluator(): PinnedPolicyEvaluator {
   return effectEvaluator("deny");
+}
+
+async function codingPolicyEvaluator(): Promise<PinnedPolicyEvaluator> {
+  const defaultPolicy = await readFile(
+    new URL("../../../policies/default.guard", import.meta.url),
+    "utf8",
+  );
+  const compiled = compilePolicySnapshotSet(
+    {
+      policyVersionId: PolicyVersionIdKind.parse(
+        "pol_018f05a0-7b01-7000-8000-000000000097",
+      ),
+      sources: [
+        { sourceId: "policies/default.guard", source: defaultPolicy },
+        {
+          sourceId: "allow-virtual-repository.guard",
+          source: `policy "allow-virtual-repository-operations" priority 100 {
+  when action.pack == "coding.virtual-repository"
+    and action.operation in ["list_files", "search_text", "read_file", "propose_patch", "inspect_diff"]
+    and action.side_effect == "none"
+  allow
+  reason "Reviewed virtual repository operations are allowed."
+}`,
+        },
+      ],
+      defaultEffect: "deny",
+    },
+    {},
+    composePolicyAttributeCatalogs([
+      BASE_POLICY_ATTRIBUTE_CATALOG,
+      REPOSITORY_POLICY_ATTRIBUTE_CATALOG,
+    ]),
+  );
+  assert.equal(compiled.ok, true, compiled.ok ? "" : JSON.stringify(compiled.diagnostics));
+  if (!compiled.ok) throw new Error("The coding policy fixture did not compile.");
+  return createPinnedPolicyEvaluator(compiled.snapshot, {
+    secretCorrelationToken: "repository-input-path-policy-test-token",
+  });
 }
 
 function effectEvaluator(effect: "allow" | "deny"): PinnedPolicyEvaluator {
@@ -150,11 +189,68 @@ function harness(
   return { source, registry, gateway, advertisement };
 }
 
+function observedBoundaryHarness(
+  source: VirtualRepository,
+  effectOrEvaluator: "allow" | "deny" | PinnedPolicyEvaluator,
+) {
+  let evaluatedAction: NormalizedAction | undefined;
+  let executedAction: NormalizedAction | undefined;
+  let releaseCount = 0;
+  const baseEvaluator = typeof effectOrEvaluator === "string"
+    ? effectEvaluator(effectOrEvaluator)
+    : effectOrEvaluator;
+  const evaluator: PinnedPolicyEvaluator = Object.freeze({
+    policyVersionId: baseEvaluator.policyVersionId,
+    evaluate(action: NormalizedAction): PolicyDecision {
+      evaluatedAction = action;
+      return baseEvaluator.evaluate(action);
+    },
+  });
+  const original = createVirtualRepositoryPack(source, {
+    maximumListResults: 8,
+    maximumReadBytes: 128,
+    maximumPatchBytes: 512,
+  });
+  const observed = {
+    ...original,
+    operations: original.operations.map((operation) => ({
+      ...operation,
+      execute(action: NormalizedAction, executionContext: Parameters<typeof operation.execute>[1]) {
+        executedAction = action;
+        return operation.execute(action, executionContext);
+      },
+      release(raw: JsonObject, action: NormalizedAction) {
+        releaseCount += 1;
+        return operation.release(raw, action);
+      },
+    })),
+  };
+  const registry = new CapabilityPackRegistry([observed]);
+  const gateway = new CapabilityGateway(registry, evaluator);
+  const advertisement = registry.createAdvertisement(
+    Object.values(VIRTUAL_REPOSITORY_REFERENCES),
+  );
+  return {
+    gateway,
+    advertisement,
+    observations: {
+      evaluatedAction: () => evaluatedAction,
+      executedAction: () => executedAction,
+      releaseCount: () => releaseCount,
+    },
+  };
+}
+
 function context(actionId: (typeof ACTION_IDS)[keyof typeof ACTION_IDS]) {
   return {
     actionId,
     subject: { kind: "scripted", driverId: "driver:coding-fixture" },
-    environment: { profileId: "coding-virtual", sandboxed: false },
+    environment: {
+      profileId: "coding-virtual",
+      sandboxed: false,
+      networkProfile: "disabled",
+      trustLevel: "untrusted",
+    },
   } as const;
 }
 
@@ -185,6 +281,7 @@ test("lists virtual fixture paths in stable order with a hard result bound", asy
     maxResults: 1,
     root: "src",
   });
+  assert.deepEqual(prepared.action.preconditions, []);
   assert.deepEqual(result.raw, {
     files: ["src/alpha.ts"],
     matchedCount: 2,
@@ -193,7 +290,6 @@ test("lists virtual fixture paths in stable order with a hard result bound", asy
   assert.deepEqual(result.audit, {
     matchedCount: 2,
     releasedCount: 1,
-    root: "src",
     truncated: true,
   });
   assert.deepEqual(result.agent, {
@@ -611,7 +707,8 @@ test("enforces exact search query, path, match, snippet, and request-output boun
 });
 
 test("policy denial prevents search handler reads and release", async () => {
-  const source = new CountingVirtualRepository({ "safe.txt": "needle\n" });
+  const sourceContent = "needle\nDENIED_SEARCH_SOURCE_CANARY\n";
+  const source = new CountingVirtualRepository({ ".env": sourceContent });
   const { gateway, advertisement } = harness({}, source, denyEvaluator());
   const prepared = await gateway.normalize(
     {
@@ -619,7 +716,7 @@ test("policy denial prevents search handler reads and release", async () => {
       ...VIRTUAL_REPOSITORY_REFERENCES.search,
       input: {
         query: "needle",
-        paths: ["safe.txt"],
+        paths: [".env"],
         maxMatches: 2,
         maxSnippetBytes: 16,
         maxOutputBytes: 512,
@@ -628,15 +725,194 @@ test("policy denial prevents search handler reads and release", async () => {
     context(ACTION_IDS.search),
     advertisement,
   );
-  assert.equal(source.readCount, 1, "normalization validates the selected file once");
-  source.resetReads();
+  assert.equal(source.readCount, 0, "normalization must not open a selected file");
+  assert.deepEqual(prepared.action.preconditions, []);
+  const normalized = JSON.stringify(prepared.action);
+  assert.equal(normalized.includes("DENIED_SEARCH_SOURCE_CANARY"), false);
+  assert.equal(normalized.includes(sha256Hex(sourceContent)), false);
+  const evaluated = gateway.evaluate(prepared);
+  assert.equal(source.readCount, 0, "policy evaluation must precede every file open");
   await assert.rejects(
-    gateway.execute(gateway.evaluate(prepared), {
+    gateway.execute(evaluated, {
       signal: new AbortController().signal,
     }),
     (error: unknown) => isDomainCode(error, "policy_denied"),
   );
   assert.equal(source.readCount, 0, "denial never dispatches the search handler");
+});
+
+test("policy denial keeps read and patch normalization byte-free", async () => {
+  for (const [operation, input] of [
+    [
+      "read",
+      { path: ".env", startLine: 1, endLine: 1, maxBytes: 32 },
+    ],
+    [
+      "patch",
+      { path: ".env", replacement: "replacement\n" },
+    ],
+  ] as const) {
+    const sourceContent = `DENIED_${operation.toUpperCase()}_SOURCE_CANARY\n`;
+    const source = new CountingVirtualRepository({ ".env": sourceContent });
+    const { gateway, advertisement } = harness({}, source, denyEvaluator());
+    const prepared = await gateway.normalize(
+      {
+        schemaVersion: 1,
+        ...VIRTUAL_REPOSITORY_REFERENCES[operation],
+        input,
+      },
+      context(ACTION_IDS[operation]),
+      advertisement,
+    );
+    assert.equal(source.readCount, 0, `${operation} normalization opened repository bytes`);
+    assert.deepEqual(prepared.action.preconditions, []);
+    const normalized = JSON.stringify(prepared.action);
+    assert.equal(normalized.includes(sourceContent.trim()), false);
+    assert.equal(normalized.includes(sha256Hex(sourceContent)), false);
+    assert.equal(prepared.action.resource["path"], ".env");
+    const evaluated = gateway.evaluate(prepared);
+    assert.equal(source.readCount, 0, `${operation} policy evaluation opened repository bytes`);
+    await assert.rejects(
+      gateway.execute(evaluated, { signal: new AbortController().signal }),
+      (error: unknown) => isDomainCode(error, "policy_denied"),
+    );
+    assert.equal(source.readCount, 0, `${operation} denial dispatched its handler`);
+  }
+});
+
+test("allowed repository byte operations open only after policy with the same frozen action", async () => {
+  const inspectPatch = [
+    "--- a/safe.txt",
+    "+++ b/safe.txt",
+    "@@ -1,1 +1,1 @@",
+    "-before needle",
+    "+after",
+    "",
+  ].join("\n");
+  for (const [operation, input] of [
+    ["read", { path: "safe.txt", startLine: 1, endLine: 1, maxBytes: 64 }],
+    [
+      "search",
+      {
+        query: "needle",
+        paths: ["safe.txt"],
+        maxMatches: 2,
+        maxSnippetBytes: 32,
+        maxOutputBytes: 512,
+      },
+    ],
+    ["patch", { path: "safe.txt", replacement: "after\n" }],
+    ["inspectDiff", { patch: inspectPatch }],
+  ] as const) {
+    const source = new CountingVirtualRepository({ "safe.txt": "before needle\n" });
+    const observed = observedBoundaryHarness(source, "allow");
+    const prepared = await observed.gateway.normalize(
+      {
+        schemaVersion: 1,
+        ...VIRTUAL_REPOSITORY_REFERENCES[operation],
+        input,
+      },
+      context(ACTION_IDS[operation]),
+      observed.advertisement,
+    );
+    assert.equal(source.readCount, 0, `${operation} normalization opened bytes`);
+    assert.deepEqual(prepared.action.preconditions, []);
+    assert.equal(Object.isFrozen(prepared.action), true);
+    const evaluated = observed.gateway.evaluate(prepared);
+    assert.equal(source.readCount, 0, `${operation} evaluation opened bytes`);
+    assert.equal(observed.observations.evaluatedAction(), prepared.action);
+    await observed.gateway.execute(evaluated, {
+      signal: new AbortController().signal,
+    });
+    assert.equal(source.readCount, 1, `${operation} did not perform one authorized read`);
+    assert.equal(observed.observations.executedAction(), prepared.action);
+    assert.equal(observed.observations.releaseCount(), 1);
+  }
+});
+
+test("authorized missing, range, and preimage failures occur after policy without release", async () => {
+  const missingPatch = [
+    "--- a/missing.txt",
+    "+++ b/missing.txt",
+    "@@ -1,1 +1,1 @@",
+    "-before",
+    "+after",
+    "",
+  ].join("\n");
+  const mismatchPatch = [
+    "--- a/safe.txt",
+    "+++ b/safe.txt",
+    "@@ -1,1 +1,1 @@",
+    "-not-current",
+    "+after",
+    "",
+  ].join("\n");
+  const cases = [
+    {
+      name: "read missing",
+      operation: "read",
+      input: { path: "missing.txt", startLine: 1, endLine: 1, maxBytes: 32 },
+    },
+    {
+      name: "read range",
+      operation: "read",
+      input: { path: "safe.txt", startLine: 2, endLine: 2, maxBytes: 32 },
+    },
+    {
+      name: "search missing",
+      operation: "search",
+      input: {
+        query: "needle",
+        paths: ["missing.txt"],
+        maxMatches: 2,
+        maxSnippetBytes: 16,
+        maxOutputBytes: 512,
+      },
+    },
+    {
+      name: "patch missing",
+      operation: "patch",
+      input: { path: "missing.txt", replacement: "after\n" },
+    },
+    {
+      name: "diff missing",
+      operation: "inspectDiff",
+      input: { patch: missingPatch },
+    },
+    {
+      name: "diff preimage mismatch",
+      operation: "inspectDiff",
+      input: { patch: mismatchPatch },
+    },
+  ] as const;
+
+  for (const entry of cases) {
+    const source = new CountingVirtualRepository({ "safe.txt": "before\n" });
+    const observed = observedBoundaryHarness(source, "allow");
+    const prepared = await observed.gateway.normalize(
+      {
+        schemaVersion: 1,
+        ...VIRTUAL_REPOSITORY_REFERENCES[entry.operation],
+        input: entry.input,
+      },
+      context(ACTION_IDS[entry.operation]),
+      observed.advertisement,
+    );
+    assert.equal(source.readCount, 0, `${entry.name} failed before policy`);
+    const evaluated = observed.gateway.evaluate(prepared);
+    assert.equal(source.readCount, 0, `${entry.name} read during policy`);
+    await assert.rejects(
+      observed.gateway.execute(evaluated, {
+        signal: new AbortController().signal,
+      }),
+      (error: unknown) => isDomainCode(error, "invalid_input"),
+      entry.name,
+    );
+    assert.equal(source.readCount, 1, `${entry.name} did not fail in its handler`);
+    assert.equal(observed.observations.evaluatedAction(), prepared.action);
+    assert.equal(observed.observations.executedAction(), prepared.action);
+    assert.equal(observed.observations.releaseCount(), 0, entry.name);
+  }
 });
 
 test("reads only a bounded line range and truncates at a valid UTF-8 boundary", async () => {
@@ -650,9 +926,10 @@ test("reads only a bounded line range and truncates at a valid UTF-8 boundary", 
     path: "src/alpha.ts",
     content: "two\nthree",
     byteLength: 9,
-    sourceSha256: full.prepared.action.preconditions[0]!.attributes["sha256"],
+    sourceSha256: sha256Hex("one\ntwo\nthree\n"),
     truncated: false,
   });
+  assert.deepEqual(full.prepared.action.preconditions, []);
   assert.deepEqual(full.result.agent, {
     path: "src/alpha.ts",
     content: "two\nthree",
@@ -716,11 +993,23 @@ test("proposes an exact bounded patch without mutating the virtual fixture", asy
   assert.equal(before, "one\ntwo\nthree\n");
   assert.equal(after, before, "proposal cannot mutate fixture state");
   assert.equal(result.raw["path"], "src/alpha.ts");
-  assert.equal(
-    result.raw["preimageSha256"],
-    prepared.action.preconditions[0]!.attributes["sha256"],
-  );
+  assert.equal(result.raw["preimageSha256"], sha256Hex(before));
   assert.equal(result.raw["replacementSha256"], prepared.action.request["replacementSha256"]);
+  assert.deepEqual(prepared.action.normalizedInput, {
+    maximumPatchBytes: 512,
+    path: "src/alpha.ts",
+    replacement: "one\nTWO\nthree\n",
+    replacementBytes: 14,
+    replacementSha256: sha256Hex("one\nTWO\nthree\n"),
+  });
+  assert.deepEqual(prepared.action.request, {
+    intent: "propose_patch",
+    affectedPaths: ["src/alpha.ts"],
+    maximumPatchBytes: 512,
+    replacementBytes: 14,
+    replacementSha256: sha256Hex("one\nTWO\nthree\n"),
+  });
+  assert.deepEqual(prepared.action.preconditions, []);
   assert.match(
     result.raw["patch"] as string,
     /^--- a\/src\/alpha\.ts\n\+\+\+ b\/src\/alpha\.ts\n@@ -1,3 \+1,3 @@\n/u,
@@ -787,6 +1076,128 @@ test("inspects a canonical unified diff without applying it", async () => {
     "capability.inspect_diff.output",
     ["src/alpha.ts"],
   );
+});
+
+test("audit and human views never persist provider filenames, snippets, content, or patches", async () => {
+  async function execute(
+    source: VirtualRepository,
+    operation: keyof typeof VIRTUAL_REPOSITORY_REFERENCES,
+    input: unknown,
+  ) {
+    const { gateway, advertisement } = harness({}, source);
+    const prepared = await gateway.normalize(
+      {
+        schemaVersion: 1,
+        ...VIRTUAL_REPOSITORY_REFERENCES[operation],
+        input,
+      },
+      context(ACTION_IDS[operation]),
+      advertisement,
+    );
+    return gateway.execute(gateway.evaluate(prepared), {
+      signal: new AbortController().signal,
+    });
+  }
+
+  const listFilename = ".env.CREDENTIAL_PATH_CANARY";
+  const listed = await execute(
+    new VirtualRepository(
+      { [listFilename]: "safe\n" },
+      { maximumFiles: 2, maximumFileBytes: 128 },
+    ),
+    "list",
+    { root: "", maxResults: 2 },
+  );
+  assert.equal(JSON.stringify(listed.agent).includes(listFilename), true);
+  assert.equal(
+    JSON.stringify({ audit: listed.audit, human: listed.human }).includes(listFilename),
+    false,
+  );
+
+  const searchCanary = "SEARCH_SNIPPET_CANARY";
+  const credentialPath = ".env.FULL_VIEW_CANARY";
+  const searched = await execute(
+    new VirtualRepository(
+      { [credentialPath]: `needle ${searchCanary}\n` },
+      { maximumFiles: 2, maximumFileBytes: 128 },
+    ),
+    "search",
+    {
+      query: "needle",
+      paths: [credentialPath],
+      maxMatches: 2,
+      maxSnippetBytes: 64,
+      maxOutputBytes: 512,
+    },
+  );
+  assert.equal(JSON.stringify(searched.agent).includes(searchCanary), true);
+  const persistedSearch = JSON.stringify({ audit: searched.audit, human: searched.human });
+  assert.equal(persistedSearch.includes(searchCanary), false);
+  assert.equal(persistedSearch.includes(credentialPath), false);
+
+  const readCanary = "READ_CONTENT_CANARY";
+  const read = await execute(
+    new VirtualRepository(
+      { [credentialPath]: `${readCanary}\n` },
+      { maximumFiles: 2, maximumFileBytes: 128 },
+    ),
+    "read",
+    { path: credentialPath, startLine: 1, endLine: 1, maxBytes: 64 },
+  );
+  assert.equal(JSON.stringify(read.agent).includes(readCanary), true);
+  const persistedRead = JSON.stringify({ audit: read.audit, human: read.human });
+  assert.equal(persistedRead.includes(readCanary), false);
+  assert.equal(persistedRead.includes(credentialPath), false);
+
+  const patchPreimage = "PATCH_PREIMAGE_CANARY";
+  const patchReplacement = "PATCH_REPLACEMENT_CANARY";
+  const proposed = await execute(
+    new VirtualRepository(
+      { [credentialPath]: `${patchPreimage}\n` },
+      { maximumFiles: 2, maximumFileBytes: 128 },
+    ),
+    "patch",
+    { path: credentialPath, replacement: `${patchReplacement}\n` },
+  );
+  assert.equal(JSON.stringify(proposed.agent).includes(patchPreimage), true);
+  assert.equal(JSON.stringify(proposed.agent).includes(patchReplacement), true);
+  const persistedProposal = JSON.stringify({
+    audit: proposed.audit,
+    human: proposed.human,
+  });
+  assert.equal(persistedProposal.includes(patchPreimage), false);
+  assert.equal(persistedProposal.includes(patchReplacement), false);
+  assert.equal(persistedProposal.includes(credentialPath), false);
+  assert.equal(Object.hasOwn(proposed.human, "patch"), false);
+
+  const diffPreimage = "DIFF_PREIMAGE_CANARY";
+  const diffReplacement = "DIFF_REPLACEMENT_CANARY";
+  const diff = [
+    `--- a/${credentialPath}`,
+    `+++ b/${credentialPath}`,
+    "@@ -1,1 +1,1 @@",
+    `-${diffPreimage}`,
+    `+${diffReplacement}`,
+    "",
+  ].join("\n");
+  const inspected = await execute(
+    new VirtualRepository(
+      { [credentialPath]: `${diffPreimage}\n` },
+      { maximumFiles: 2, maximumFileBytes: 128 },
+    ),
+    "inspectDiff",
+    { patch: diff },
+  );
+  assert.equal(JSON.stringify(inspected.agent).includes(diffPreimage), true);
+  assert.equal(JSON.stringify(inspected.agent).includes(diffReplacement), true);
+  const persistedInspection = JSON.stringify({
+    audit: inspected.audit,
+    human: inspected.human,
+  });
+  assert.equal(persistedInspection.includes(diffPreimage), false);
+  assert.equal(persistedInspection.includes(diffReplacement), false);
+  assert.equal(persistedInspection.includes(credentialPath), false);
+  assert.equal(Object.hasOwn(inspected.human, "patch"), false);
 });
 
 test("list, search, and diff environment-path metadata is denied by the real broker policy", async () => {
@@ -989,10 +1400,11 @@ test("list, search, and diff environment-path metadata is denied by the real bro
 });
 
 test("policy denial prevents inspect-diff handler reads and release", async () => {
-  const source = new CountingVirtualRepository({ "safe.txt": "before\n" });
+  const sourceContent = "before\nDENIED_INSPECT_SOURCE_CANARY\n";
+  const source = new CountingVirtualRepository({ ".env": sourceContent });
   const patch = [
-    "--- a/safe.txt",
-    "+++ b/safe.txt",
+    "--- a/.env",
+    "+++ b/.env",
     "@@ -1,1 +1,1 @@",
     "-before",
     "+after",
@@ -1008,15 +1420,126 @@ test("policy denial prevents inspect-diff handler reads and release", async () =
     context(ACTION_IDS.inspectDiff),
     advertisement,
   );
-  assert.equal(source.readCount, 1, "normalization validates the current preimage");
-  source.resetReads();
+  assert.equal(source.readCount, 0, "normalization must not open the diff preimage");
+  assert.deepEqual(prepared.action.preconditions, []);
+  const normalized = JSON.stringify(prepared.action);
+  assert.equal(normalized.includes("DENIED_INSPECT_SOURCE_CANARY"), false);
+  assert.equal(normalized.includes(sha256Hex(sourceContent)), false);
+  assert.deepEqual(prepared.action.resource["paths"], [".env"]);
+  const evaluated = gateway.evaluate(prepared);
+  assert.equal(source.readCount, 0, "policy evaluation must precede diff preimage opens");
   await assert.rejects(
-    gateway.execute(gateway.evaluate(prepared), {
+    gateway.execute(evaluated, {
       signal: new AbortController().signal,
     }),
     (error: unknown) => isDomainCode(error, "policy_denied"),
   );
   assert.equal(source.readCount, 0, "denial never dispatches the inspection handler");
+});
+
+test("structural diff normalization exposes every file section before policy without reads", async () => {
+  const source = new CountingVirtualRepository({
+    "safe.txt": "before\n",
+    "z/.env": "secret\n",
+  });
+  const patch = [
+    "--- a/safe.txt",
+    "+++ b/safe.txt",
+    "@@ -1,1 +1,1 @@",
+    "-before",
+    "+after",
+    "--- a/z/.env",
+    "+++ b/z/.env",
+    "@@ -1,1 +1,1 @@",
+    "-secret",
+    "+redacted",
+    "",
+  ].join("\n");
+  const { gateway, advertisement } = harness({}, source, denyEvaluator());
+  const prepared = await gateway.normalize(
+    {
+      schemaVersion: 1,
+      ...VIRTUAL_REPOSITORY_REFERENCES.inspectDiff,
+      input: { patch },
+    },
+    context(ACTION_IDS.inspectDiff),
+    advertisement,
+  );
+  assert.equal(source.readCount, 0);
+  assert.deepEqual(prepared.action.resource["paths"], ["safe.txt", "z/.env"]);
+  assert.deepEqual(prepared.action.request["affectedPaths"], ["safe.txt", "z/.env"]);
+  const evaluated = gateway.evaluate(prepared);
+  assert.equal(source.readCount, 0);
+  await assert.rejects(
+    gateway.execute(evaluated, { signal: new AbortController().signal }),
+    (error: unknown) => isDomainCode(error, "policy_denied"),
+  );
+  assert.equal(source.readCount, 0);
+});
+
+test("real coding policy denies mixed secret input paths before handler dispatch", async () => {
+  const evaluator = await codingPolicyEvaluator();
+  const inspectPatch = [
+    "--- a/safe.txt",
+    "+++ b/safe.txt",
+    "@@ -1,1 +1,1 @@",
+    "-needle",
+    "+safe",
+    "--- a/z/.env",
+    "+++ b/z/.env",
+    "@@ -1,1 +1,1 @@",
+    "-needle",
+    "+redacted",
+    "",
+  ].join("\n");
+  for (const [operation, input] of [
+    [
+      "search",
+      {
+        query: "needle",
+        paths: ["z/.env", "safe.txt"],
+        maxMatches: 4,
+        maxSnippetBytes: 32,
+        maxOutputBytes: 1_024,
+      },
+    ],
+    ["inspectDiff", { patch: inspectPatch }],
+  ] as const) {
+    const source = new CountingVirtualRepository({
+      "safe.txt": "needle\n",
+      "z/.env": "needle\n",
+    });
+    const observed = observedBoundaryHarness(source, evaluator);
+    const prepared = await observed.gateway.normalize(
+      {
+        schemaVersion: 1,
+        ...VIRTUAL_REPOSITORY_REFERENCES[operation],
+        input,
+      },
+      context(ACTION_IDS[operation]),
+      observed.advertisement,
+    );
+    assert.equal(source.readCount, 0, operation);
+    assert.deepEqual(prepared.action.resource["paths"], ["safe.txt", "z/.env"]);
+    const directDecision = evaluator.evaluate(prepared.action);
+    assert.equal(directDecision.effect, "deny", operation);
+    const evaluated = observed.gateway.evaluate(prepared);
+    assert.equal(evaluated.decision.effect, "deny");
+    assert.equal(
+      evaluated.decision.winningPolicyName,
+      "deny-secret-repository-actions",
+    );
+    assert.equal(source.readCount, 0, operation);
+    await assert.rejects(
+      observed.gateway.execute(evaluated, {
+        signal: new AbortController().signal,
+      }),
+      (error: unknown) => isDomainCode(error, "policy_denied"),
+    );
+    assert.equal(source.readCount, 0, operation);
+    assert.equal(observed.observations.executedAction(), undefined);
+    assert.equal(observed.observations.releaseCount(), 0);
+  }
 });
 
 test("requires unique UTF-8 ordered diff sections and exact current preimages", async () => {
@@ -1066,12 +1589,11 @@ test("requires unique UTF-8 ordered diff sections and exact current preimages", 
     "+# Reviewed fixture",
     "",
   ].join("\n");
-  const invalid = [
+  const structurallyInvalid = [
     reversed,
-    stablePatch.replace("-one", "-not-current-content"),
     stablePatch.replace("+++ b/README.md", "+++ b/src/alpha.ts"),
   ];
-  for (const patch of invalid) {
+  for (const patch of structurallyInvalid) {
     const { gateway, advertisement } = harness({}, source);
     await assert.rejects(
       gateway.normalize(
@@ -1086,6 +1608,32 @@ test("requires unique UTF-8 ordered diff sections and exact current preimages", 
       (error: unknown) => isDomainCode(error, "invalid_input"),
     );
   }
+
+  const mismatchSource = new CountingVirtualRepository({
+    "README.md": "# Fixture\n",
+    "src/alpha.ts": "one\ntwo\nthree\n",
+  });
+  const mismatchHarness = observedBoundaryHarness(mismatchSource, "allow");
+  const mismatchPrepared = await mismatchHarness.gateway.normalize(
+    {
+      schemaVersion: 1,
+      ...VIRTUAL_REPOSITORY_REFERENCES.inspectDiff,
+      input: { patch: stablePatch.replace("-one", "-not-current-content") },
+    },
+    context(ACTION_IDS.inspectDiff),
+    mismatchHarness.advertisement,
+  );
+  assert.equal(mismatchSource.readCount, 0);
+  const mismatchEvaluated = mismatchHarness.gateway.evaluate(mismatchPrepared);
+  assert.equal(mismatchSource.readCount, 0);
+  await assert.rejects(
+    mismatchHarness.gateway.execute(mismatchEvaluated, {
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+  assert.equal(mismatchSource.readCount, 2);
+  assert.equal(mismatchHarness.observations.releaseCount(), 0);
 });
 
 test("accepts canonical nonzero zero-count insertion and deletion coordinates", async () => {

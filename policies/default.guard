@@ -1,7 +1,8 @@
-policy "deny-secret-repository-reads" priority 1000 {
-  when action.pack == "repository" and action.operation == "read_file" and repo.path matches "**/.env*"
+policy "deny-secret-repository-actions" priority 1000 {
+  when action.pack == "coding.virtual-repository"
+    and (repo.path matches "**/.env*" or repo.input_paths matches "**/.env*")
   deny
-  reason "Secret-bearing repository paths cannot enter agent context"
+  reason "Secret-bearing repository paths cannot be operated on"
 }
 
 policy "approve-dependency-installation" priority 700 {
