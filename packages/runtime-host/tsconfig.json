@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../contracts" },
+    { "path": "../event-store" },
+    { "path": "../runtime" },
+    { "path": "../agent-driver" },
+    { "path": "../context-broker" },
+    { "path": "../capability-gateway" },
+    { "path": "../profile-registry" }
+  ]
+}

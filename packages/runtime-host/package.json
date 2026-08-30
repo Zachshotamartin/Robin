@@ -1,0 +1,32 @@
+{
+  "name": "@guard/runtime-host",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Synchronous application host for the Guarded Agent runtime kernel.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc --build --force",
+    "test": "npm run build && node --test dist/*.test.js"
+  },
+  "dependencies": {
+    "@guard/agent-driver": "0.0.0",
+    "@guard/capability-gateway": "0.0.0",
+    "@guard/context-broker": "0.0.0",
+    "@guard/contracts": "0.0.0",
+    "@guard/event-store": "0.0.0",
+    "@guard/profile-registry": "0.0.0",
+    "@guard/runtime": "0.0.0"
+  }
+}
