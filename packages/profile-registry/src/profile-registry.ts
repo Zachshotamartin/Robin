@@ -1,15 +1,26 @@
 import {
   canonicalSha256Hex,
-  cloneAndFreezeJsonObject,
   createDomainError,
-  isContractSchemaVersion,
   isDomainError,
-  type ComponentBinding,
+  parseObjectiveEnvelope,
+  parseOutcomeEnvelope,
+  parseTaskProfile,
+  snapshotBoundaryJsonObject,
   type JsonObject,
-  type NamedComponentBinding,
+  type ObjectiveEnvelope,
+  type OutcomeEnvelope,
   type TaskProfile,
-  type VersionedSchema,
 } from "@guard/contracts";
+import {
+  compileTrustedJsonObjectSchema,
+  type CompiledJsonObjectSchema,
+} from "@guard/schema-validation";
+
+export const DEFAULT_MAX_PROFILE_SCHEMA_BYTES = 256 * 1_024;
+
+export interface TaskProfileRegistryOptions {
+  readonly maxSchemaBytes: number;
+}
 
 export interface PinnedTaskProfile {
   readonly profileId: string;
@@ -29,11 +40,15 @@ export interface TaskProfileRegistry {
   resolve(profileId: unknown, profileVersion: unknown): TaskProfile;
   list(): readonly TaskProfileListEntry[];
   pin(profileId: unknown, profileVersion: unknown): PinnedTaskProfile;
+  validateObjective(value: unknown): ObjectiveEnvelope;
+  validateOutcome(value: unknown): OutcomeEnvelope;
 }
 
 interface StoredProfile {
   readonly pinned: PinnedTaskProfile;
   readonly listEntry: TaskProfileListEntry;
+  readonly objectiveValidator: CompiledJsonObjectSchema;
+  readonly outcomeValidator: CompiledJsonObjectSchema;
 }
 
 /**
@@ -43,6 +58,15 @@ interface StoredProfile {
  */
 export class InMemoryTaskProfileRegistry implements TaskProfileRegistry {
   readonly #profiles = new Map<string, Map<number, StoredProfile>>();
+  readonly #maxSchemaBytes: number;
+
+  constructor(
+    options: TaskProfileRegistryOptions = {
+      maxSchemaBytes: DEFAULT_MAX_PROFILE_SCHEMA_BYTES,
+    },
+  ) {
+    this.#maxSchemaBytes = parseRegistryOptions(options).maxSchemaBytes;
+  }
 
   register(value: unknown): PinnedTaskProfile {
     const profile = snapshotAndValidate(value);
@@ -58,6 +82,18 @@ export class InMemoryTaskProfileRegistry implements TaskProfileRegistry {
       });
     }
 
+    const objectiveValidator = compileTrustedJsonObjectSchema(
+      profile.objectiveSchema,
+      {
+        maxSchemaBytes: this.#maxSchemaBytes,
+        maxValueBytes: profile.budgetPolicy.maxInputBytes,
+      },
+    );
+    const outcomeValidator = compileTrustedJsonObjectSchema(profile.outcomeSchema, {
+      maxSchemaBytes: this.#maxSchemaBytes,
+      maxValueBytes: profile.budgetPolicy.maxOutputBytes,
+    });
+
     const fingerprint = canonicalSha256Hex(profile);
     const pinned: PinnedTaskProfile = Object.freeze({
       profileId: profile.profileId,
@@ -70,7 +106,12 @@ export class InMemoryTaskProfileRegistry implements TaskProfileRegistry {
       profileVersion: profile.profileVersion,
       fingerprint,
     });
-    const stored: StoredProfile = Object.freeze({ pinned, listEntry });
+    const stored: StoredProfile = Object.freeze({
+      pinned,
+      listEntry,
+      objectiveValidator,
+      outcomeValidator,
+    });
     const versions = existingVersions ?? new Map<number, StoredProfile>();
     versions.set(profile.profileVersion, stored);
     if (existingVersions === undefined) {
@@ -106,6 +147,20 @@ export class InMemoryTaskProfileRegistry implements TaskProfileRegistry {
     return Object.freeze(entries);
   }
 
+  validateObjective(value: unknown): ObjectiveEnvelope {
+    const objective = parseObjectiveEnvelope(value);
+    const stored = this.lookup(objective.profileId, objective.profileVersion);
+    stored.objectiveValidator.validate(objective.payload);
+    return objective;
+  }
+
+  validateOutcome(value: unknown): OutcomeEnvelope {
+    const outcome = parseOutcomeEnvelope(value);
+    const stored = this.lookup(outcome.profileId, outcome.profileVersion);
+    stored.outcomeValidator.validate(outcome.payload);
+    return outcome;
+  }
+
   private lookup(profileId: unknown, profileVersion: unknown): StoredProfile {
     requireIdentifier(profileId, "profileId");
     requirePositiveSafeInteger(profileVersion, "profileVersion");
@@ -122,237 +177,45 @@ export class InMemoryTaskProfileRegistry implements TaskProfileRegistry {
 }
 
 function snapshotAndValidate(value: unknown): TaskProfile {
-  let snapshot: JsonObject;
   try {
-    snapshot = cloneAndFreezeJsonObject(
-      value as Readonly<Record<string, unknown>>,
-      "Task profile"
-    );
-  } catch {
-    throw invalidProfile("$", "must be a lossless JSON object");
-  }
-
-  try {
-    validateTaskProfile(snapshot);
+    return parseTaskProfile(value);
   } catch (error: unknown) {
     if (isDomainError(error)) {
       throw error;
     }
-    throw invalidProfile("$", "could not be validated safely");
+    throw createDomainError({
+      code: "invalid_input",
+      message: "The task profile could not be validated safely.",
+    });
   }
-  return snapshot as unknown as TaskProfile;
 }
 
-const TASK_PROFILE_KEYS = new Set([
-  "schemaVersion",
-  "profileId",
-  "profileVersion",
-  "objectiveSchema",
-  "driverProfile",
-  "modelBindings",
-  "contextSources",
-  "capabilityPacks",
-  "policyProfile",
-  "outcomeSchema",
-  "budgetPolicy",
-  "evidenceMode",
-  "evaluationProfile",
-]);
-
-function validateTaskProfile(profile: JsonObject): void {
-  requireExactKeys(profile, TASK_PROFILE_KEYS, "$", "task profile");
-  if (!isContractSchemaVersion(profile["schemaVersion"])) {
-    throw invalidProfile("$.schemaVersion", "must be the current contract version");
+function parseRegistryOptions(value: unknown): TaskProfileRegistryOptions {
+  let snapshot: JsonObject;
+  try {
+    snapshot = snapshotBoundaryJsonObject(value);
+  } catch {
+    throw invalidRegistryOptions();
   }
-  requireIdentifier(profile["profileId"], "$.profileId");
-  requirePositiveSafeInteger(profile["profileVersion"], "$.profileVersion");
-  validateSchema(profile["objectiveSchema"], "$.objectiveSchema");
-  validateComponent(profile["driverProfile"], "$.driverProfile", false);
-  validateModelBindings(profile["modelBindings"]);
-  validateNamedComponents(profile["contextSources"], "$.contextSources");
-  validateNamedComponents(profile["capabilityPacks"], "$.capabilityPacks");
-  validateComponent(profile["policyProfile"], "$.policyProfile", false);
-  validateSchema(profile["outcomeSchema"], "$.outcomeSchema");
-  validateBudget(profile["budgetPolicy"]);
+  const keys = Object.keys(snapshot);
   if (
-    profile["evidenceMode"] !== "durable_encrypted" &&
-    profile["evidenceMode"] !== "ephemeral_metadata"
+    keys.length !== 1 ||
+    keys[0] !== "maxSchemaBytes" ||
+    typeof snapshot["maxSchemaBytes"] !== "number" ||
+    !Number.isSafeInteger(snapshot["maxSchemaBytes"]) ||
+    snapshot["maxSchemaBytes"] < 1
   ) {
-    throw invalidProfile("$.evidenceMode", "must be a supported evidence mode");
+    throw invalidRegistryOptions();
   }
-  if (profile["evaluationProfile"] !== null) {
-    validateComponent(profile["evaluationProfile"], "$.evaluationProfile", false);
-  }
+  return snapshot as unknown as TaskProfileRegistryOptions;
 }
 
-const SCHEMA_KEYS = new Set(["schemaId", "schemaVersion", "document"]);
-
-function validateSchema(value: unknown, path: string): asserts value is VersionedSchema {
-  const schema = requireObject(value, path);
-  requireExactKeys(schema, SCHEMA_KEYS, path, "schema");
-  requireIdentifier(schema["schemaId"], `${path}.schemaId`);
-  requirePositiveSafeInteger(schema["schemaVersion"], `${path}.schemaVersion`);
-  requireObject(schema["document"], `${path}.document`);
-}
-
-const COMPONENT_KEYS = new Set([
-  "componentId",
-  "componentVersion",
-  "configuration",
-]);
-const NAMED_COMPONENT_KEYS = new Set([...COMPONENT_KEYS, "bindingId"]);
-
-function validateComponent(
-  value: unknown,
-  path: string,
-  named: false
-): asserts value is ComponentBinding;
-function validateComponent(
-  value: unknown,
-  path: string,
-  named: true
-): asserts value is NamedComponentBinding;
-function validateComponent(value: unknown, path: string, named: boolean): void {
-  const component = requireObject(value, path);
-  requireExactKeys(
-    component,
-    named ? NAMED_COMPONENT_KEYS : COMPONENT_KEYS,
-    path,
-    named ? "named component binding" : "component binding"
-  );
-  if (named) {
-    requireIdentifier(component["bindingId"], `${path}.bindingId`);
-  }
-  requireIdentifier(component["componentId"], `${path}.componentId`);
-  requirePositiveSafeInteger(
-    component["componentVersion"],
-    `${path}.componentVersion`
-  );
-  requireObject(component["configuration"], `${path}.configuration`);
-}
-
-function validateNamedComponents(value: unknown, path: string): void {
-  const bindings = requireArray(value, path);
-  const seen = new Set<string>();
-  for (let index = 0; index < bindings.length; index += 1) {
-    const bindingPath = `${path}[${index}]`;
-    const binding = bindings[index];
-    validateComponent(binding, bindingPath, true);
-    if (seen.has(binding.bindingId)) {
-      throw invalidProfile(`${bindingPath}.bindingId`, "must be unique in its category");
-    }
-    seen.add(binding.bindingId);
-  }
-}
-
-const MODEL_BINDING_KEYS = new Set([
-  "bindingId",
-  "roleId",
-  "authority",
-  "modelProfileId",
-  "modelProfileVersion",
-  "mayProposeActions",
-  "configuration",
-]);
-
-function validateModelBindings(value: unknown): void {
-  const bindings = requireArray(value, "$.modelBindings");
-  const seen = new Set<string>();
-  let plannerCount = 0;
-  for (let index = 0; index < bindings.length; index += 1) {
-    const path = `$.modelBindings[${index}]`;
-    const binding = requireObject(bindings[index], path);
-    requireExactKeys(binding, MODEL_BINDING_KEYS, path, "model binding");
-    requireIdentifier(binding["bindingId"], `${path}.bindingId`);
-    requireIdentifier(binding["roleId"], `${path}.roleId`);
-    requireIdentifier(binding["modelProfileId"], `${path}.modelProfileId`);
-    requirePositiveSafeInteger(
-      binding["modelProfileVersion"],
-      `${path}.modelProfileVersion`
-    );
-    requireObject(binding["configuration"], `${path}.configuration`);
-    if (typeof binding["mayProposeActions"] !== "boolean") {
-      throw invalidProfile(`${path}.mayProposeActions`, "must be a boolean");
-    }
-    if (binding["authority"] === "planner") {
-      plannerCount += 1;
-      if (binding["mayProposeActions"] !== true) {
-        throw invalidProfile(path, "a planner must be action-capable");
-      }
-    } else if (binding["authority"] === "auxiliary") {
-      if (binding["mayProposeActions"] !== false) {
-        throw invalidProfile(path, "an auxiliary binding cannot propose actions");
-      }
-    } else {
-      throw invalidProfile(`${path}.authority`, "must be planner or auxiliary");
-    }
-    const bindingId = binding["bindingId"] as string;
-    if (seen.has(bindingId)) {
-      throw invalidProfile(`${path}.bindingId`, "must be unique in its category");
-    }
-    seen.add(bindingId);
-  }
-  if (plannerCount > 1) {
-    throw invalidProfile("$.modelBindings", "must contain no more than one planner");
-  }
-}
-
-const BUDGET_KEYS = new Set([
-  "maxTurns",
-  "maxActions",
-  "maxElapsedMs",
-  "maxInputBytes",
-  "maxOutputBytes",
-  "extensions",
-]);
-
-function validateBudget(value: unknown): void {
-  const budget = requireObject(value, "$.budgetPolicy");
-  requireExactKeys(budget, BUDGET_KEYS, "$.budgetPolicy", "budget policy");
-  requirePositiveSafeInteger(budget["maxTurns"], "$.budgetPolicy.maxTurns");
-  requireNonnegativeSafeInteger(budget["maxActions"], "$.budgetPolicy.maxActions");
-  requirePositiveSafeInteger(
-    budget["maxElapsedMs"],
-    "$.budgetPolicy.maxElapsedMs"
-  );
-  requirePositiveSafeInteger(
-    budget["maxInputBytes"],
-    "$.budgetPolicy.maxInputBytes"
-  );
-  requirePositiveSafeInteger(
-    budget["maxOutputBytes"],
-    "$.budgetPolicy.maxOutputBytes"
-  );
-  requireObject(budget["extensions"], "$.budgetPolicy.extensions");
-}
-
-function requireObject(value: unknown, path: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw invalidProfile(path, "must be an object");
-  }
-  return value as JsonObject;
-}
-
-function requireArray(value: unknown, path: string): readonly unknown[] {
-  if (!Array.isArray(value)) {
-    throw invalidProfile(path, "must be an array");
-  }
-  return value;
-}
-
-function requireExactKeys(
-  value: JsonObject,
-  expected: ReadonlySet<string>,
-  path: string,
-  label: string
-): void {
-  const keys = Object.keys(value);
-  if (
-    keys.length !== expected.size ||
-    keys.some((key) => !expected.has(key))
-  ) {
-    throw invalidProfile(path, `${label} fields must match the current contract exactly`);
-  }
+function invalidRegistryOptions() {
+  return createDomainError({
+    code: "invalid_input",
+    message: "Task-profile registry options are malformed.",
+    details: { reason: "invalid_limits" },
+  });
 }
 
 function requireIdentifier(value: unknown, path: string): asserts value is string {
@@ -361,7 +224,7 @@ function requireIdentifier(value: unknown, path: string): asserts value is strin
     value.length === 0 ||
     value.trim() !== value
   ) {
-    throw invalidProfile(path, "must be a nonempty identifier without edge whitespace");
+    throw invalidLookup(path, "must be a nonempty identifier without edge whitespace");
   }
 }
 
@@ -370,23 +233,14 @@ function requirePositiveSafeInteger(
   path: string
 ): asserts value is number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
-    throw invalidProfile(path, "must be a positive safe integer");
+    throw invalidLookup(path, "must be a positive safe integer");
   }
 }
 
-function requireNonnegativeSafeInteger(
-  value: unknown,
-  path: string
-): asserts value is number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-    throw invalidProfile(path, "must be a nonnegative safe integer");
-  }
-}
-
-function invalidProfile(path: string, reason: string) {
+function invalidLookup(path: string, reason: string) {
   return createDomainError({
     code: "invalid_input",
-    message: "The task profile is malformed or semantically invalid.",
+    message: "The task-profile lookup is malformed.",
     details: { path, reason },
   });
 }

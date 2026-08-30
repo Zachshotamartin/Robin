@@ -1,8 +1,8 @@
 {
-  "name": "@guard/profile-registry",
+  "name": "@guard/schema-validation",
   "version": "0.0.0",
   "private": true,
-  "description": "Immutable validated task-profile registry for the Guarded Agent kernel.",
+  "description": "Shared trusted JSON Schema compilation and immutable value validation boundary.",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -22,6 +22,6 @@
   },
   "dependencies": {
     "@guard/contracts": "0.0.0",
-    "@guard/schema-validation": "0.0.0"
+    "ajv": "8.20.0"
   }
 }

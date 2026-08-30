@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  canonicalBytes,
   canonicalSha256Hex,
   isDomainError,
+  type DomainError,
+  type ObjectiveEnvelope,
+  type OutcomeEnvelope,
   type TaskProfile,
 } from "@guard/contracts";
 
@@ -18,7 +22,12 @@ const BASE_PROFILE: TaskProfile = {
     schemaVersion: 1,
     document: {
       type: "object",
-      properties: { input: { type: "string" } },
+      additionalProperties: false,
+      required: ["input"],
+      properties: {
+        input: { type: "string" },
+        tag: { type: "string", default: "default-tag" },
+      },
     },
   },
   driverProfile: {
@@ -51,7 +60,12 @@ const BASE_PROFILE: TaskProfile = {
   outcomeSchema: {
     schemaId: "schema:synthetic-outcome",
     schemaVersion: 1,
-    document: { type: "object", required: ["answer"] },
+    document: {
+      type: "object",
+      additionalProperties: false,
+      required: ["answer"],
+      properties: { answer: { type: "string" } },
+    },
   },
   budgetPolicy: {
     maxTurns: 5,
@@ -63,6 +77,29 @@ const BASE_PROFILE: TaskProfile = {
   },
   evidenceMode: "ephemeral_metadata",
   evaluationProfile: null,
+};
+
+const BASE_OBJECTIVE: ObjectiveEnvelope = {
+  schemaVersion: 1,
+  profileId: BASE_PROFILE.profileId,
+  profileVersion: BASE_PROFILE.profileVersion,
+  objectiveType: "synthetic.transform",
+  objectiveTypeVersion: 1,
+  payload: { input: "alpha" },
+  submittedBy: { kind: "user", id: "user:test" },
+  submittedAt: "2026-08-30T12:00:00.000Z",
+};
+
+const BASE_OUTCOME: OutcomeEnvelope = {
+  schemaVersion: 1,
+  outcomeId: "outcome:synthetic",
+  profileId: BASE_PROFILE.profileId,
+  profileVersion: BASE_PROFILE.profileVersion,
+  outcomeType: "synthetic.result",
+  outcomeTypeVersion: 1,
+  payload: { answer: "alpha" },
+  evidence: [],
+  proposedAt: "2026-08-30T12:00:01.000Z",
 };
 
 function mutableProfile(): Record<string, unknown> {
@@ -88,6 +125,24 @@ function assertDomainFailure(
     operation,
     (error: unknown) => isDomainError(error) && error.code === code
   );
+}
+
+function captureDomainFailure(
+  operation: () => unknown,
+  code: "invalid_input" | "conflict" = "invalid_input",
+): DomainError {
+  let captured: DomainError | undefined;
+  assert.throws(operation, (error: unknown) => {
+    if (isDomainError(error) && error.code === code) {
+      captured = error;
+      return true;
+    }
+    return false;
+  });
+  if (captured === undefined) {
+    assert.fail("Expected a DomainError to be captured.");
+  }
+  return captured;
 }
 
 test("register snapshots, fingerprints, and deeply freezes a valid profile", () => {
@@ -421,4 +476,208 @@ test("resolve and pin validate their own untrusted lookup inputs", () => {
       "invalid_input"
     );
   }
+});
+
+test("registration eagerly rejects invalid and asynchronous payload schemas", () => {
+  const invalidObjective = mutableProfile();
+  asRecord(asRecord(invalidObjective["objectiveSchema"])["document"])[
+    "unreviewedKeyword"
+  ] = true;
+  const asyncOutcome = mutableProfile();
+  asRecord(asRecord(asyncOutcome["outcomeSchema"])["document"])["$async"] = true;
+
+  for (const profile of [invalidObjective, asyncOutcome]) {
+    const registry = new InMemoryTaskProfileRegistry();
+    const error = captureDomainFailure(() => registry.register(profile));
+    assert.equal(error.details?.["reason"], "invalid_schema");
+    assert.deepEqual(registry.list(), []);
+  }
+});
+
+test("validateObjective and validateOutcome return detached frozen envelopes", () => {
+  const registry = new InMemoryTaskProfileRegistry();
+  registry.register(mutableProfile());
+
+  const objective = structuredClone(BASE_OBJECTIVE);
+  const validatedObjective = registry.validateObjective(objective);
+  assert.deepEqual(validatedObjective, objective);
+  assert.notStrictEqual(validatedObjective, objective);
+  assert.notStrictEqual(validatedObjective.payload, objective.payload);
+  assert.equal(Object.isFrozen(validatedObjective), true);
+  assert.equal(Object.isFrozen(validatedObjective.payload), true);
+
+  const outcome = structuredClone(BASE_OUTCOME);
+  const validatedOutcome = registry.validateOutcome(outcome);
+  assert.deepEqual(validatedOutcome, outcome);
+  assert.notStrictEqual(validatedOutcome, outcome);
+  assert.notStrictEqual(validatedOutcome.payload, outcome.payload);
+  assert.equal(Object.isFrozen(validatedOutcome), true);
+  assert.equal(Object.isFrozen(validatedOutcome.payload), true);
+
+  (objective.payload as Record<string, unknown>)["input"] = "mutated";
+  (outcome.payload as Record<string, unknown>)["answer"] = "mutated";
+  assert.equal(validatedObjective.payload["input"], "alpha");
+  assert.equal(validatedOutcome.payload["answer"], "alpha");
+});
+
+test("complete envelope parsing and exact profile-version routing fail closed", () => {
+  const registry = new InMemoryTaskProfileRegistry();
+  registry.register(mutableProfile());
+
+  const malformedObjective = {
+    ...structuredClone(BASE_OBJECTIVE),
+    providerRequestId: "must-not-cross",
+  };
+  const malformedOutcome = structuredClone(BASE_OUTCOME) as unknown as Record<
+    string,
+    unknown
+  >;
+  delete malformedOutcome["outcomeTypeVersion"];
+  const wrongObjectiveProfile = {
+    ...structuredClone(BASE_OBJECTIVE),
+    profileId: "profile:missing",
+  };
+  const wrongOutcomeVersion = {
+    ...structuredClone(BASE_OUTCOME),
+    profileVersion: 2,
+  };
+
+  for (const operation of [
+    () => registry.validateObjective(malformedObjective),
+    () => registry.validateOutcome(malformedOutcome),
+    () => registry.validateObjective(wrongObjectiveProfile),
+    () => registry.validateOutcome(wrongOutcomeVersion),
+  ]) {
+    assertDomainFailure(operation, "invalid_input");
+  }
+});
+
+test("profile payload schemas reject invalid and extra fields without mutation", () => {
+  const registry = new InMemoryTaskProfileRegistry();
+  registry.register(mutableProfile());
+
+  const missingDefault = structuredClone(BASE_OBJECTIVE);
+  const validated = registry.validateObjective(missingDefault);
+  assert.equal("tag" in missingDefault.payload, false);
+  assert.equal("tag" in validated.payload, false);
+
+  const wrongType = structuredClone(BASE_OBJECTIVE) as unknown as {
+    payload: Record<string, unknown>;
+  };
+  wrongType.payload["input"] = 7;
+  assertDomainFailure(() => registry.validateObjective(wrongType), "invalid_input");
+  assert.equal(wrongType.payload["input"], 7);
+
+  const extra = structuredClone(BASE_OBJECTIVE) as unknown as {
+    payload: Record<string, unknown>;
+  };
+  extra.payload["extra"] = true;
+  assertDomainFailure(() => registry.validateObjective(extra), "invalid_input");
+  assert.equal(extra.payload["extra"], true);
+
+  const missingOutcome = structuredClone(BASE_OUTCOME) as unknown as {
+    payload: Record<string, unknown>;
+  };
+  delete missingOutcome.payload["answer"];
+  assertDomainFailure(
+    () => registry.validateOutcome(missingOutcome),
+    "invalid_input",
+  );
+});
+
+test("objective and outcome validation reject traps without canary leakage", () => {
+  const registry = new InMemoryTaskProfileRegistry();
+  registry.register(mutableProfile());
+  const canary = "SECRET_PROFILE_PAYLOAD_CANARY_1a0e";
+  let proxyGets = 0;
+  const objectiveProxy = new Proxy(structuredClone(BASE_OBJECTIVE), {
+    get(target, key, receiver) {
+      proxyGets += 1;
+      if (key === "payload") throw new Error(canary);
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  const proxyError = captureDomainFailure(() =>
+    registry.validateObjective(objectiveProxy),
+  );
+  assert.equal(proxyGets, 0);
+  assert.equal(JSON.stringify(proxyError).includes(canary), false);
+
+  let accessorGets = 0;
+  const outcomeAccessor = structuredClone(BASE_OUTCOME) as unknown as Record<
+    string,
+    unknown
+  >;
+  Object.defineProperty(outcomeAccessor, "payload", {
+    enumerable: true,
+    get() {
+      accessorGets += 1;
+      throw new Error(canary);
+    },
+  });
+  const accessorError = captureDomainFailure(() =>
+    registry.validateOutcome(outcomeAccessor),
+  );
+  assert.equal(accessorGets, 0);
+  assert.equal(JSON.stringify(accessorError).includes(canary), false);
+});
+
+test("profile budget byte limits accept exact payload bytes and reject one byte over", () => {
+  const profile = mutableProfile();
+  const exactObjectivePayload = { input: "é" };
+  const exactOutcomePayload = { answer: "é" };
+  asRecord(profile["budgetPolicy"])["maxInputBytes"] =
+    canonicalBytes(exactObjectivePayload).byteLength;
+  asRecord(profile["budgetPolicy"])["maxOutputBytes"] =
+    canonicalBytes(exactOutcomePayload).byteLength;
+
+  const registry = new InMemoryTaskProfileRegistry();
+  registry.register(profile);
+  assert.doesNotThrow(() =>
+    registry.validateObjective({
+      ...BASE_OBJECTIVE,
+      payload: exactObjectivePayload,
+    }),
+  );
+  assert.doesNotThrow(() =>
+    registry.validateOutcome({ ...BASE_OUTCOME, payload: exactOutcomePayload }),
+  );
+  assertDomainFailure(
+    () =>
+      registry.validateObjective({
+        ...BASE_OBJECTIVE,
+        payload: { input: "éx" },
+      }),
+    "invalid_input",
+  );
+  assertDomainFailure(
+    () =>
+      registry.validateOutcome({
+        ...BASE_OUTCOME,
+        payload: { answer: "éx" },
+      }),
+    "invalid_input",
+  );
+});
+
+test("registry schema-byte configuration is positive and enforced at registration", () => {
+  const profile = mutableProfile() as unknown as TaskProfile;
+  const exact = Math.max(
+    canonicalBytes(profile.objectiveSchema).byteLength,
+    canonicalBytes(profile.outcomeSchema).byteLength,
+  );
+  assert.doesNotThrow(() =>
+    new InMemoryTaskProfileRegistry({ maxSchemaBytes: exact }).register(profile),
+  );
+  assertDomainFailure(
+    () =>
+      new InMemoryTaskProfileRegistry({ maxSchemaBytes: exact - 1 }).register(
+        profile,
+      ),
+    "invalid_input",
+  );
+  assertDomainFailure(
+    () => new InMemoryTaskProfileRegistry({ maxSchemaBytes: 0 }),
+    "invalid_input",
+  );
 });
