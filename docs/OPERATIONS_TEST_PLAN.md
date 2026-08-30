@@ -186,7 +186,7 @@ GUARDED_AGENT_DATA_DIR=
 GUARDED_AGENT_LOG_LEVEL=info
 ```
 
-The application does not automatically load arbitrary `.env` files from analyzed repositories. A deliberate `guard credentials import-env --name ... --variable ...` migration reads one named variable, writes it to the OS credential store, and does not persist the value elsewhere. Development-only non-secret loading must target the Guarded Agent repository's known configuration path.
+The application does not automatically load arbitrary `.env` files from analyzed repositories. A deliberate `guard credentials add <name> --adapter <adapter-id> --from-env <VARIABLE_NAME>` migration reads one named variable, writes it to the OS credential store, and does not persist the value elsewhere. Development-only non-secret loading must target the Guarded Agent repository's known configuration path.
 
 ## 5. Dependency Installation Policy
 

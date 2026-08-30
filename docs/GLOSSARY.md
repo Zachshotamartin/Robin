@@ -16,7 +16,7 @@ Canonical definitions for the controlled vocabulary used across the planning doc
 
 ## Context and Capabilities
 
-- **Context broker** — the read side of the security boundary. Every resource an agent or model sees passes canonicalization, policy, classification, redaction, budgets, and provenance recording here first.
+- **Context broker** — the read side of the security boundary. Every resource Guarded Agent delivers to an agent or model passes canonicalization, policy, classification, redaction, budgets, and provenance recording here first. Lower-tier external agents may have separately disclosed context outside Guarded Agent's visibility.
 - **Context-source adapter** — installed trusted code that resolves one scheme of `ResourceRef` (repository, document corpus, artifact) into bounded content for the broker.
 - **Capability pack** — installed versioned trusted code defining guarded operations: schemas, normalizers, approval displays, executors, reconcilers, and output classifiers. Coding and local research are the reference packs.
 - **Normalized action** — the single immutable canonical representation of a proposed operation. Policy evaluates it, approval binds its hash, and the handler executes that exact object.
@@ -43,7 +43,7 @@ Canonical definitions for the controlled vocabulary used across the planning doc
 - **Event envelope** — the stable metadata wrapper on every event: stream identity, version, type, schema version, actor, causation, correlation, and payload, hashed into a tamper-evident chain.
 - **Lease / lease generation** — database-time-bounded ownership of a command by one worker; the generation token prevents a stale worker from completing work after losing the lease.
 - **Reconciliation** — the operation-specific proof of whether a side effect already occurred before retrying it. Unprovable state becomes `orphaned`, which stops automatic retry.
-- **Evidence mode** — the per-run retention choice: `durable_encrypted` stores the exact ordered agent-visible transcript and required opaque provider items under local authenticated encryption and supports restart resume; `ephemeral_metadata` stores hashes and safe metadata only and is non-resumable after process loss.
+- **Evidence mode** — the per-run retention choice: `durable_encrypted` stores the exact ordered agent-visible transcript and required opaque provider items under local authenticated encryption; after the durability milestone it supports restart resume only when the selected driver has a lossless resume contract. `ephemeral_metadata` stores hashes and safe metadata only and is non-resumable after process loss.
 - **Artifact object / artifact reference** — immutable content-addressed bytes versus the per-run pointer to them. Deduplicated objects survive as long as any live reference exists.
 - **Attempt-result-uncertain** — the recorded state of an external driver or provider request that may have been transmitted without a durable terminal result. Retries are new, budgeted attempts, never silent replays.
 
@@ -51,6 +51,6 @@ Canonical definitions for the controlled vocabulary used across the planning doc
 
 - **Compatibility tier** — the evidence-computed guarantee level of an integration: A (direct model, fully mediated), B (protocol-controlled external agent), C (sandboxed black-box CLI, containment only), D (observe-only). Adapters report primitive capabilities; the trusted validator computes the tier.
 - **Conformance suite / dialect** — the versioned test corpus an adapter or endpoint must pass before its profile may claim a tier; a compatibility label is never accepted from self-description.
-- **Credential reference** — the opaque identifier stored in configuration and PostgreSQL; secret bytes live only in the OS credential store and are injected by the trusted transport against an exact origin.
+- **Credential reference** — the opaque identifier stored in configuration and PostgreSQL; secret bytes live only in the OS credential store. Guard-owned provider credentials are injected by the trusted transport against an exact origin. Reviewed agent-owned delivery modes disclose that the pinned agent and its children can read the selected credential and receive a weaker confinement claim.
 - **Canary** — a seeded high-entropy synthetic secret used to prove leak absence across serialized requests, events, logs, artifacts, child environments, and protocol surfaces.
 - **Guarded MCP bridge** — the run-scoped stdio MCP server exposing only installed operations; its annotations are untrusted hints and never authorization.

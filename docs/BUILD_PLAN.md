@@ -620,7 +620,7 @@ guard doctor
 guard profiles list
 guard profiles inspect <profile-id>
 guard profiles validate <profile-id>
-guard credentials add|list|validate|rotate|remove ...
+guard credentials add|list|inspect|validate|rotate|remove ...
 guard providers add|list|doctor ...
 guard agents register|list|doctor ...
 guard run --profile coding-local --provider <provider-profile> --objective-file <file>
@@ -924,7 +924,7 @@ Build:
 
 - Direct-model `AgentDriver` using the generic driver protocol
 - Credential metadata store, OS credential-store references, origin-bound transport, and redacted diagnostics
-- `guard credentials add|list|validate|rotate|remove` commands with hidden-input and one-time environment import
+- `guard credentials add|list|inspect|validate|rotate|remove` commands with hidden-input and `add --from-env` one-time environment import
 - Official SDK-backed OpenAI Responses provider adapter
 - Local no-credential provider adapter behind the same provider port, satisfying the portfolio-release local no-key path
 - Streaming event normalization and request/response recording

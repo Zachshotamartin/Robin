@@ -1838,15 +1838,16 @@ Deliverable: a local scripted-driver coding run that edits only a disposable wor
 Implementation order:
 
 1. Implement the direct-model driver and provider-neutral semantic request/content contracts.
-2. Implement OS credential-store ports, origin-bound unsigned-request transport, hidden-input/import, rotation, removal, and leak-canary tests.
-3. Add the official SDK and first provider adapter package.
-4. Map capability operations to strict client function definitions.
-5. Implement local conversation reconstruction.
-6. Normalize streaming content, complete calls, usage, terminal status, and opaque continuation items.
-7. Set storage and parallel-call safety defaults.
-8. Add provider budgets, capability negotiation, and failure classification.
-9. Add synthetic HTTP/provider-contract tests without real credentials.
-10. Run a small credentialed smoke suite outside pull-request CI.
+2. Implement OS credential-store ports, origin-bound unsigned-request transport, `add|list|inspect|validate|rotate|remove` CLI commands, hidden-input and `add --from-env` import, and leak-canary tests.
+3. Implement the local no-credential provider adapter and endpoint profile through the generic provider port.
+4. Add the official SDK and first hosted-provider adapter package.
+5. Map capability operations to strict client function definitions.
+6. Implement local conversation reconstruction.
+7. Normalize streaming content, complete calls, usage, terminal status, and opaque continuation items.
+8. Set storage and parallel-call safety defaults.
+9. Add provider budgets, capability negotiation, and failure classification.
+10. Add synthetic HTTP/provider-contract tests without real credentials.
+11. Run a small credentialed smoke suite outside pull-request CI.
 
 Deliverable: the same curated task succeeds with synthetic, local no-key, and real hosted providers while producing equivalent generic policy and action audit semantics; no credential canary crosses a forbidden boundary.
 
@@ -1889,12 +1890,12 @@ Implementation order:
 
 1. Freeze provider and driver capability manifests, compatibility tiers, and conformance-case schemas.
 2. Add Anthropic and Gemini adapters with golden request/stream/continuation/error fixtures.
-3. Add a versioned OpenAI-compatible conformance dialect and a local no-credential endpoint profile.
+3. Add a versioned OpenAI-compatible conformance dialect and harden the Phase 5 local no-credential endpoint profile through the shared conformance corpus.
 4. Add schema-output and text-only planning modes; add bounded modality transforms only where supported by fixtures.
 5. Implement ACP virtual workspace/terminal mappings and adversarial protocol tests.
 6. Implement a run-scoped stdio MCP bridge and prove annotations cannot authorize.
 7. Implement contained-CLI Tier C snapshots, output import, and guarantee labeling.
-8. Complete provider/agent/profile/credential CLI commands, adapter SDK docs, rotation/removal tests, and compatibility audit export.
+8. Complete provider/agent/profile CLI commands, adapter SDK docs, cross-adapter credential rotation/removal tests, and compatibility audit export.
 
 Deliverable: multiple provider families, one local model path, and three external-agent integration styles pass their claimed conformance tier without a kernel change or credential leak.
 
