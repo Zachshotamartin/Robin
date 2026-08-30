@@ -1,0 +1,31 @@
+{
+  "name": "@guard/cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Command-line interface for deterministic Guarded Agent Milestone A runs.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "guard": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "testdata"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc --build --force",
+    "test": "npm run build && node --test dist/*.test.js"
+  },
+  "dependencies": {
+    "@guard/milestone-a-scenarios": "0.0.0"
+  }
+}

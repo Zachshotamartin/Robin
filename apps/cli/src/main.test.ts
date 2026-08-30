@@ -1,0 +1,197 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { EXIT_CODES, exitCodeForResult, runCli, type CliDependencies } from "./main.js";
+import type { RenderableEvent } from "./render.js";
+
+test("CLI buffers and writes only the selected renderer output", async () => {
+  const stdout = writer();
+  const stderr = writer();
+  let calls = 0;
+  const dependencies = successfulDependencies(() => {
+    calls += 1;
+  });
+  const code = await runCli(
+    ["run", "--profile", "synthetic-demo", "--format", "quiet"],
+    stdout,
+    stderr,
+    dependencies,
+  );
+  assert.equal(code, EXIT_CODES.success);
+  assert.equal(calls, 1);
+  assert.deepEqual(JSON.parse(stdout.value), OUTCOME);
+  assert.equal(stderr.value, "");
+  assert.equal(stdout.writes, 1);
+});
+
+test("usage failures never start a scenario or leak following option values", async () => {
+  const stdout = writer();
+  const stderr = writer();
+  let calls = 0;
+  const secret = "cli-secret-canary";
+  const code = await runCli(
+    ["run", "--profile", "synthetic-demo", "--api-key", secret],
+    stdout,
+    stderr,
+    successfulDependencies(() => {
+      calls += 1;
+    }),
+  );
+  assert.equal(code, EXIT_CODES.invalidConfiguration);
+  assert.equal(calls, 0);
+  assert.equal(stdout.value, "");
+  assert.doesNotMatch(stderr.value, new RegExp(secret, "u"));
+});
+
+test("objective mismatch is rejected before the scenario is called", async () => {
+  const stdout = writer();
+  const stderr = writer();
+  let calls = 0;
+  const code = await runCli(
+    [
+      "run",
+      "--profile",
+      "synthetic-demo",
+      "--objective-json",
+      '{"recordId":"other","mode":"uppercase"}',
+    ],
+    stdout,
+    stderr,
+    successfulDependencies(() => {
+      calls += 1;
+    }),
+  );
+  assert.equal(code, EXIT_CODES.invalidConfiguration);
+  assert.equal(calls, 0);
+  assert.equal(stdout.value, "");
+});
+
+test("a rendering canary fails without partial stdout", async () => {
+  const stdout = writer();
+  const stderr = writer();
+  const history = [event(1, "RunCreated", { invalid: 1n })];
+  const dependencies: CliDependencies = {
+    readObjectiveFile: async () => ({}),
+    runSynthetic: async () => ({
+      execution: { history, state: { result: COMPLETED_RESULT } },
+    }),
+    runCoding: async () => ({
+      execution: { history, state: { result: COMPLETED_RESULT } },
+    }),
+  };
+  const code = await runCli(
+    ["run", "--profile", "synthetic-demo", "--format", "jsonl"],
+    stdout,
+    stderr,
+    dependencies,
+  );
+  assert.equal(code, EXIT_CODES.infrastructureFailed);
+  assert.equal(stdout.value, "");
+  assert.match(stderr.value, /before a terminal result/u);
+});
+
+test("stable exit mapping covers every Milestone A class", () => {
+  assert.equal(exitCodeForResult(COMPLETED_RESULT), 0);
+  assert.equal(exitCodeForResult({ status: "cancelled", reason: null }), 8);
+  assert.equal(exitCodeForResult({ status: "orphaned", error: error("driver_failed") }), 7);
+  assert.equal(exitCodeForResult({ status: "failed", error: error("policy_denied") }), 3);
+  assert.equal(
+    exitCodeForResult({ status: "failed", error: error("approval_required") }),
+    4,
+  );
+  assert.equal(exitCodeForResult({ status: "failed", error: error("budget_exceeded") }), 5);
+  assert.equal(exitCodeForResult({ status: "failed", error: error("action_failed") }), 6);
+  assert.equal(
+    exitCodeForResult({ status: "failed", error: error("infrastructure_failed") }),
+    7,
+  );
+  assert.equal(exitCodeForResult(null), 7);
+});
+
+test("a revoked thrown proxy is contained as infrastructure failure", async () => {
+  const stdout = writer();
+  const stderr = writer();
+  const revoked = Proxy.revocable({}, {});
+  revoked.revoke();
+  const dependencies = successfulDependencies();
+  const hostileDependencies: CliDependencies = {
+    ...dependencies,
+    runSynthetic: async () => Promise.reject(revoked.proxy),
+  };
+  const code = await runCli(
+    ["run", "--profile", "synthetic-demo"],
+    stdout,
+    stderr,
+    hostileDependencies,
+  );
+  assert.equal(code, EXIT_CODES.infrastructureFailed);
+  assert.equal(stdout.value, "");
+});
+
+const RUN_ID = "run_018f0001-0000-7000-8000-010000000001";
+const OUTCOME = Object.freeze({
+  schemaVersion: 1,
+  outcomeId: "out_fixture",
+  profileId: "synthetic-transform",
+  profileVersion: 1,
+  outcomeType: "synthetic.transform.completed",
+  outcomeTypeVersion: 1,
+  payload: { transformed: "GUARDED" },
+  evidence: [],
+  proposedAt: "2026-01-02T03:04:05.000Z",
+});
+const COMPLETED_RESULT = Object.freeze({
+  status: "completed",
+  outcome: OUTCOME,
+});
+const SUCCESS_HISTORY: readonly RenderableEvent[] = Object.freeze([
+  event(1, "RunCreated", { objective: {} }),
+  event(2, "RunCompleted", { result: COMPLETED_RESULT }),
+]);
+
+function successfulDependencies(onRun: () => void = () => undefined): CliDependencies {
+  const run = async () => {
+    onRun();
+    return {
+      execution: {
+        history: SUCCESS_HISTORY,
+        state: { result: COMPLETED_RESULT },
+      },
+    };
+  };
+  return {
+    readObjectiveFile: async () => ({ recordId: "greeting", mode: "uppercase" }),
+    runSynthetic: run,
+    runCoding: run,
+  };
+}
+
+function writer(): { write(chunk: string): void; value: string; writes: number } {
+  return {
+    value: "",
+    writes: 0,
+    write(chunk: string) {
+      this.value += chunk;
+      this.writes += 1;
+    },
+  };
+}
+
+function error(code: string): Readonly<Record<string, string>> {
+  return Object.freeze({ code });
+}
+
+function event(
+  streamVersion: number,
+  eventType: string,
+  payload: unknown,
+): RenderableEvent {
+  return Object.freeze({
+    eventSchemaVersion: 1,
+    streamVersion,
+    recordedAt: "2026-01-02T03:04:06.000Z",
+    eventType,
+    streamId: RUN_ID,
+    payload,
+  });
+}

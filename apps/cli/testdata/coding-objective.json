@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "profileId": "coding-virtual-fixture",
+  "profileVersion": 1,
+  "objectiveType": "coding.virtual.change",
+  "objectiveTypeVersion": 1,
+  "payload": {
+    "path": "src/greet.ts",
+    "instruction": "Capitalize the greeting and add conventional punctuation."
+  },
+  "submittedBy": {
+    "kind": "user",
+    "id": "milestone-a-fixture"
+  },
+  "submittedAt": "2026-01-02T03:04:05.000Z"
+}
