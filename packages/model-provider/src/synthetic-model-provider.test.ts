@@ -124,6 +124,13 @@ function isDomainCode(error: unknown, code: string): boolean {
   return isDomainError(error) && error.code === code;
 }
 
+function mutableRecord(value: unknown): Record<string, unknown> {
+  assert.equal(typeof value, "object");
+  assert.notEqual(value, null);
+  assert.equal(Array.isArray(value), false);
+  return value as Record<string, unknown>;
+}
+
 test("replays an exact request as a deterministic immutable event sequence", async () => {
   const mutableEvents = structuredClone(SUCCESS_EVENTS) as ModelProviderEvent[];
   const mutableScript = script(request(), mutableEvents);
@@ -297,6 +304,53 @@ test("rejects malformed scripts and normalized event sequences at construction",
   for (const invalid of invalidScripts) {
     assert.throws(
       () => new SyntheticModelProvider(invalid as SyntheticModelScript),
+      (error: unknown) => isDomainCode(error, "invalid_input"),
+    );
+  }
+});
+
+test("rejects malformed nested contracts and provider-branded extra fields", () => {
+  const candidates: unknown[] = [];
+  const add = (mutate: (script: Record<string, unknown>) => void): void => {
+    const candidate = structuredClone(script()) as unknown as Record<string, unknown>;
+    mutate(candidate);
+    candidates.push(candidate);
+  };
+  const firstStep = (candidate: Record<string, unknown>): Record<string, unknown> =>
+    mutableRecord((candidate["steps"] as unknown[])[0]);
+  const expectedRequest = (
+    candidate: Record<string, unknown>,
+  ): Record<string, unknown> => mutableRecord(firstStep(candidate)["expectedRequest"]);
+  const events = (candidate: Record<string, unknown>): unknown[] =>
+    firstStep(candidate)["events"] as unknown[];
+
+  add((candidate) => { candidate["providerRequestId"] = "provider-secret"; });
+  add((candidate) => { firstStep(candidate)["providerRequestId"] = "provider-secret"; });
+  add((candidate) => { expectedRequest(candidate)["providerRequestId"] = "provider-secret"; });
+  add((candidate) => {
+    mutableRecord(expectedRequest(candidate)["model"])["providerRegion"] = "vendor";
+  });
+  add((candidate) => {
+    mutableRecord((expectedRequest(candidate)["conversation"] as unknown[])[0])[
+      "providerItemId"
+    ] = "vendor";
+  });
+  add((candidate) => {
+    mutableRecord((expectedRequest(candidate)["conversation"] as unknown[])[0])[
+      "content"
+    ] = [{}];
+  });
+  add((candidate) => {
+    mutableRecord((expectedRequest(candidate)["operations"] as unknown[])[0])[
+      "providerDialect"
+    ] = "vendor";
+  });
+  add((candidate) => { mutableRecord(events(candidate)[0])["providerEventId"] = "vendor"; });
+  add((candidate) => { mutableRecord(events(candidate)[1])["content"] = {}; });
+
+  for (const candidate of candidates) {
+    assert.throws(
+      () => new SyntheticModelProvider(candidate as SyntheticModelScript),
       (error: unknown) => isDomainCode(error, "invalid_input"),
     );
   }

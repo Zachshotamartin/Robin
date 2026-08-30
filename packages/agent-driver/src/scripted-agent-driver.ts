@@ -5,7 +5,11 @@ import {
   canonicalSha256Hex,
   canonicalize,
   createDomainError,
-  isDomainError,
+  parseContentBlock,
+  parseDomainError,
+  parseObjectiveEnvelope,
+  parseObservation,
+  parseOutcomeEnvelope,
 } from "@guard/contracts";
 
 import {
@@ -159,6 +163,7 @@ function validateScript(script: ScriptedAgentDriverScript): void {
   if (!isRecord(script)) {
     invalidInput("Scripted agent script must be a plain object.");
   }
+  requireExactKeys(script, ["scriptId", "turns"], "script");
   nonEmptyString(script.scriptId, "script.scriptId");
   if (!Array.isArray(script.turns) || script.turns.length === 0) {
     invalidInput("Scripted agent script must contain at least one turn.");
@@ -169,6 +174,11 @@ function validateScript(script: ScriptedAgentDriverScript): void {
     if (!isRecord(turn)) {
       invalidInput(`script.turns[${index}] must be a plain object.`);
     }
+    requireExactKeys(
+      turn,
+      ["expectedRequest", "events"],
+      `script.turns[${index}]`,
+    );
     validateRequest(
       turn.expectedRequest as AgentTurnRequest,
       `script.turns[${index}].expectedRequest`,
@@ -186,6 +196,20 @@ function validateRequest(request: AgentTurnRequest, path: string): void {
   if (!isRecord(request)) {
     invalidInput(`${path} must be a plain object.`);
   }
+  requireExactKeys(
+    request,
+    [
+      "schemaVersion",
+      "runId",
+      "attemptId",
+      "turnNumber",
+      "objective",
+      "advertisedOperations",
+      "context",
+      "observations",
+    ],
+    path,
+  );
   if (request.schemaVersion !== AGENT_DRIVER_SCHEMA_VERSION) {
     invalidInput(`${path}.schemaVersion must be ${AGENT_DRIVER_SCHEMA_VERSION}.`);
   }
@@ -196,9 +220,7 @@ function validateRequest(request: AgentTurnRequest, path: string): void {
     invalidInput(`${path}.attemptId must be a valid AgentAttemptId.`);
   }
   positiveInteger(request.turnNumber, `${path}.turnNumber`);
-  if (!isRecord(request.objective)) {
-    invalidInput(`${path}.objective must be an objective envelope.`);
-  }
+  parseObjectiveEnvelope(request.objective);
   if (!Array.isArray(request.advertisedOperations)) {
     invalidInput(`${path}.advertisedOperations must be an array.`);
   }
@@ -208,6 +230,18 @@ function validateRequest(request: AgentTurnRequest, path: string): void {
     if (!isRecord(operation)) {
       invalidInput(`${path}.advertisedOperations[${index}] must be a plain object.`);
     }
+    requireExactKeys(
+      operation,
+      [
+        "capabilityPackId",
+        "capabilityPackVersion",
+        "operationId",
+        "operationVersion",
+        "description",
+        "inputSchema",
+      ],
+      `${path}.advertisedOperations[${index}]`,
+    );
     nonEmptyString(
       operation.capabilityPackId,
       `${path}.advertisedOperations[${index}].capabilityPackId`,
@@ -247,9 +281,11 @@ function validateRequest(request: AgentTurnRequest, path: string): void {
   if (!Array.isArray(request.context)) {
     invalidInput(`${path}.context must be an array.`);
   }
+  request.context.forEach((content) => parseContentBlock(content));
   if (!Array.isArray(request.observations)) {
     invalidInput(`${path}.observations must be an array.`);
   }
+  request.observations.forEach((observation) => parseObservation(observation));
 }
 
 function validateEvents(
@@ -272,16 +308,29 @@ function validateEvents(
 
     switch (event.type) {
       case "content_delta":
+        requireExactKeys(event, ["type", "channel", "delta"], path);
         validateChannel(event.channel, `${path}.channel`);
         nonEmptyString(event.delta, `${path}.delta`);
         break;
       case "content_completed":
+        requireExactKeys(event, ["type", "channel", "content"], path);
         validateChannel(event.channel, `${path}.channel`);
-        if (!isRecord(event.content)) {
-          invalidInput(`${path}.content must be a content block.`);
-        }
+        parseContentBlock(event.content);
         break;
       case "action_proposed":
+        requireExactKeys(
+          event,
+          [
+            "type",
+            "proposalId",
+            "capabilityPackId",
+            "capabilityPackVersion",
+            "operationId",
+            "operationVersion",
+            "input",
+          ],
+          path,
+        );
         if (!DriverProposalIdKind.is(event.proposalId)) {
           invalidInput(`${path}.proposalId must be a valid DriverProposalId.`);
         }
@@ -309,14 +358,15 @@ function validateEvents(
         }
         break;
       case "outcome_proposed":
-        if (!isRecord(event.outcome)) {
-          invalidInput(`${path}.outcome must be an outcome envelope.`);
-        }
+        requireExactKeys(event, ["type", "outcome"], path);
+        parseOutcomeEnvelope(event.outcome);
         break;
       case "usage_reported":
+        requireExactKeys(event, ["type", "dimensions"], path);
         validateDimensions(event.dimensions, `${path}.dimensions`);
         break;
       case "paused":
+        requireExactKeys(event, ["type", "reason"], path);
         if (typeof event.reason !== "string" || !PAUSE_REASONS.has(event.reason as AgentPauseReason)) {
           invalidInput(`${path}.reason is not supported.`);
         }
@@ -324,13 +374,13 @@ function validateEvents(
         validateTerminalPosition(index, events.length, path);
         break;
       case "completed":
+        requireExactKeys(event, ["type"], path);
         terminalCount += 1;
         validateTerminalPosition(index, events.length, path);
         break;
       case "failed":
-        if (!isDomainError(event.error)) {
-          invalidInput(`${path}.error must be a DomainError.`);
-        }
+        requireExactKeys(event, ["type", "error"], path);
+        parseDomainError(event.error);
         terminalCount += 1;
         validateTerminalPosition(index, events.length, path);
         break;
@@ -363,5 +413,19 @@ function validateDimensions(value: unknown, path: string): void {
   for (const [name, count] of Object.entries(value)) {
     nonEmptyString(name, `${path} key`);
     nonNegativeInteger(count, `${path}.${name}`);
+  }
+}
+
+function requireExactKeys(
+  value: Readonly<Record<string, unknown>>,
+  expected: readonly string[],
+  path: string,
+): void {
+  const keys = Object.keys(value);
+  if (
+    keys.length !== expected.length ||
+    keys.some((key) => !expected.includes(key))
+  ) {
+    invalidInput(`${path} has unknown or missing fields.`);
   }
 }

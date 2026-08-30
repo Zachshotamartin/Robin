@@ -3,6 +3,7 @@ import {
   canonicalSha256Hex,
   canonicalize,
   createDomainError,
+  parseContentBlock,
 } from "@guard/contracts";
 
 import {
@@ -176,6 +177,7 @@ function validateScript(script: SyntheticModelScript): void {
   if (!isRecord(script)) {
     invalidInput("Synthetic model script must be a plain object.");
   }
+  requireExactKeys(script, ["scriptId", "steps"], "script");
   nonEmptyString(script.scriptId, "script.scriptId");
   if (!Array.isArray(script.steps) || script.steps.length === 0) {
     invalidInput("Synthetic model script must contain at least one step.");
@@ -186,6 +188,11 @@ function validateScript(script: SyntheticModelScript): void {
     if (!isRecord(step)) {
       invalidInput(`script.steps[${index}] must be a plain object.`);
     }
+    requireExactKeys(
+      step,
+      ["expectedRequest", "events"],
+      `script.steps[${index}]`,
+    );
     validateRequest(
       step.expectedRequest as SemanticModelRequest,
       `script.steps[${index}].expectedRequest`,
@@ -203,6 +210,21 @@ function validateRequest(request: SemanticModelRequest, path: string): void {
   if (!isRecord(request)) {
     invalidInput(`${path} must be a plain object.`);
   }
+  requireExactKeys(
+    request,
+    [
+      "schemaVersion",
+      "attemptId",
+      "model",
+      "instructions",
+      "conversation",
+      "operations",
+      "maximumOutputUnits",
+      "actionMode",
+      "metadata",
+    ],
+    path,
+  );
   if (request.schemaVersion !== MODEL_PROVIDER_SCHEMA_VERSION) {
     invalidInput(`${path}.schemaVersion must be ${MODEL_PROVIDER_SCHEMA_VERSION}.`);
   }
@@ -212,6 +234,7 @@ function validateRequest(request: SemanticModelRequest, path: string): void {
   if (!isRecord(request.model)) {
     invalidInput(`${path}.model must be a plain object.`);
   }
+  requireExactKeys(request.model, ["modelId", "settings"], `${path}.model`);
   nonEmptyString(request.model.modelId, `${path}.model.modelId`);
   if (!isRecord(request.model.settings)) {
     invalidInput(`${path}.model.settings must be a JSON object.`);
@@ -230,12 +253,20 @@ function validateRequest(request: SemanticModelRequest, path: string): void {
     if (!isRecord(item)) {
       invalidInput(`${path}.conversation[${index}] must be a plain object.`);
     }
+    requireExactKeys(
+      item,
+      item.correlationId === undefined
+        ? ["role", "content"]
+        : ["role", "content", "correlationId"],
+      `${path}.conversation[${index}]`,
+    );
     if (typeof item.role !== "string" || !CONVERSATION_ROLES.has(item.role)) {
       invalidInput(`${path}.conversation[${index}].role is not supported.`);
     }
     if (!Array.isArray(item.content) || item.content.length === 0) {
       invalidInput(`${path}.conversation[${index}].content must not be empty.`);
     }
+    item.content.forEach((content) => parseContentBlock(content));
     if (item.correlationId !== undefined) {
       nonEmptyString(item.correlationId, `${path}.conversation[${index}].correlationId`);
     }
@@ -249,6 +280,18 @@ function validateRequest(request: SemanticModelRequest, path: string): void {
     if (!isRecord(operation)) {
       invalidInput(`${path}.operations[${index}] must be a plain object.`);
     }
+    requireExactKeys(
+      operation,
+      [
+        "capabilityPackId",
+        "capabilityPackVersion",
+        "operationId",
+        "operationVersion",
+        "description",
+        "inputSchema",
+      ],
+      `${path}.operations[${index}]`,
+    );
     nonEmptyString(
       operation.capabilityPackId,
       `${path}.operations[${index}].capabilityPackId`,
@@ -320,16 +363,28 @@ function validateEvents(
 
     switch (event.type) {
       case "text_delta":
+        requireExactKeys(event, ["type", "outputIndex", "delta"], path);
         nonNegativeInteger(event.outputIndex, `${path}.outputIndex`);
         nonEmptyString(event.delta, `${path}.delta`);
         break;
       case "content_completed":
+        requireExactKeys(event, ["type", "outputIndex", "content"], path);
         nonNegativeInteger(event.outputIndex, `${path}.outputIndex`);
-        if (!isRecord(event.content)) {
-          invalidInput(`${path}.content must be a content block.`);
-        }
+        parseContentBlock(event.content);
         break;
       case "action_started":
+        requireExactKeys(
+          event,
+          [
+            "type",
+            "callId",
+            "capabilityPackId",
+            "capabilityPackVersion",
+            "operationId",
+            "operationVersion",
+          ],
+          path,
+        );
         if (request.actionMode !== "structured") {
           invalidInput(`${path} is forbidden when actionMode is none.`);
         }
@@ -353,6 +408,7 @@ function validateEvents(
         startedActions.set(event.callId, startedOperation);
         break;
       case "action_arguments_delta":
+        requireExactKeys(event, ["type", "callId", "delta"], path);
         nonEmptyString(event.callId, `${path}.callId`);
         nonEmptyString(event.delta, `${path}.delta`);
         if (!startedActions.has(event.callId)) {
@@ -360,6 +416,19 @@ function validateEvents(
         }
         break;
       case "action_completed": {
+        requireExactKeys(
+          event,
+          [
+            "type",
+            "callId",
+            "capabilityPackId",
+            "capabilityPackVersion",
+            "operationId",
+            "operationVersion",
+            "arguments",
+          ],
+          path,
+        );
         nonEmptyString(event.callId, `${path}.callId`);
         nonEmptyString(event.capabilityPackId, `${path}.capabilityPackId`);
         positiveInteger(event.capabilityPackVersion, `${path}.capabilityPackVersion`);
@@ -387,9 +456,11 @@ function validateEvents(
         break;
       }
       case "usage_reported":
+        requireExactKeys(event, ["type", "dimensions"], path);
         validateDimensions(event.dimensions, `${path}.dimensions`);
         break;
       case "response_completed":
+        requireExactKeys(event, ["type", "finishReason"], path);
         if (
           typeof event.finishReason !== "string" ||
           !FINISH_REASONS.has(event.finishReason)
@@ -403,6 +474,7 @@ function validateEvents(
         }
         break;
       case "response_failed":
+        requireExactKeys(event, ["type", "failure"], path);
         validateFailure(event.failure, `${path}.failure`);
         terminalCount += 1;
         validateTerminalPosition(index, events.length, path);
@@ -451,6 +523,11 @@ function validateFailure(failure: unknown, path: string): void {
   if (!isRecord(failure)) {
     invalidInput(`${path} must be a plain object.`);
   }
+  requireExactKeys(
+    failure,
+    ["code", "message", "retry", "resultCertainty"],
+    path,
+  );
   nonEmptyString(failure.code, `${path}.code`);
   nonEmptyString(failure.message, `${path}.message`);
   if (typeof failure.retry !== "string" || !FAILURE_RETRIES.has(failure.retry)) {
@@ -461,5 +538,19 @@ function validateFailure(failure: unknown, path: string): void {
     !RESULT_CERTAINTIES.has(failure.resultCertainty)
   ) {
     invalidInput(`${path}.resultCertainty is not supported.`);
+  }
+}
+
+function requireExactKeys(
+  value: Readonly<Record<string, unknown>>,
+  expected: readonly string[],
+  path: string,
+): void {
+  const keys = Object.keys(value);
+  if (
+    keys.length !== expected.length ||
+    keys.some((key) => !expected.includes(key))
+  ) {
+    invalidInput(`${path} has unknown or missing fields.`);
   }
 }

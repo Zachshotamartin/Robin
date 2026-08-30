@@ -32,6 +32,10 @@ const ACTION_ID = ActionIdKind.parse("act_018f05a0-7b01-7000-8000-000000000003")
 const PROPOSAL_ID = DriverProposalIdKind.parse(
   "dpr_018f05a0-7b01-7000-8000-000000000004",
 );
+const DENIED_OBSERVATION_ERROR = createDomainError({
+  code: "policy_denied",
+  message: "The synthetic observation was denied.",
+});
 
 const RESOURCE = {
   schemaVersion: 1,
@@ -86,7 +90,7 @@ function observation(status: "succeeded" | "denied" = "succeeded"): Observation 
     audit: { documentsMatched: status === "succeeded" ? 1 : 0 },
     human: [textBlock("human-observation", status)],
     agent: [textBlock("agent-observation", status)],
-    error: null,
+    error: status === "succeeded" ? null : DENIED_OBSERVATION_ERROR,
     occurredAt: "2026-08-30T00:00:01.000Z",
   };
 }
@@ -199,6 +203,13 @@ function firstAdvertisedOperation(request: AgentTurnRequest): Record<string, unk
   const operation = request.advertisedOperations[0];
   assert.notEqual(operation, undefined);
   return operation as unknown as Record<string, unknown>;
+}
+
+function mutableRecord(value: unknown): Record<string, unknown> {
+  assert.equal(typeof value, "object");
+  assert.notEqual(value, null);
+  assert.equal(Array.isArray(value), false);
+  return value as Record<string, unknown>;
 }
 
 function scriptWithRequestOperationMutation(
@@ -534,6 +545,54 @@ test("rejects malformed scripts and events before a run begins", () => {
   for (const invalid of invalidScripts) {
     assert.throws(
       () => new ScriptedAgentDriver(invalid as ScriptedAgentDriverScript),
+      (error: unknown) => isDomainCode(error, "invalid_input"),
+    );
+  }
+});
+
+test("rejects malformed nested contracts and vendor-branded extra fields", () => {
+  const candidates: unknown[] = [];
+  const add = (mutate: (script: Record<string, unknown>) => void): void => {
+    const candidate = structuredClone(driverScript()) as unknown as Record<
+      string,
+      unknown
+    >;
+    mutate(candidate);
+    candidates.push(candidate);
+  };
+  const firstTurn = (script: Record<string, unknown>): Record<string, unknown> =>
+    mutableRecord((script["turns"] as unknown[])[0]);
+  const firstRequest = (script: Record<string, unknown>): Record<string, unknown> =>
+    mutableRecord(firstTurn(script)["expectedRequest"]);
+  const firstEvents = (script: Record<string, unknown>): unknown[] =>
+    firstTurn(script)["events"] as unknown[];
+
+  add((script) => { script["providerRequestId"] = "provider-secret"; });
+  add((script) => { firstTurn(script)["providerRequestId"] = "provider-secret"; });
+  add((script) => { firstRequest(script)["providerRequestId"] = "provider-secret"; });
+  add((script) => { firstRequest(script)["objective"] = {}; });
+  add((script) => { firstRequest(script)["context"] = [{}]; });
+  add((script) => { firstRequest(script)["observations"] = [{}]; });
+  add((script) => {
+    mutableRecord((firstRequest(script)["advertisedOperations"] as unknown[])[0])[
+      "providerDialect"
+    ] = "vendor";
+  });
+  add((script) => {
+    mutableRecord(firstEvents(script)[1])["content"] = {};
+  });
+  add((script) => {
+    mutableRecord(firstEvents(script)[0])["providerRequestId"] = "provider-secret";
+  });
+  add((script) => {
+    const second = mutableRecord((script["turns"] as unknown[])[1]);
+    const events = second["events"] as unknown[];
+    mutableRecord(events[1])["outcome"] = {};
+  });
+
+  for (const candidate of candidates) {
+    assert.throws(
+      () => new ScriptedAgentDriver(candidate as ScriptedAgentDriverScript),
       (error: unknown) => isDomainCode(error, "invalid_input"),
     );
   }
