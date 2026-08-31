@@ -1108,10 +1108,12 @@ test("manifest validation rejects unredacted environment fields and self hashes"
   );
 });
 
-test("repository R0/R1 capture configs and JSON schemas stay structurally valid", async () => {
+test("repository R0/R1/R2 capture configs and JSON schemas stay structurally valid", async () => {
   const [
     config,
     r1Config,
+    r2Config,
+    rootManifest,
     buildPlan,
     operationsTestPlan,
     manifestSchema,
@@ -1122,6 +1124,8 @@ test("repository R0/R1 capture configs and JSON schemas stay structurally valid"
     await Promise.all([
       readFile(path.join(repositoryRoot, "evidence/config/r0.json"), "utf8").then(JSON.parse),
       readFile(path.join(repositoryRoot, "evidence/config/r1.json"), "utf8").then(JSON.parse),
+      readFile(path.join(repositoryRoot, "evidence/config/r2.json"), "utf8").then(JSON.parse),
+      readFile(path.join(repositoryRoot, "package.json"), "utf8").then(JSON.parse),
       readFile(path.join(repositoryRoot, "docs/BUILD_PLAN.md"), "utf8"),
       readFile(path.join(repositoryRoot, "docs/OPERATIONS_TEST_PLAN.md"), "utf8"),
       readFile(
@@ -1151,6 +1155,9 @@ test("repository R0/R1 capture configs and JSON schemas stay structurally valid"
   assert.doesNotThrow(() =>
     validateCaptureConfig(r1Config, { buildPlan, operationsTestPlan }),
   );
+  assert.doesNotThrow(() =>
+    validateCaptureConfig(r2Config, { buildPlan, operationsTestPlan }),
+  );
   assert.equal(manifestSchema.$id, "https://robin.invalid/schema/gate-evidence-manifest-v1.json");
   assert.equal(configSchema.$id, "https://robin.invalid/schema/gate-evidence-capture-config-v1.json");
   assert.equal(manifestSchema.additionalProperties, false);
@@ -1169,6 +1176,11 @@ test("repository R0/R1 capture configs and JSON schemas stay structurally valid"
   );
   assert.equal(
     validateConfigSchema(r1Config),
+    true,
+    JSON.stringify(validateConfigSchema.errors),
+  );
+  assert.equal(
+    validateConfigSchema(r2Config),
     true,
     JSON.stringify(validateConfigSchema.errors),
   );
@@ -1204,6 +1216,26 @@ test("repository R0/R1 capture configs and JSON schemas stay structurally valid"
       "package-smoke",
       "gate-b",
     ],
+  );
+  assert.deepEqual(
+    r2Config.commands.map(({ id }) => id),
+    [
+      "dependency-install",
+      "dependency-tree",
+      "static",
+      "repository-tools",
+      "pty-local",
+      "package-smoke",
+      "gate-b",
+    ],
+  );
+  assert.equal(
+    rootManifest.scripts["evidence:capture:r2"],
+    "node scripts/gate-evidence.mjs capture --config evidence/config/r2.json --output evidence/manifests/r2.json",
+  );
+  assert.equal(
+    rootManifest.scripts["evidence:validate-config:r2"],
+    "node scripts/gate-evidence.mjs validate-config --config evidence/config/r2.json",
   );
   assert.equal(
     r1Config.knownLimitations.some(

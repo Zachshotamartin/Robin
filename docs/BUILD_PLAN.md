@@ -6040,7 +6040,7 @@ asserts the user-visible failure path.
 
 | Requirement | Terminal gate and tickets | Owning boundary | Required evidence |
 | --- | --- | --- | --- |
-| `FR-EDIT-001` | R2.07–R2.09 | `tool-workspace` structured patch | Exact preimage/hunks/parser/application and provider-tool E2E. |
+| `FR-EDIT-001` | R2.07/R2.08/R2.09 | `tool-workspace` structured patch | Exact preimage/hunks/parser/application and provider-tool E2E. |
 | `FR-EDIT-002` | R6.01–R6.04 | workspace edit schemas | Distinct bounded full/create/batch operation with higher risk and limits. |
 | `FR-EDIT-003` | R6.03–R6.04 | batch edit | Create/update/move/delete exact preconditions and journal recovery. |
 | `FR-EDIT-004` | R2.07, R6.01 | patch/batch parser | Malformed/path disagreement/overlap/duplicate/collision/size rejection. |
