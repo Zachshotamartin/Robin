@@ -1,0 +1,165 @@
+import assert from "node:assert/strict";
+import { access, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import test from "node:test";
+
+import {
+  assertRepositoryDelta,
+  createRepositoryFixture,
+  diffRepositorySnapshots,
+  snapshotRepository,
+} from "./repository-fixture.mjs";
+
+test("clean fixture records stable workspace and Git identity", async (context) => {
+  const fixture = await createRepositoryFixture({ variant: "clean" });
+  context.after(() => fixture.cleanup());
+
+  assert.equal(fixture.variant, "clean");
+  assert.equal(fixture.initialSnapshot.git.isRepository, true);
+  assert.equal(fixture.initialSnapshot.git.branch, "main");
+  assert.equal(fixture.initialSnapshot.git.detached, false);
+  assert.equal(fixture.initialSnapshot.git.unborn, false);
+  assert.equal(fixture.initialSnapshot.git.porcelainV2ZBase64, "");
+  assert.match(
+    await readFile(path.join(fixture.workspaceRoot, "src", "answer.txt"), "utf8"),
+    /^41\n$/u,
+  );
+
+  const again = await snapshotRepository(fixture.workspaceRoot);
+  assert.deepEqual(diffRepositorySnapshots(fixture.initialSnapshot, again), {
+    workspace: { added: [], changed: [], removed: [] },
+    git: { changed: false },
+  });
+});
+
+test("dirty fixture contains staged, unstaged, and untracked state", async (context) => {
+  const fixture = await createRepositoryFixture({ variant: "dirty" });
+  context.after(() => fixture.cleanup());
+
+  const status = Buffer.from(
+    fixture.initialSnapshot.git.porcelainV2ZBase64,
+    "base64",
+  ).toString("utf8");
+  assert.match(status, /1 M\. N\.\.\. 100644 100644 100644 /u);
+  assert.match(status, /1 \.M N\.\.\. 100644 100644 100644 /u);
+  assert.match(status, /\? untracked\.txt\0/u);
+});
+
+test("unborn, detached, nested, conflict, and hostile-name variants are explicit", async (context) => {
+  const fixtures = [];
+  context.after(async () => {
+    await Promise.all(fixtures.map((fixture) => fixture.cleanup()));
+  });
+
+  for (const variant of [
+    "unborn",
+    "detached",
+    "nested",
+    "merge-conflict",
+    "malicious-name",
+    "unicode",
+    "newline",
+    "symlink",
+  ]) {
+    fixtures.push(await createRepositoryFixture({ variant }));
+  }
+
+  const byVariant = new Map(fixtures.map((fixture) => [fixture.variant, fixture]));
+  assert.equal(byVariant.get("unborn").initialSnapshot.git.unborn, true);
+  assert.equal(byVariant.get("detached").initialSnapshot.git.detached, true);
+  assert.notEqual(
+    byVariant.get("nested").workingDirectory,
+    byVariant.get("nested").workspaceRoot,
+  );
+  assert.equal(byVariant.get("merge-conflict").metadata.hasConflict, true);
+
+  for (const relativePath of [
+    "-leading-dash.txt",
+    "dollar-$(not-executed).txt",
+    "semi;colon.txt",
+  ]) {
+    await access(path.join(byVariant.get("malicious-name").workspaceRoot, relativePath));
+  }
+  await access(path.join(byVariant.get("unicode").workspaceRoot, "emoji-🦉.txt"));
+  await access(path.join(byVariant.get("newline").workspaceRoot, "line\nbreak.txt"));
+
+  const symlinkRecord = byVariant
+    .get("symlink")
+    .initialSnapshot.workspace.entries.find(
+      (entry) => entry.path === "link-outside.txt",
+    );
+  assert.equal(symlinkRecord?.kind, "symlink");
+});
+
+test("linked worktree, local submodule, and bare variants expose their layout", async (context) => {
+  const fixtures = [];
+  context.after(async () => {
+    await Promise.all(fixtures.map((fixture) => fixture.cleanup()));
+  });
+
+  for (const variant of ["linked-worktree", "submodule", "bare"]) {
+    fixtures.push(await createRepositoryFixture({ variant }));
+  }
+  const byVariant = new Map(fixtures.map((fixture) => [fixture.variant, fixture]));
+
+  assert.equal(byVariant.get("linked-worktree").initialSnapshot.git.linkedWorktree, true);
+  assert.notEqual(
+    byVariant.get("linked-worktree").initialSnapshot.git.commonDir,
+    byVariant.get("linked-worktree").initialSnapshot.git.gitDir,
+  );
+  assert.equal(byVariant.get("submodule").metadata.hasSubmodule, true);
+  assert.equal(byVariant.get("bare").initialSnapshot.git.bare, true);
+});
+
+test("delta oracle identifies exact file and Git changes", async (context) => {
+  const fixture = await createRepositoryFixture({ variant: "clean" });
+  context.after(() => fixture.cleanup());
+  const before = fixture.initialSnapshot;
+
+  await writeFile(path.join(fixture.workspaceRoot, "src", "answer.txt"), "42\n");
+  await writeFile(path.join(fixture.workspaceRoot, "created.txt"), "created\n");
+  const after = await snapshotRepository(fixture.workspaceRoot);
+  const delta = diffRepositorySnapshots(before, after);
+
+  assert.deepEqual(delta.workspace.added, ["created.txt"]);
+  assert.deepEqual(delta.workspace.removed, []);
+  assert.deepEqual(delta.workspace.changed, ["src/answer.txt"]);
+  assert.equal(delta.git.changed, true);
+  assert.doesNotThrow(() =>
+    assertRepositoryDelta(before, after, {
+      added: ["created.txt"],
+      changed: ["src/answer.txt"],
+      removed: [],
+      gitChanged: true,
+    }),
+  );
+  assert.throws(
+    () =>
+      assertRepositoryDelta(before, after, {
+        added: [],
+        changed: ["src/answer.txt"],
+        removed: [],
+        gitChanged: true,
+      }),
+    /unexpected repository delta/u,
+  );
+});
+
+test("outside-root safety snapshot detects a change without following symlinks", async (context) => {
+  const fixture = await createRepositoryFixture({ variant: "symlink" });
+  context.after(() => fixture.cleanup());
+  const before = await snapshotRepository(fixture.outsideRoot, {
+    includeGit: false,
+  });
+
+  await writeFile(path.join(fixture.outsideRoot, "outside.txt"), "changed\n");
+  const after = await snapshotRepository(fixture.outsideRoot, {
+    includeGit: false,
+  });
+
+  assert.deepEqual(diffRepositorySnapshots(before, after).workspace, {
+    added: [],
+    changed: ["outside.txt"],
+    removed: [],
+  });
+});

@@ -1,7 +1,7 @@
 # Robin
 
 Robin is a local-first, provider-flexible coding agent for the terminal,
-currently available only as the deterministic R1 candidate described below. Its
+currently available as the accepted deterministic R1 vertical slice described below. Its
 intended product workflow is to start `robin` in a repository, describe work in
 natural language, and collaborate with an agent that can inspect the codebase,
 edit files, run commands and tests, review Git changes, and resume the same
@@ -15,8 +15,9 @@ control layer is internal infrastructure for that coding experience, not the
 product's primary surface.
 
 > **Implementation status:** R0 is accepted on `main` at merge commit
-> `2c042ca` after its merge-triggered Gate A/B workflow passed. This branch
-> contains the still-unaccepted R1 implementation candidate.
+> `2c042ca`. R1 is accepted on `main` at merge commit `fb64cf1`; all nine
+> required checks passed both on reviewed pull-request head `9907287` and on
+> the merge-triggered `main` workflow.
 > `robin` now has a raw-mode TTY editor, a non-TTY/accessible flat renderer,
 > streamed multi-turn conversation, prompt queuing, cancellation, resize and
 > paste handling, visible usage, and two deterministic read-only coding-tool
@@ -25,9 +26,8 @@ product's primary surface.
 > and tools use in-memory fixtures: Robin does not yet read or change the
 > physical repository,
 > run commands or Git, contact a network, store credentials, or persist a
-> session. Milestones A and B and R0 are accepted. R1 remains unaccepted until
-> its refreshed package, PTY, hosted-matrix, and evidence gates pass on the
-> exact post-R0 head and the candidate is merged.
+> session. Milestones A and B and Robin R0–R1 are accepted. R2 real-workspace
+> tools and approvals are in development and are not current release claims.
 
 ## Intended Robin Experience
 
@@ -90,13 +90,12 @@ package, executable, documentation, and product name are Robin.
 
 ## Current Implementation
 
-The repository currently proves inherited Milestones A and B and contains an
-R1 synthetic coding-loop candidate. All configured hosted Linux/macOS PTY,
-package-smoke, and R1 aggregate checks passed on candidate commit `dc39937`.
-R0 is accepted on `main` at `2c042ca`. R1 is not accepted because its
-candidate has not merged and its base-changing update requires fresh exact-head
-evidence. Passing candidate evidence is not mainline acceptance, so the
-complete R1 terminal gate remains open.
+The repository proves inherited Milestones A and B plus accepted Robin R0 and
+R1. The reviewed R1 head `9907287` passed all nine required hosted checks, was
+merged as `fb64cf1`, and the same nine checks passed on the merge-triggered
+`main` workflow. R2 is now implementing real bounded workspace, edit, process,
+Git-read, and approval behavior; none of those R2 capabilities is claimed until
+its complete gate passes and merges.
 
 | Area | Implemented now | Not implemented now |
 |---|---|---|
@@ -266,10 +265,10 @@ terminal CLI / headless CLI / future editor client
  events, context release, checkpoints, evidence, persistence
 ```
 
-The branch now contains the first narrow implementation of the upper terminal,
+The accepted R1 baseline contains the first narrow implementation of the upper terminal,
 session, application, provider-neutral loop, and synthetic tool layers. It is
-intentionally fixture-only and ephemeral; the configured R1 candidate evidence
-is green, but R1 remains unaccepted until its prerequisite and candidate merge.
+intentionally fixture-only and ephemeral. Its reviewed exact-head and
+post-merge acceptance evidence is green.
 The build order creates a usable vertical coding workflow before deepening
 isolation, distributed durability, evaluation infrastructure, or clients.
 
@@ -347,12 +346,12 @@ The ordered roadmap is:
 1. **Completed substrate — Milestones A and B:** contracts, deterministic event
    loop and replay, strict policy engine, context boundary, virtual repository
    capability, golden scenarios, and the renamed fixture CLI.
-2. **Coding-agent foundation — candidate under verification:** a normalized
+2. **Coding-agent foundation — R1 accepted:** a normalized
    multi-request synthetic tool loop, shared versioned application path, raw and
    flat terminal renderers, cancellation/queue/resize behavior, headless formats,
-   output sanitization, and local plus hosted PTY coverage now exist. The hosted
-   package/PTY/aggregate candidate gate is green on `dc39937`. R0 is accepted;
-   R1 remains unaccepted until the refreshed candidate gate is green and merged.
+   output sanitization, and local plus hosted PTY coverage now exist. The
+   reviewed R1 head `9907287` and merge commit `fb64cf1` both have a green
+   nine-job hosted gate.
 3. **Hosted-provider alpha (R2–R4):** one real direct provider with BYOK setup,
    real repository search/read/edit tools, command and test execution, Git diff
    review, permission prompts, interruption, continue/resume, and a complete

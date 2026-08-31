@@ -30,7 +30,7 @@ client launches or connects to the same local engine contract without creating
 a second agent loop.
 
 The repository currently contains the accepted Milestones A and B substrate and
-an unaccepted R1 candidate. One ephemeral provider-neutral application path
+accepted Robin R0–R1. One ephemeral provider-neutral application path
 uses a versioned in-memory event journal, pure reducer/replay projection, and
 replay-then-live stream. A credential-free synthetic provider drives a
 multi-request structured loop through two pinned fixture tools. Raw TTY and
@@ -38,11 +38,11 @@ append-only flat terminal modes, queued prompts, cancellation, resize, inert
 bracketed paste, terminal restoration, and experimental headless formats are
 implemented.
 
-Local macOS real-PTY and isolated package install/execute/uninstall tests provide
-candidate evidence only. The configured hosted Linux/macOS PTY, package-smoke,
-and aggregate jobs passed on candidate commit `dc39937`. R0 is accepted on
-`main` at `2c042ca`, but R1 remains open until its refreshed exact-head gate
-passes and the candidate merges. Real workspace tools, file-backed resume,
+Local macOS real-PTY and isolated package install/execute/uninstall tests plus
+the configured hosted Linux/macOS PTY, package-smoke, and aggregate jobs passed
+on reviewed R1 head `9907287`. R0 is accepted on `main` at `2c042ca`; R1
+merged as `fb64cf1`, and all nine merge-triggered jobs passed again. Real
+workspace tools, file-backed resume,
 hosted providers, credentials/API keys, sandboxing, supported release packaging,
 and later extension surfaces remain planned until their named gates pass.
 
@@ -396,7 +396,7 @@ Once each job exists, protect `main` with:
 - tag protection for `v*` and immutable published releases.
 
 The target initial required checks are `docs-policy`, `static`, `unit-contract`,
-and `package-smoke`. The current R1 candidate workflow configures exact job IDs
+and `package-smoke`. The accepted R1 workflow configures exact job IDs
 `pty-linux`, `pty-macos`, and `package-smoke`, with `r1-candidate` as the
 aggregate over those jobs and the inherited `gate-b` prerequisite. The displayed
 check names and pinned runners are recorded in Section 12.2. Their presence on a
@@ -520,7 +520,7 @@ node apps/cli/dist/bin.js run --profile coding-virtual
 Those commands are current substrate checks, not the planned interactive
 product.
 
-The current R1 candidate also exposes these credential-free user smoke paths:
+The accepted R1 implementation also exposes these credential-free user smoke paths:
 
 ```bash
 node apps/cli/dist/bin.js
@@ -1728,7 +1728,7 @@ and registered local endpoints do not become release claims until R7.
 | ID | Mechanics | Pass criteria | Earliest gate |
 | --- | --- | --- | --- |
 | PERM-001 | Evaluate every tool operation with complete normalized attributes: tool/version, workspace, paths, command, network, Git target, extension, mutability, sandbox, and risk. | Decision is based on the exact immutable object later executed; missing required attribute fails closed. | R5 |
-| PERM-002 | Combine built-in `default`, `plan`, `accept-edits`, `locked`, and `bypass` modes with user rules, project restrictions, and managed floors for read/edit/process/Git/network/extension actions. | `deny > ask > allow`; each mode matches the canonical enum; lower-trust source cannot weaken a higher floor; the current R1 candidate's experimental `ask` spelling migrates to `default`. | R5 |
+| PERM-002 | Combine built-in `default`, `plan`, `accept-edits`, `locked`, and `bypass` modes with user rules, project restrictions, and managed floors for read/edit/process/Git/network/extension actions. | `deny > ask > allow`; each mode matches the canonical enum; lower-trust source cannot weaken a higher floor; the accepted R1 implementation's experimental `ask` spelling migrates to `default`. | R5 |
 | PERM-003 | Request bounded repository reads, outside-root reads, edits, ordinary command, shell command, Git stage/commit/push, network, hook, MCP, and destructive Git action under default mode. | Reads follow bounded default; consequential actions ask; high-risk actions deny unless explicitly enabled through eligible trusted source. | R5 |
 | PERM-004 | Run plan mode and attempt create/modify/delete/rename, process, Git write, network, hook, and model-emitted self-approval. | Every mutation/execution is denied before handler; read-only planning remains possible; model text cannot change mode. | R5 |
 | PERM-005 | Run accept-edits mode for exact bounded edits, commands, Git writes, network, and edits outside permitted path scope. | Eligible edits may allow; commands/Git/network retain ask/deny; outside/stale edits do not inherit acceptance. | R5 |
@@ -1946,13 +1946,12 @@ cannot prove its budget or fixture isolation does not run.
 | `publish-npm` | Approved final tag after RC verification | Download exact verified tarball, compare hash, publish with provenance, reinstall from registry | Short-lived trusted publishing identity | Registry tarball hash/inventory/version match approved artifact; smoke/unpublish-deprecation plan recorded. |
 | `publish-release` | Approved final tag | Upload signed archives/standalone, checksums, SBOM, provenance, compatibility manifest, notes | Release write plus isolated signing/notarization | Uploaded bytes match verified hashes; release/tag immutable; download/install verification passes. |
 
-The four R1 rows above are present in the candidate workflow with third-party
-actions pinned to immutable commit hashes. Their current documentation status is
-**configured; exact stacked candidate result green**: Linux PTY, macOS PTY,
-package smoke, and `r1-candidate` passed on `dc39937`. These results establish
-candidate evidence only. The repository plan does not provide branch-protection
-enforcement, and a base-changing update requires fresh exact-head results before
-mainline acceptance.
+The four R1 rows above are present in the workflow with third-party actions
+pinned to immutable commit hashes. Their current status is **accepted**: the
+complete nine-job workflow passed on reviewed pull-request head `9907287`, R1
+merged as `fb64cf1`, and the complete merge-triggered `main` workflow passed.
+The repository plan does not claim branch-protection enforcement from those
+results alone.
 
 ### 12.3 Deterministic workflow network policy
 
@@ -2875,10 +2874,9 @@ R1 requires no API key, network provider, real workspace mutation, sandbox,
 database, or daemon.
 
 The implementation and local plus hosted PTY/package/aggregate evidence satisfy
-the candidate portions of these criteria on `dc39937`. R0 is accepted on
-`main` at `2c042ca`. R1 remains open until the candidate is refreshed against
-that base, the exact hosted jobs pass again for the reviewed head, and R1 is
-merged with its required evidence attached.
+these criteria on reviewed head `9907287`. R0 is accepted on `main` at
+`2c042ca`; R1 merged as `fb64cf1`, and its merge-triggered nine-job workflow
+passed. R1 is therefore accepted within the deliberately synthetic scope above.
 
 ### 19.3 R2 — Real repository coding tools
 
@@ -2972,7 +2970,7 @@ R5 passes when:
 - the exact `default|plan|accept-edits|locked|bypass` permission enum and
   `deny > ask > allow` precedence pass all permission rows;
 - `headless` is tested as an invocation surface using those modes, not as a
-  permission mode; the current R1 candidate spelling `ask` has a documented
+  permission mode; the accepted R1 spelling `ask` has a documented
   migration to target `default` and is absent from the stable enum;
 - approval UI exposes exact action/preconditions/risk/sandbox and prevents stale,
   cross-scope, duplicate, forged, or model-generated decisions;

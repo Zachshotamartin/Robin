@@ -1165,7 +1165,8 @@ test("Robin's coding-agent product contract remains first-class and status-hones
   assert.match(readme, /local-first, provider-flexible coding agent for the terminal/i);
   assert.match(readme, /same product category[^.]*Claude Code/i);
   assert.match(readme, /Milestones A and B[^.]*accepted/i);
-  assert.match(readme, /complete R1 terminal gate[^.]*open/i);
+  assert.match(readme, /R1 is accepted[^.]*fb64cf1/i);
+  assert.match(readme, /R2[^.]*not current release claims/i);
   assert.match(readme, /credential-free synthetic model provider/i);
   assert.match(readme, /node apps\/cli\/dist\/bin\.js run --profile coding-virtual/);
   assert.match(readme, /selecting a real provider[^.]*configuration error/i);

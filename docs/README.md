@@ -6,8 +6,8 @@ substrate for that product, not the product definition.
 
 The root [README](../README.md) is the quick start and current implementation
 snapshot. It distinguishes the intended interactive and resumable Robin
-experience from the accepted Milestones A/B substrate and the current,
-ephemeral R1 coding-agent candidate. R1 has not passed its full acceptance gate.
+experience from the accepted Milestones A/B and Robin R0–R1 baseline. R1 is
+ephemeral and synthetic by scope, but its full acceptance gate has passed.
 
 ## Product-First Source of Truth
 
@@ -44,7 +44,7 @@ implemented behavior and deterministic coverage on the current branch:
   formatting, attribute catalogs, three-valued evaluation, decision precedence,
   safe traces, case corpora, simulation, CLI commands, and current limitations.
 
-The current R1 candidate exposes a Claude Code-style `robin` coding-agent
+The accepted R1 slice exposes a Claude Code-style `robin` coding-agent
 session. Capable interactive terminals use a raw grapheme-aware editor and
 diff-based renderer; non-TTY, `TERM=dumb`, and screen-reader sessions use an
 append-only flat fallback. The deterministic synthetic provider streams a
@@ -58,11 +58,10 @@ R1 coding sessions remain ephemeral. The synthetic tools operate only on an
 in-memory fixture: there is no physical repository access, file editing,
 process execution, Git integration, provider/network request, API key,
 credential storage, durable session, continuation, or resume. Local and hosted
-Linux/macOS PTY plus package/aggregate candidate evidence passed on
-`dc39937`. R0 is accepted on `main` at `2c042ca`; R1 is still a candidate
-until fresh exact-head evidence passes after the base update and the candidate
-merges. Planned documents may specify later features only as planned until their
-evidence gates pass.
+Linux/macOS PTY plus package/aggregate evidence passed on reviewed head
+`9907287` and after merge. R0 is accepted on `main` at `2c042ca`; R1 is
+accepted on `main` at `fb64cf1`. Planned documents may specify later features
+only as planned until their evidence gates pass.
 
 ## Product Supporting Specifications
 

@@ -174,7 +174,7 @@ Until R1 is accepted, the truthful claim is:
 > substrate and is being pivoted into a coding-agent CLI. The current mainline
 > is not yet a usable coding agent.
 
-The stacked R1 branch contains an implementation candidate:
+The accepted R1 baseline contains this implementation:
 `robin` and `robin "prompt"` use one ephemeral application service with a
 raw-mode TTY editor or flat fallback, while `robin --print` uses the same
 provider-neutral, multi-request structured tool loop with experimental text,
@@ -186,20 +186,16 @@ TypeScript fixture. Prompt queueing, first-/second-interrupt behavior, resize,
 bracketed paste, bounded usage/budgets, terminal cleanup, and PTY error paths
 have local automated coverage.
 
-The candidate still has no physical repository, process, Git, credential,
+R1 still has no physical repository, process, Git, credential,
 network, durable-session, or resume capability. R0 is accepted on `main` at
-`2c042ca`; the R1 package inventory/evidence record is captured for source
-commit `2e1eb8a`, and the configured hosted Linux/macOS PTY, package-smoke, and
-aggregate jobs passed on stacked candidate `dc39937`. R1 is not accepted until
-the branch is refreshed against accepted `main`, those exact-head gates pass
-again, and the candidate merges.
+`2c042ca`; reviewed R1 head `9907287` passed all nine required hosted jobs,
+merged as `fb64cf1`, and all nine merge-triggered `main` jobs passed again.
 
 The preview currently spells the ordinary ask-first permission label `ask` and
 uses `--output-format` and `--no-save`. Those spellings are experimental. They
 must migrate to target `default`, `--output`, and `--no-session` respectively.
-The R1 acceptance gate remains open despite the local implementation and test
-results. The stable R7 automation contract is entirely planned. Candidate code
-does not change the accepted-mainline claim above.
+The R1 acceptance gate is closed. The stable R7 automation contract remains
+entirely planned, so accepting R1 does not promote its experimental spellings.
 
 `robin auth`, `robin models`, `robin doctor`, and `robin support` are currently
 reserved/unimplemented preview commands. Their target names are fixed here so
@@ -776,7 +772,7 @@ after a reserved command, and ambiguous piped input are parse errors.
 10. **R0.10 — Rewrite normative product docs.** Make
     `PRODUCT_REQUIREMENTS.md`, this plan, ADR-0007, and README agree on the
     coding-agent-first scope, the implemented ephemeral preview, and every
-    still-unaccepted R1/R7/release claim.
+    still-unaccepted R7/release claim.
 11. **R0.11 — Re-run accepted gates.** Run typecheck, package unit tests, Gate A,
     Gate B, mutation tests, CLI subprocess tests, and repository checks after the
     rename. A golden update requires semantic review rather than blanket rewrite.
@@ -880,7 +876,7 @@ loop defects cannot hide behind network or model variance.
 
 ### 6.3 Packages, files, interfaces, and data
 
-The current stacked branch contains the bounded R1 candidate:
+The accepted baseline contains the bounded R1 implementation:
 
 - `packages/model-provider` exposes the temporary
   `ModelProvider.respond(SemanticModelRequest, AbortSignal)` port plus scripted,
@@ -902,11 +898,11 @@ The current stacked branch contains the bounded R1 candidate:
   two turns, tool visibility, queueing, resize, paste, single/double interrupt,
   provider/tool failure, and exact terminal-mode restoration.
 
-These implemented pieces remain candidate evidence only. R1 still requires the
-clean package inventory, installed-tarball PTY/uninstall smoke, documented
-terminal matrix, clean-commit evidence manifest, hosted Linux/macOS jobs, an
-accepted R0 predecessor, and the complete section 6.9 review. R7, not R1, owns
-the stable public automation schemas and target flag compatibility contract.
+These pieces passed the clean package inventory, installed-tarball PTY/uninstall
+smoke, documented terminal matrix, hosted Linux/macOS jobs, accepted R0
+predecessor, exact-head review, and post-merge checks required by section 6.9.
+R7, not R1, owns the stable public automation schemas and target flag
+compatibility contract.
 
 Create `packages/robin-application` with:
 
@@ -1154,11 +1150,10 @@ R1 is accepted only when a recorded PTY run proves all of the following:
 - no real repository, provider, API key, durable resume, or sandbox claim appears
   in release notes.
 
-Current candidate evidence is intentionally weaker than acceptance: the local
-unit, adversarial application, CLI subprocess, and PTY suites pass on the
-development host, but a local pass cannot substitute for the clean package
-artifact, hosted operating-system matrix, prerequisite merge, and reviewed
-manifest required above.
+Acceptance evidence is recorded at reviewed head `9907287` and merge commit
+`fb64cf1`: local gates, the clean package artifact, hosted Linux/macOS matrix,
+prerequisite merge, aggregate, and post-merge workflow all passed. These facts
+do not widen R1 beyond its synthetic, credential-free scope.
 
 ### 6.10 Explicit deferrals
 
@@ -1177,7 +1172,7 @@ these requirements remain open through R3.
 
 ## 7. R2 — Real Repository, Editing, Process, Verification, and Git Review
 
-**Status:** planned.
+**Status:** implementation in progress on `codex/robin-r2-real-tool-loop`.
 
 **Effort range:** 5–8 part-time weeks.
 
@@ -6499,26 +6494,23 @@ At the end of any accepted phase:
 - threat model and residual risks are updated;
 - a clean-commit gate evidence manifest records exact results and limitations.
 
-## 23. Immediate Execution Order from the Current Pivot Branch
+## 23. Immediate Execution Order from the Accepted R1 Baseline
 
-The branch currently contains the line-oriented, ephemeral initial-R1 preview,
-including experimental `--print` formats, but neither the complete R1 gate nor
-the stable R7 `--output`/`--no-session` automation contract is accepted. The
-safe next sequence is:
+R0 and R1 are accepted. Experimental R1 `--print` formats remain narrower than
+the stable R7 `--output`/`--no-session` automation contract. The current safe
+sequence is:
 
-1. finish R0.08–R0.12 identity/package/docs/gate evidence without changing
-   Milestone A/B serialized internals;
-2. inventory the current preview against R1.01–R1.13 and mark each ticket with
-   actual test evidence rather than assuming existing CLI files satisfy it;
-3. complete the canonical `robin-session`, `robin-agent`,
-   `robin-application`, and `robin-terminal` boundaries before adding a real
-   provider;
-4. make the two-turn synthetic tool-loop PTY scenario pass, including cancellation
-   and terminal restoration;
-5. update the R1 evidence manifest and only then mark R1 accepted;
-6. begin R2 with the disposable repository fixture factory and physical workspace
-   safety oracle, never by pointing unfinished tools at the Robin checkout;
-7. keep the archived Milestone C work as test/audit input and cherry-pick no
+1. implement R2 from disposable repository fixtures and an exact physical
+   workspace safety oracle, never by pointing unfinished tools at the Robin
+   checkout;
+2. close path, read, edit, process, Git-read, and approval invariants before
+   exposing their tools through the application;
+3. require the complete synthetic diagnose/edit/verify/status/diff scenario and
+   PTY approval matrix before accepting R2;
+4. proceed to R3 durability only after R2 effects and attribution are accepted;
+5. add the first hosted provider in R4 without moving tool authority into a
+   provider adapter;
+6. keep the archived Milestone C work as test/audit input and cherry-pick no
    component without fresh R2/R3/R9 review.
 
 This ordering produces a Claude Code-style coding-agent experience as early as
