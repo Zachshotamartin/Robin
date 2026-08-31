@@ -3,6 +3,10 @@ export {
   MAXIMUM_APPLICATION_IDENTIFIER_UTF8_BYTES,
   MAXIMUM_APPLICATION_TEXT_UTF8_BYTES,
   MAXIMUM_APPROVAL_DISPLAY_SUMMARY_UTF8_BYTES,
+  MAXIMUM_TOOL_OUTPUT_DELTAS_PER_CALL,
+  MAXIMUM_TOOL_OUTPUT_DELTA_TEXT_UTF8_BYTES,
+  MAXIMUM_TOOL_OUTPUT_SOURCE_BYTES_PER_CALL,
+  MAXIMUM_TOOL_OUTPUT_TEXT_UTF8_BYTES_PER_CALL,
   ROBIN_APPLICATION_EVENT_SCHEMA_VERSION,
   ROBIN_APPLICATION_EVENT_TYPES,
   RobinSessionError,
@@ -29,6 +33,8 @@ export type {
   RobinPermissionDecidedPayload,
   RobinPermissionEffect,
   RobinSessionErrorCode,
+  RobinToolOutputChannel,
+  RobinToolOutputDeltaPayload,
   RobinTurnApplicationEvent,
 } from "./application-event.js";
 export { classifyRobinBudget } from "./budgets.js";

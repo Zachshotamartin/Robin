@@ -6,6 +6,7 @@ import type {
   RobinApprovalRequestedPayload,
   RobinBudgetDimension,
   RobinPermissionDecidedPayload,
+  RobinToolOutputDeltaPayload,
   RobinTurnApplicationEvent,
 } from "./application-event.js";
 
@@ -85,6 +86,8 @@ export interface RobinToolCallState {
   readonly callId: string;
   readonly failure?: RobinToolCallFailureState;
   readonly observation?: JsonObject;
+  /** Ordered, bounded presentation facts; never execution or approval authority. */
+  readonly outputDeltas: readonly RobinToolOutputDeltaPayload[];
   readonly permission?: RobinPermissionDecidedPayload;
   readonly status: "active" | "completed" | "failed";
   readonly toolName: string;

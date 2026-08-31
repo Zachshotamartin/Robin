@@ -5,6 +5,9 @@ import { canonicalSha256Hex } from "@guard/contracts";
 
 import {
   MAXIMUM_APPLICATION_EVENT_UTF8_BYTES,
+  MAXIMUM_TOOL_OUTPUT_DELTAS_PER_CALL,
+  MAXIMUM_TOOL_OUTPUT_DELTA_TEXT_UTF8_BYTES,
+  MAXIMUM_TOOL_OUTPUT_SOURCE_BYTES_PER_CALL,
   ROBIN_APPLICATION_EVENT_TYPES,
   RobinSessionError,
   parseRobinApplicationEvent,
@@ -44,6 +47,17 @@ const PAYLOADS: Readonly<Record<string, Readonly<Record<string, unknown>>>> =
     ToolCallStarted: Object.freeze({
       callId: "call-1",
       toolName: "robin.synthetic.inspect_file@1",
+      turnId: "turn-1",
+    }),
+    ToolOutputDelta: Object.freeze({
+      byteLength: 6,
+      callId: "call-1",
+      channel: "stdout",
+      limitExceeded: false,
+      safeText: "output",
+      sequence: 1,
+      textTruncated: false,
+      toolName: "robin.process.run@1",
       turnId: "turn-1",
     }),
     PermissionDecided: permissionDecisionPayload(),
@@ -95,7 +109,7 @@ const PAYLOADS: Readonly<Record<string, Readonly<Record<string, unknown>>>> =
   });
 
 test("parses and deeply freezes every versioned application event type", () => {
-  assert.equal(ROBIN_APPLICATION_EVENT_TYPES.length, 21);
+  assert.equal(ROBIN_APPLICATION_EVENT_TYPES.length, 22);
   for (const [index, type] of ROBIN_APPLICATION_EVENT_TYPES.entries()) {
     const parsed = parseRobinApplicationEvent(rawEvent(index + 1, type, PAYLOADS[type]!));
     assert.equal(parsed.type, type);
@@ -312,6 +326,84 @@ test("escapes unsafe terminal controls in text and nested observations", () => {
     ...rawEvent(1, "SessionClosed", { reason: "user" }),
     eventId: "bad\nidentifier",
   });
+});
+
+test("parses only bounded, terminal-inert tool output presentation facts", () => {
+  const output = parseRobinApplicationEvent(
+    rawEvent(1, "ToolOutputDelta", {
+      byteLength: 5,
+      callId: "call-1",
+      channel: "stderr",
+      limitExceeded: true,
+      safeText: "bad\u001b]52;clipboard\u0007",
+      sequence: 2,
+      textTruncated: true,
+      toolName: "robin.process.run@1",
+      turnId: "turn-1",
+    }),
+  );
+  assert.equal(output.type, "ToolOutputDelta");
+  if (output.type === "ToolOutputDelta") {
+    assert.deepEqual(output.payload, {
+      byteLength: 5,
+      callId: "call-1",
+      channel: "stderr",
+      limitExceeded: true,
+      safeText: "bad\\u{1b}]52;clipboard\\u{07}",
+      sequence: 2,
+      textTruncated: true,
+      toolName: "robin.process.run@1",
+      turnId: "turn-1",
+    });
+    assert.equal(Object.isFrozen(output.payload), true);
+  }
+
+  const base = PAYLOADS["ToolOutputDelta"]!;
+  for (const invalid of [
+    { ...base, channel: "combined" },
+    { ...base, sequence: 0 },
+    { ...base, sequence: MAXIMUM_TOOL_OUTPUT_DELTAS_PER_CALL + 1 },
+    { ...base, byteLength: 0 },
+    { ...base, byteLength: MAXIMUM_TOOL_OUTPUT_SOURCE_BYTES_PER_CALL + 1 },
+    { ...base, limitExceeded: 0 },
+    { ...base, textTruncated: "false" },
+    { ...base, extra: true },
+    (() => {
+      const { toolName: _toolName, ...missing } = base;
+      return missing;
+    })(),
+  ]) {
+    assertInvalidEvent(rawEvent(1, "ToolOutputDelta", invalid));
+  }
+
+  const exactTextBound = "x".repeat(
+    MAXIMUM_TOOL_OUTPUT_DELTA_TEXT_UTF8_BYTES,
+  );
+  const exact = parseRobinApplicationEvent(
+    rawEvent(1, "ToolOutputDelta", { ...base, safeText: exactTextBound }),
+  );
+  assert.equal(
+    exact.type === "ToolOutputDelta"
+      ? Buffer.byteLength(exact.payload.safeText, "utf8")
+      : 0,
+    MAXIMUM_TOOL_OUTPUT_DELTA_TEXT_UTF8_BYTES,
+  );
+  assertInvalidEvent(
+    rawEvent(1, "ToolOutputDelta", {
+      ...base,
+      safeText: exactTextBound + "x",
+    }),
+  );
+  assertInvalidEvent(
+    rawEvent(1, "ToolOutputDelta", {
+      ...base,
+      // Escaping expands each control to six printable bytes and is checked
+      // against the same released-text ceiling after transformation.
+      safeText: "\u001b".repeat(
+        Math.floor(MAXIMUM_TOOL_OUTPUT_DELTA_TEXT_UTF8_BYTES / 6) + 1,
+      ),
+    }),
+  );
 });
 
 test("validates and escapes classified tool failures", () => {

@@ -282,6 +282,83 @@ test("replays tool failure settlement before turn cancellation and close", () =>
   });
 });
 
+test("replay deterministically reconstructs ordered tool output without effects", () => {
+  const events = [
+    event(1, "SessionStarted", startPayload()),
+    event(2, "UserMessageAccepted", {
+      messageId: "message-1",
+      text: "run tests",
+      turnId: "turn-1",
+    }),
+    event(3, "TurnStarted", {
+      messageId: "message-1",
+      turnId: "turn-1",
+    }),
+    event(4, "ToolCallStarted", {
+      callId: "call-1",
+      toolName: "robin.process.run@1",
+      turnId: "turn-1",
+    }),
+    event(5, "PermissionDecided", permissionDecisionPayload({
+      effect: "allow",
+      toolName: "robin.process.run@1",
+      winningPolicyName: null,
+    })),
+    event(6, "ToolOutputDelta", toolOutputPayload({
+      safeText: "not ok\u001b[31m",
+    })),
+    event(7, "ToolOutputDelta", toolOutputPayload({
+      byteLength: 2,
+      safeText: "ok",
+      sequence: 2,
+    })),
+    event(8, "ToolCallCompleted", {
+      callId: "call-1",
+      observation: { classification: "success" },
+      toolName: "robin.process.run@1",
+      turnId: "turn-1",
+    }),
+    event(9, "TurnCompleted", { text: "", turnId: "turn-1" }),
+    event(10, "SessionClosed", { reason: "user" }),
+  ];
+
+  const first = replayRobinSession(events);
+  const second = replayRobinSession(
+    events.map((value) => structuredClone(value)),
+  );
+  assert.deepEqual(first, second);
+  assert.equal(first.status, "closed");
+  assert.deepEqual(first.turns[0]?.toolCalls[0]?.outputDeltas, [
+    {
+      byteLength: 5,
+      callId: "call-1",
+      channel: "stdout",
+      limitExceeded: false,
+      safeText: "not ok\\u{1b}[31m",
+      sequence: 1,
+      textTruncated: false,
+      toolName: "robin.process.run@1",
+      turnId: "turn-1",
+    },
+    {
+      byteLength: 2,
+      callId: "call-1",
+      channel: "stdout",
+      limitExceeded: false,
+      safeText: "ok",
+      sequence: 2,
+      textTruncated: false,
+      toolName: "robin.process.run@1",
+      turnId: "turn-1",
+    },
+  ]);
+  assert.equal(
+    first.turns[0]?.toolCalls[0]?.permission?.effect,
+    "allow",
+  );
+  assert.equal(Object.isFrozen(first.turns[0]?.toolCalls[0]?.outputDeltas), true);
+});
+
 test("replay reconstructs the exact immutable pending approval without effects", () => {
   const events = [
     event(1, "SessionStarted", startPayload()),
@@ -471,6 +548,23 @@ function event(
     sessionId: "session-1",
     type,
   };
+}
+
+function toolOutputPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    byteLength: 5,
+    callId: "call-1",
+    channel: "stdout",
+    limitExceeded: false,
+    safeText: "first",
+    sequence: 1,
+    textTruncated: false,
+    toolName: "robin.process.run@1",
+    turnId: "turn-1",
+    ...overrides,
+  });
 }
 
 function approvalRequestPayload(

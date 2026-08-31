@@ -2,6 +2,9 @@ import { Buffer } from "node:buffer";
 
 import {
   MAXIMUM_APPLICATION_TEXT_UTF8_BYTES,
+  MAXIMUM_TOOL_OUTPUT_DELTAS_PER_CALL,
+  MAXIMUM_TOOL_OUTPUT_SOURCE_BYTES_PER_CALL,
+  MAXIMUM_TOOL_OUTPUT_TEXT_UTF8_BYTES_PER_CALL,
   RobinSessionError,
   type RobinApprovalBinding,
   type RobinTurnApplicationEvent,
@@ -69,11 +72,20 @@ export function reduceRobinTurn(
           ...state.toolCalls,
           Object.freeze({
             callId: event.payload.callId,
+            outputDeltas: Object.freeze([]),
             status: "active" as const,
             toolName: event.payload.toolName,
           }),
         ]),
       });
+    case "ToolOutputDelta":
+      if (
+        state.status !== "active" &&
+        state.status !== "cancellation_requested"
+      ) {
+        return illegalTransition();
+      }
+      return appendToolOutputDelta(state, event);
     case "PermissionDecided":
       requireActive(state);
       return decidePermission(state, event);
@@ -418,12 +430,10 @@ function completeToolCall(
     }
     found = true;
     return Object.freeze({
-      ...(call.approval === undefined ? {} : { approval: call.approval }),
-      callId: call.callId,
+      ...call,
       observation: event.payload.observation,
       permission: call.permission!,
       status: "completed",
-      toolName: call.toolName,
     });
   });
   if (!found) return illegalTransition();
@@ -485,19 +495,74 @@ function failToolCall(
         })
       : call.approval;
     return Object.freeze({
+      ...call,
       ...(approval === undefined ? {} : { approval }),
-      callId: call.callId,
       failure: Object.freeze({
         code: event.payload.code,
         message: event.payload.message,
       }),
-      ...(call.permission === undefined ? {} : { permission: call.permission }),
       status: "failed",
-      toolName: call.toolName,
     });
   });
   if (!found) return illegalTransition();
   return freezeTurn({ ...state, toolCalls: Object.freeze(calls) });
+}
+
+function appendToolOutputDelta(
+  state: RobinTurnState,
+  event: Extract<RobinTurnApplicationEvent, { readonly type: "ToolOutputDelta" }>,
+): RobinTurnState {
+  const activeCalls = state.toolCalls.filter((call) => call.status === "active");
+  const active = activeCalls[0];
+  if (
+    activeCalls.length !== 1 ||
+    active === undefined ||
+    active.callId !== event.payload.callId ||
+    active.toolName !== event.payload.toolName ||
+    !toolMayProduceOutput(active) ||
+    event.payload.sequence !== active.outputDeltas.length + 1 ||
+    active.outputDeltas.length >= MAXIMUM_TOOL_OUTPUT_DELTAS_PER_CALL ||
+    (active.outputDeltas.at(-1)?.limitExceeded === true &&
+      event.payload.limitExceeded === false)
+  ) {
+    return illegalTransition();
+  }
+
+  let sourceBytes = event.payload.byteLength;
+  let textBytes = Buffer.byteLength(event.payload.safeText, "utf8");
+  for (const delta of active.outputDeltas) {
+    sourceBytes += delta.byteLength;
+    textBytes += Buffer.byteLength(delta.safeText, "utf8");
+  }
+  if (
+    sourceBytes > MAXIMUM_TOOL_OUTPUT_SOURCE_BYTES_PER_CALL ||
+    textBytes > MAXIMUM_TOOL_OUTPUT_TEXT_UTF8_BYTES_PER_CALL
+  ) {
+    return illegalTransition();
+  }
+
+  const calls = state.toolCalls.map((call): RobinToolCallState =>
+    call.callId === event.payload.callId
+      ? Object.freeze({
+          ...call,
+          outputDeltas: Object.freeze([
+            ...call.outputDeltas,
+            event.payload,
+          ]),
+        })
+      : call
+  );
+  return freezeTurn({ ...state, toolCalls: Object.freeze(calls) });
+}
+
+function toolMayProduceOutput(call: RobinToolCallState): boolean {
+  if (call.permission?.effect === "allow") {
+    return call.approval === undefined;
+  }
+  return (
+    call.permission?.effect === "require_approval" &&
+    call.approval?.status === "granted"
+  );
 }
 
 function appendAssistantText(current: string, delta: string): string {

@@ -20,6 +20,14 @@ export const MAXIMUM_APPLICATION_EVENT_UTF8_BYTES = 524_288;
 export const MAXIMUM_APPLICATION_TEXT_UTF8_BYTES = 262_144;
 export const MAXIMUM_APPLICATION_IDENTIFIER_UTF8_BYTES = 256;
 export const MAXIMUM_APPROVAL_DISPLAY_SUMMARY_UTF8_BYTES = 65_536;
+/** Mirrors the installed R2 lifecycle sink's maximum released text per chunk. */
+export const MAXIMUM_TOOL_OUTPUT_DELTA_TEXT_UTF8_BYTES = 32 * 1_024;
+/** One process multiplexer sequence is bounded independently of event sequence. */
+export const MAXIMUM_TOOL_OUTPUT_DELTAS_PER_CALL = 4_096;
+/** Matches the hard process-output ceiling; this is observed bytes, not text. */
+export const MAXIMUM_TOOL_OUTPUT_SOURCE_BYTES_PER_CALL = 64 * 1_024 * 1_024;
+/** Bounds escaped text retained by the ephemeral replay projection. */
+export const MAXIMUM_TOOL_OUTPUT_TEXT_UTF8_BYTES_PER_CALL = 8 * 1_024 * 1_024;
 export const UNSAFE_TERMINAL_TEXT_POLICY = "escape" as const;
 
 export type RobinApplicationEventType =
@@ -30,6 +38,7 @@ export type RobinApplicationEventType =
   | "TurnStarted"
   | "AssistantTextDelta"
   | "ToolCallStarted"
+  | "ToolOutputDelta"
   | "PermissionDecided"
   | "ApprovalRequested"
   | "ApprovalResolved"
@@ -53,6 +62,7 @@ export const ROBIN_APPLICATION_EVENT_TYPES: readonly RobinApplicationEventType[]
   "TurnStarted",
   "AssistantTextDelta",
   "ToolCallStarted",
+  "ToolOutputDelta",
   "PermissionDecided",
   "ApprovalRequested",
   "ApprovalResolved",
@@ -71,6 +81,7 @@ export const ROBIN_APPLICATION_EVENT_TYPES: readonly RobinApplicationEventType[]
 export type RobinApplicationEventSchemaVersion =
   typeof ROBIN_APPLICATION_EVENT_SCHEMA_VERSION;
 export type RobinPermissionMode = "ask" | "plan";
+export type RobinToolOutputChannel = "stdout" | "stderr";
 export type RobinPermissionEffect = "allow" | "deny" | "require_approval";
 export type RobinApprovalDecision = "allow_once" | "deny";
 export type RobinApprovalOutcome = "granted" | "denied" | "stale";
@@ -129,6 +140,22 @@ export interface RobinPermissionDecidedPayload {
   readonly winningPolicyName: string | null;
 }
 
+/**
+ * Presentation-only process output. It never contains raw bytes, handles,
+ * approval facts, normalized actions, or any other execution authority.
+ */
+export interface RobinToolOutputDeltaPayload {
+  readonly byteLength: number;
+  readonly callId: string;
+  readonly channel: RobinToolOutputChannel;
+  readonly limitExceeded: boolean;
+  readonly safeText: string;
+  readonly sequence: number;
+  readonly textTruncated: boolean;
+  readonly toolName: string;
+  readonly turnId: string;
+}
+
 export interface RobinApplicationEventPayloadMap {
   readonly SessionStarted: {
     readonly permissionMode: RobinPermissionMode;
@@ -162,6 +189,7 @@ export interface RobinApplicationEventPayloadMap {
     readonly toolName: string;
     readonly turnId: string;
   };
+  readonly ToolOutputDelta: RobinToolOutputDeltaPayload;
   readonly PermissionDecided: RobinPermissionDecidedPayload;
   readonly ApprovalRequested: RobinApprovalRequestedPayload;
   readonly ApprovalResolved: RobinApprovalResolvedPayload;
@@ -236,6 +264,7 @@ export type RobinApplicationEvent =
   | RobinApplicationEventBase<"TurnStarted">
   | RobinApplicationEventBase<"AssistantTextDelta">
   | RobinApplicationEventBase<"ToolCallStarted">
+  | RobinApplicationEventBase<"ToolOutputDelta">
   | RobinApplicationEventBase<"PermissionDecided">
   | RobinApplicationEventBase<"ApprovalRequested">
   | RobinApplicationEventBase<"ApprovalResolved">
@@ -257,6 +286,7 @@ export type RobinTurnApplicationEvent =
   | RobinApplicationEventBase<"TurnStarted">
   | RobinApplicationEventBase<"AssistantTextDelta">
   | RobinApplicationEventBase<"ToolCallStarted">
+  | RobinApplicationEventBase<"ToolOutputDelta">
   | RobinApplicationEventBase<"PermissionDecided">
   | RobinApplicationEventBase<"ApprovalRequested">
   | RobinApplicationEventBase<"ApprovalResolved">
@@ -294,6 +324,10 @@ const PERMISSION_EFFECT_SET: ReadonlySet<string> = new Set([
   "require_approval",
 ]);
 const PERMISSION_MODE_SET: ReadonlySet<string> = new Set(["ask", "plan"]);
+const TOOL_OUTPUT_CHANNEL_SET: ReadonlySet<string> = new Set([
+  "stdout",
+  "stderr",
+]);
 const BUDGET_DIMENSION_SET: ReadonlySet<string> = new Set([
   "turns",
   "model_requests",
@@ -489,6 +523,47 @@ function parsePayload(
         toolName: requiredIdentifier(payload, "toolName"),
         turnId: requiredIdentifier(payload, "turnId"),
       });
+    case "ToolOutputDelta": {
+      requireExactKeys(
+        payload,
+        new Set([
+          "byteLength",
+          "callId",
+          "channel",
+          "limitExceeded",
+          "safeText",
+          "sequence",
+          "textTruncated",
+          "toolName",
+          "turnId",
+        ]),
+      );
+      const channel = requiredString(payload, "channel", 8, false);
+      if (!TOOL_OUTPUT_CHANNEL_SET.has(channel)) invalidEvent();
+      return Object.freeze({
+        byteLength: requiredPositiveIntegerAtMost(
+          payload,
+          "byteLength",
+          MAXIMUM_TOOL_OUTPUT_SOURCE_BYTES_PER_CALL,
+        ),
+        callId: requiredIdentifier(payload, "callId"),
+        channel: channel as RobinToolOutputChannel,
+        limitExceeded: requiredBoolean(payload, "limitExceeded"),
+        safeText: requiredSafeText(
+          payload,
+          "safeText",
+          MAXIMUM_TOOL_OUTPUT_DELTA_TEXT_UTF8_BYTES,
+        ),
+        sequence: requiredPositiveIntegerAtMost(
+          payload,
+          "sequence",
+          MAXIMUM_TOOL_OUTPUT_DELTAS_PER_CALL,
+        ),
+        textTruncated: requiredBoolean(payload, "textTruncated"),
+        toolName: requiredIdentifier(payload, "toolName"),
+        turnId: requiredIdentifier(payload, "turnId"),
+      });
+    }
     case "PermissionDecided":
       requireExactKeys(
         payload,
@@ -974,6 +1049,22 @@ function requiredPositiveInteger(value: JsonObject, key: string): number {
   if (!Number.isSafeInteger(member) || typeof member !== "number" || member <= 0) {
     invalidEvent();
   }
+  return member;
+}
+
+function requiredPositiveIntegerAtMost(
+  value: JsonObject,
+  key: string,
+  maximum: number,
+): number {
+  const member = requiredPositiveInteger(value, key);
+  if (member > maximum) invalidEvent();
+  return member;
+}
+
+function requiredBoolean(value: JsonObject, key: string): boolean {
+  const member = value[key];
+  if (typeof member !== "boolean") invalidEvent();
   return member;
 }
 
