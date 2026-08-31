@@ -12,7 +12,10 @@ import {
   type SessionCliRequest,
   type SessionPermissionMode,
 } from "./argv.js";
-import { createCliSessionApplication } from "./composition.js";
+import {
+  cliSessionMetadata,
+  createCliSessionApplication,
+} from "./composition.js";
 import { EXIT_CODES, exitCodeForErrorCode } from "./exit-codes.js";
 import {
   executeInteractiveSession,
@@ -35,7 +38,7 @@ export interface SessionCommandDependencies {
     modelId: string,
     maximumTurns: number,
     permissionMode: SessionPermissionMode,
-  ) => R1RobinApplication;
+  ) => R1RobinApplication | Promise<R1RobinApplication>;
   readonly nextSessionId?: () => string;
 }
 
@@ -62,25 +65,34 @@ export async function executeSessionCommand(
 ): Promise<number> {
   if (request.provider !== "synthetic") {
     throw new CliUsageError(
-      "R1 supports only the credential-free synthetic provider; hosted providers arrive in a later gate.",
+      "R2 supports only the credential-free synthetic provider; hosted providers arrive in a later gate.",
     );
   }
-  const modelId = request.model ?? "synthetic-r1-v1";
-  if (modelId !== "synthetic-r1-v1") {
+  const modelId = request.model ?? "synthetic-r2-v1";
+  if (modelId !== "synthetic-r2-v1" && modelId !== "synthetic-r1-v1") {
     throw new CliUsageError(
-      "The R1 synthetic provider supports only model synthetic-r1-v1.",
+      "The synthetic provider supports models synthetic-r2-v1 and synthetic-r1-v1.",
     );
   }
   const maximumTurns =
     request.kind === "print"
       ? request.maximumTurns
       : DEFAULT_MAXIMUM_SESSION_TURNS;
-  const application = dependencies.createApplication(
+  const application = await dependencies.createApplication(
     dependencies.nextSessionId?.() ?? `ephemeral-${randomUUID()}`,
     modelId,
     maximumTurns,
     request.permissionMode,
   );
+  const metadata = cliSessionMetadata(application);
+  if (request.kind === "interactive" && metadata !== null) {
+    try {
+      stdout.write(renderWorkspaceBinding(metadata));
+    } catch (error) {
+      await application.close("error");
+      throw error;
+    }
+  }
   return request.kind === "interactive"
     ? executeInteractiveSession(
         request,
@@ -139,6 +151,13 @@ async function executePrint(
       submission.signal,
     )) {
       if (abortSignalRaised(runtime.outputFailureSignal)) break;
+      if (event.type === "ApprovalRequested") {
+        // Print mode has no interactive input channel. Fail closed instead of
+        // waiting forever or treating a non-interactive invocation as consent.
+        if (!application.resolveApproval(event.payload.approvalId, "deny")) {
+          application.cancelActiveTurn("headless_approval_resolution_failed");
+        }
+      }
       events.push(event);
       if (request.outputFormat === "stream-json") {
         stdout.write(
@@ -148,7 +167,12 @@ async function executePrint(
             sessionId: application.snapshot.sessionId,
             persistence: "ephemeral",
             permissionMode: request.permissionMode,
-            permissions: "synthetic-fixture-tools",
+            permissions: permissionDescriptor(application),
+            sandboxed:
+              application.snapshot.providerId === "robin.r2-synthetic-coding"
+                ? false
+                : null,
+            workspace: sessionMetadataView(application),
             maximumAgentTurns: request.maximumTurns,
             sequence: event.sequence,
             event,
@@ -238,10 +262,58 @@ function previewResultMetadata(
     persistence: "ephemeral",
     saved: false,
     permissionMode: request.permissionMode,
-    permissions: "synthetic-fixture-tools",
+    permissions: permissionDescriptor(application),
+    sandboxed:
+      application.snapshot.providerId === "robin.r2-synthetic-coding"
+        ? false
+        : null,
+    workspace: sessionMetadataView(application),
     maximumAgentTurns: request.maximumTurns,
     usedAgentTurns: application.snapshot.turnsStarted,
   });
+}
+
+function permissionDescriptor(application: R1RobinApplication): string {
+  return application.snapshot.providerId === "robin.r2-synthetic-coding"
+    ? "live-workspace-manual-approval"
+    : "synthetic-fixture-tools";
+}
+
+function sessionMetadataView(
+  application: R1RobinApplication,
+): Readonly<Record<string, unknown>> | null {
+  const metadata = cliSessionMetadata(application);
+  if (metadata === null) return null;
+  return Object.freeze({
+    kind: metadata.workspace.kind,
+    root: metadata.workspace.displayRoot,
+    physicalRoot: metadata.workspace.physicalRoot,
+    workspaceId: metadata.workspace.workspaceId,
+    containmentTier: metadata.workspace.containmentTier,
+    branch: metadata.git.branch,
+    branchState: metadata.git.branchState,
+    initialDirty: metadata.git.initialDirty,
+    initialStatusEntries: metadata.git.initialStatusEntries,
+    repositoryId: metadata.git.repositoryId,
+    sandboxed: metadata.execution.sandboxed,
+    filesystemIsolation: metadata.execution.filesystemIsolation,
+    networkIsolation: metadata.execution.networkIsolation,
+  });
+}
+
+function renderWorkspaceBinding(
+  metadata: NonNullable<ReturnType<typeof cliSessionMetadata>>,
+): string {
+  const branch = metadata.git.branch ?? metadata.git.branchState;
+  const dirty = metadata.git.initialDirty
+    ? `dirty (${metadata.git.initialStatusEntries} status entries)`
+    : "clean";
+  return (
+    `[workspace] ${sanitizeTerminalDiagnostic(metadata.workspace.displayRoot)} ` +
+    `· branch ${sanitizeTerminalDiagnostic(branch)} · ${dirty}\n` +
+    "[execution] live workspace · manual approvals · ephemeral · not sandboxed " +
+    "(no filesystem or network isolation)\n"
+  );
 }
 
 export function sanitizeTerminalText(value: string): string {

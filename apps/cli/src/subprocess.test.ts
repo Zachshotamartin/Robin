@@ -4,6 +4,16 @@ import {
   spawn,
 } from "node:child_process";
 import { once } from "node:events";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
@@ -223,7 +233,12 @@ test("source-installed bin rejects API-key flags without leaking the value", asy
 });
 
 test("source-installed bin runs one headless Robin preview turn", async () => {
-  const result = await execute(["-p", "Explain the current slice."]);
+  const result = await execute([
+    "-p",
+    "--model",
+    "synthetic-r1-v1",
+    "Explain the current slice.",
+  ]);
   assert.equal(result.code, 0);
   assert.equal(result.stderr, "");
   assert.match(result.stdout, /^I’ll inspect the deterministic workspace summary/u);
@@ -234,6 +249,8 @@ test("source-installed bin runs one headless Robin preview turn", async () => {
 test("source-installed bin emits parseable stream JSON for a preview turn", async () => {
   const result = await execute([
     "--print",
+    "--model",
+    "synthetic-r1-v1",
     "--output-format",
     "stream-json",
     "Stream one turn.",
@@ -255,6 +272,90 @@ test("source-installed bin emits parseable stream JSON for a preview turn", asyn
   assert.equal(records.at(-1)?.event.type, "TurnCompleted");
 });
 
+test("default headless R2 binds the physical repository and denies edits", async (t) => {
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "robin-cli-r2-print-"));
+  t.after(async () => rm(fixtureRoot, { recursive: true, force: true }));
+  const repositoryRoot = path.join(fixtureRoot, "repository");
+  await mkdir(path.join(repositoryRoot, "src"), { recursive: true });
+  const sourcePath = path.join(repositoryRoot, "src", "calculate.ts");
+  const initialSource = [
+    "export function calculate(values: readonly number[]): number {",
+    "  let total = 0;",
+    "  for (const value of values) total = total - value;",
+    "  return total;",
+    "}",
+    "",
+    "export function normalizeLabel(label: string): string {",
+    "  return label.toLowerCase();",
+    "}",
+    "",
+  ].join("\n");
+  await writeFile(sourcePath, initialSource, "utf8");
+  await writeFile(
+    path.join(repositoryRoot, "package.json"),
+    `${JSON.stringify({ name: "robin-cli-r2-print", private: true })}\n`,
+    "utf8",
+  );
+  await execFile("git", ["init", "--quiet", repositoryRoot]);
+  await execFile("git", ["-C", repositoryRoot, "add", "--", "package.json", "src/calculate.ts"]);
+  await execFile(
+    "git",
+    [
+      "-C",
+      repositoryRoot,
+      "-c",
+      "user.name=Robin CLI Test",
+      "-c",
+      "user.email=robin-cli@example.invalid",
+      "commit",
+      "--quiet",
+      "-m",
+      "fixture",
+    ],
+  );
+
+  const result = await execute(
+    ["--print", "--output-format", "json", "Fix the deterministic defect."],
+    { cwd: repositoryRoot },
+  );
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stderr, "");
+  assert.equal(await readFile(sourcePath, "utf8"), initialSource);
+  const decoded = JSON.parse(result.stdout) as {
+    readonly permissions: string;
+    readonly sandboxed: boolean;
+    readonly workspace: {
+      readonly physicalRoot: string;
+      readonly initialDirty: boolean;
+      readonly filesystemIsolation: string;
+      readonly networkIsolation: string;
+    };
+    readonly events: readonly {
+      readonly type: string;
+      readonly payload?: { readonly decision?: string };
+    }[];
+    readonly result: string;
+  };
+  assert.equal(decoded.permissions, "live-workspace-manual-approval");
+  assert.equal(decoded.sandboxed, false);
+  assert.equal(decoded.workspace.physicalRoot, await realpath(repositoryRoot));
+  assert.equal(decoded.workspace.initialDirty, false);
+  assert.equal(decoded.workspace.filesystemIsolation, "none");
+  assert.equal(decoded.workspace.networkIsolation, "none");
+  assert.equal(
+    decoded.events.filter((event) => event.type === "ApprovalRequested").length,
+    1,
+  );
+  assert.equal(
+    decoded.events.some(
+      (event) =>
+        event.type === "ApprovalResolved" && event.payload?.decision === "deny",
+    ),
+    true,
+  );
+  assert.match(decoded.result, /denied/u);
+});
+
 test(
   "source-installed bin cancels a slow headless turn when its output pipe closes",
   { timeout: 30_000 },
@@ -264,6 +365,8 @@ test(
       [
         BIN,
         "--print",
+        "--model",
+        "synthetic-r1-v1",
         "--output-format",
         "stream-json",
         "[scenario:slow]",
@@ -350,12 +453,15 @@ test("source-installed bin explains and simulates without effects", async () => 
   assert.equal(simulatedPayload.entries[0]?.category, "newly_denied");
 });
 
-async function execute(argv: readonly string[]): Promise<{
+async function execute(
+  argv: readonly string[],
+  options: { readonly cwd?: string } = {},
+): Promise<{
   readonly code: number;
   readonly stdout: string;
   readonly stderr: string;
 }> {
-  return executeNode([BIN, ...argv]);
+  return executeNode([BIN, ...argv], options);
 }
 
 async function executeCold(argv: readonly string[]): Promise<{
@@ -374,13 +480,17 @@ async function executeCold(argv: readonly string[]): Promise<{
   ]);
 }
 
-async function executeNode(argv: readonly string[]): Promise<{
+async function executeNode(
+  argv: readonly string[],
+  options: { readonly cwd?: string } = {},
+): Promise<{
   readonly code: number;
   readonly stdout: string;
   readonly stderr: string;
 }> {
   try {
     const result = await execFile(process.execPath, argv, {
+      cwd: options.cwd,
       encoding: "utf8",
       maxBuffer: 4 * 1024 * 1024,
       timeout: 30_000,

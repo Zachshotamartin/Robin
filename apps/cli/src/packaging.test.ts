@@ -318,7 +318,12 @@ test("the actual tarball installs with its local workspace closure and runs offl
 
   const previewResult = await execFile(
     installedCommand,
-    ["-p", "Verify the installed Robin preview."],
+    [
+      "-p",
+      "--model",
+      "synthetic-r1-v1",
+      "Verify the installed Robin preview.",
+    ],
     {
       cwd: installRoot,
       encoding: "utf8",
