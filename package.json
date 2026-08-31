@@ -33,7 +33,7 @@
     "test": "npm run test:repository && npm run test:unit",
     "test:evidence": "node --test --test-reporter=./scripts/deterministic-test-reporter.mjs scripts/gate-evidence.test.mjs",
     "test:reporter": "node --test --test-reporter=./scripts/deterministic-test-reporter.mjs scripts/deterministic-test-reporter.test.mjs",
-    "test:repository": "node --test --test-reporter=./scripts/deterministic-test-reporter.mjs scripts/check-docs.test.mjs scripts/check-architecture.test.mjs scripts/check-gate-b-configuration.test.mjs scripts/check-repository-policy.test.mjs scripts/deterministic-test-reporter.test.mjs scripts/gate-evidence.test.mjs scripts/workspace-graph.test.mjs tests/support/repository-fixture.test.mjs",
+    "test:repository": "node --test --test-reporter=./scripts/deterministic-test-reporter.mjs scripts/check-docs.test.mjs scripts/check-architecture.test.mjs scripts/check-gate-b-configuration.test.mjs scripts/check-repository-policy.test.mjs scripts/deterministic-test-reporter.test.mjs scripts/gate-evidence.test.mjs scripts/workspace-graph.test.mjs tests/support/process-fixture.test.mjs tests/support/repository-fixture.test.mjs",
     "pretest:pty": "npm run build",
     "test:pty": "node --test --test-reporter=./scripts/deterministic-test-reporter.mjs tests/pty/robin-pty.test.mjs",
     "pretest:package": "npm run build",
