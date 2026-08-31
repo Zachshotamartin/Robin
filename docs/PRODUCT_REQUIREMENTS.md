@@ -3,17 +3,27 @@
 Document status: normative product specification for the Robin pivot.
 
 Implementation status: the repository contains the completed deterministic
-runtime and policy/context substrate from Milestones A and B plus an initial-R1
-preview: a line-oriented, ephemeral provider-neutral text conversation driven by
-a credential-free synthetic provider through one application path in interactive
-and `--print` modes. The preview's JSON and streaming-JSON envelopes are
-experimental; it currently spells target `default` permission as `ask` and uses
-temporary `--output-format` and `--no-save` flags. It has no physical repository,
-process, Git, credential, network, durable-session, or resume capability. The
-complete R1 terminal/event/tool gate and the stable R7 automation contract do
-not exist yet. The full coding-agent product described here remains planned until
-each release gate names passing evidence. Current behavior is summarized in the
-repository README.
+runtime and policy/context substrate from Milestones A and B plus an unaccepted
+R1 candidate. The candidate uses a schema-versioned, append-only in-memory
+application-event journal, pure reducer/replay projection, and replay-then-live
+event stream for one ephemeral provider-neutral application path. Its
+credential-free synthetic provider runs a multi-request structured loop through
+two pinned fixture tools. Capable TTYs use the raw terminal editor; non-TTY,
+`TERM=dumb`, and screen-reader sessions use the append-only flat renderer. Queue,
+cancellation, resize, inert bracketed paste, and experimental `--print` text,
+JSON, and streaming-JSON paths are implemented. It currently spells target
+`default` permission as `ask` and uses temporary `--output-format` and
+`--no-save` flags.
+
+Local macOS real-PTY and isolated package install/execute/uninstall tests provide
+candidate evidence only. R0 is accepted on `main` at `2c042ca`, and the
+configured hosted Linux/macOS jobs and aggregate passed on stacked candidate
+`dc39937`. The complete R1 gate remains open until fresh exact-head evidence
+passes after the base update and the candidate merges.
+There is no physical repository, process, Git, credential, network provider,
+API-key, durable-session, or resume capability, and the stable R7 automation
+contract remains planned. Current behavior is summarized in the repository
+README.
 
 ## 1. Product Definition
 
@@ -205,26 +215,37 @@ Robin does not use “event” to mean three incompatible things. The layers are
    for replay, recovery, and audit. Complete content is sealed; original chunk
    cadence is not durable authority.
 
-The current `EphemeralRobinApplication` directly yields the preview
-`RobinAgentEvent` live union. That is a temporary initial-R1 seam. R1 completion
-maps live events into versioned application events; R3 adds canonical durable
-events and replayed application views without changing renderer semantics. The
-minimum mapping is:
+The current CLI no longer exposes the retained `EphemeralRobinApplication` /
+`RobinAgentEvent` compatibility seam directly. `R1RobinApplication` maps
+provider-neutral coordinator observations into schema-version-1 application
+records, validates every append through the pure session reducer, can replay
+every recorded prefix, and lets each subscriber consume journal history before
+following the same live append order. Its implemented subset covers session and
+permission state, accepted/queued messages, turn start, assistant deltas, tool
+start/completion/failure, usage and budgets, cancellation, terminal turn
+outcomes, and session close. The old direct-live application remains only for
+legacy compatibility tests, not default CLI composition.
+
+R3 still adds canonical durable events and durable replay without changing
+renderer semantics. The following table is the minimum target mapping as that
+durable plane is added:
 
 | Live observation | Application view | Canonical durable fact |
 | --- | --- | --- |
-| preview `turn_started` | `TurnQueued` plus context progress | `UserSubmissionAccepted`, `TurnStarted` |
+| accepted user/turn-start observation | `TurnQueued` plus context progress | `UserSubmissionAccepted`, `TurnStarted` |
 | assistant/provider text delta | `ProviderTextDelta` | later `ProviderContentSealed`, `AssistantMessageSealed`; no frame per delta |
 | provider tool fragments | bounded progress only | none until the complete call is sealed |
 | complete normalized tool call | `ProviderToolCallCompleted`, `ToolRequestNormalized` | `ProviderToolCallSealed`, `ToolCallReceived`, `ToolCallNormalized` or `ToolCallRejected` |
 | permission evaluation/response | `PermissionDecided`, `ApprovalRequested`, `ApprovalResolved` | `PermissionEvaluated`, `ApprovalRequested`, `ApprovalResponded` |
 | tool/process lifecycle | start/output/terminal application events | `ToolExecutionPrepared`, `ToolExecutionStarted`, `ToolOutputSealed`, then one terminal tool event |
 | provider usage | `ProviderUsageReported` | `ProviderUsageRecorded` |
-| preview completion/failure/cancel | matching terminal application event | assistant seal plus `TurnCompleted`; provider/tool failure plus `TurnFailed`; or `TurnCancellationRequested` then `TurnCancelled` |
+| completion/failure/cancel observation | matching terminal application event | assistant seal plus `TurnCompleted`; provider/tool failure plus `TurnFailed`; or `TurnCancellationRequested` then `TurnCancelled` |
 
-Only canonical durable events receive monotonic session sequence numbers. A
-live-only application event carries a live ordering key and no fabricated
-durable sequence.
+The R1 in-memory journal uses a positive monotonic `sequence` to validate local
+append and replay order, but that value disappears with the process and is not a
+durable `SessionSequence`. In the target durable model, only canonical durable
+events receive monotonic session sequence numbers. A live-only application event
+carries a live ordering key and no fabricated durable sequence.
 
 ### 3.11 No silent degradation
 
@@ -238,9 +259,9 @@ behavior.
 
 ### 4.1 Required for the first supported, first usable developer release
 
-This release is one cumulative bundle produced only after R8. R1 preview, R4
-hosted-provider alpha, and R7 provider/automation conformance builds are evidence
-checkpoints, not earlier supported releases.
+This release is one cumulative bundle produced only after R8. The R1 candidate,
+R4 hosted-provider alpha, and R7 provider/automation conformance builds are
+evidence checkpoints, not earlier supported releases.
 
 - `robin` interactive mode in a real local Git repository;
 - `robin "prompt"` interactive mode with an initial request;
@@ -348,10 +369,10 @@ type HeadlessOutput = "text" | "json" | "stream-json";
 ```
 
 Headless is the `--print` surface, not a permission value. Its target flags are
-`--output <text|json|stream-json>` and `--no-session`. The initial-R1 preview
-currently accepts `ask`, `--output-format`, and `--no-save`; these are temporary
-implementation spellings, not stable aliases. Before the R7 public command
-snapshot, `ask` maps to `default`, `--output-format` becomes `--output`, and
+`--output <text|json|stream-json>` and `--no-session`. The unaccepted R1
+candidate currently accepts `ask`, `--output-format`, and `--no-save`; these are
+temporary implementation spellings, not stable aliases. Before the R7 public
+command snapshot, `ask` maps to `default`, `--output-format` becomes `--output`, and
 `--no-save` becomes `--no-session`. `robin auth`, `robin models`, `robin doctor`,
 and `robin support` are target/reserved commands and must not be described as
 implemented until their owning gates pass.
@@ -799,8 +820,9 @@ implemented until their owning gates pass.
 
 ### 7.10 Providers and models
 
-The checked-in `ModelProvider.respond(request, signal)` contract is a temporary
-initial-R1 preview port. The canonical production R4 adapter exposes only
+The checked-in unaccepted R1 candidate still uses the temporary
+`ModelProvider.respond(request, signal)` port. The canonical production R4
+adapter exposes only
 `probe`, `countInput`, `invoke`, `classifyUnknownError`, and
 `redactDiagnostic`; `invoke` accepts a provider-neutral conversation request and
 returns an abortable asynchronous stream of normalized items. Request compilers,
@@ -812,7 +834,7 @@ the reviewed pinned official JavaScript SDK.
 
 - `FR-PROV-001`: The production provider port implements `probe`, `countInput`,
   `invoke`, `classifyUnknownError`, and `redactDiagnostic` with the responsibility
-  split above; preview `respond` is retired from production composition during
+  split above; candidate `respond` is retired from production composition during
   R4 migration.
 - `FR-PROV-002`: Normalized items cover text deltas, complete text, tool-call
   deltas, complete tool calls, usage, provider notices, stop reason, and typed
@@ -897,7 +919,9 @@ the reviewed pinned official JavaScript SDK.
 
 The canonical `PermissionMode` enum is exactly `default | plan | accept-edits |
 locked | bypass`. `--print`/headless is a presentation and interaction surface,
-not a permission mode. Initial-preview `ask` is migrated to `default`.
+not a permission mode. The unaccepted R1 candidate's experimental `ask`
+spelling must migrate to `default` before the target public permission surface
+is accepted.
 
 - `FR-PERM-001`: Every tool operation has a normalized permission action with
   tool, operation, workspace, paths, command, network target, Git target,
@@ -1194,15 +1218,24 @@ The existing Milestones A and B remain accepted only for their current,
 documented deterministic contracts, policy engine, context boundary, and
 virtual repository evidence. They do not satisfy a coding-agent product release.
 
-### 12.2 Initial-R1 implementation preview and R1 completion
+### 12.2 R1 implementation candidate and R1 completion
 
-The checked-in preview proves a shared provider-neutral ephemeral text path in
-line-oriented interactive and experimental `--print` modes. It is not a release
-or a complete R1 gate. R1 closes only after the versioned application-event
-mapping, deterministic synthetic tool cycle, raw terminal editor, queued input,
-cancellation, resize, PTY restoration, accessible flat renderer, and complete
-failure matrix pass. It makes no repository, provider, credential, persistence,
-resume, sandbox, or stable automation claim.
+The checked-in R1 candidate proves a shared provider-neutral ephemeral path
+through a versioned in-memory application journal, reducer/replay projection,
+and replay-then-live event stream. Its structured synthetic loop makes multiple
+model requests around two deterministic fixture-tool observations. Raw TTY and
+append-only flat terminal modes, queued input, cancellation, resize, inert
+bracketed paste, PTY restoration, and experimental `--print` output are present.
+Local macOS real-PTY and isolated package install/execute/uninstall tests cover
+those candidate paths. The configured hosted Linux/macOS PTY, package-smoke,
+and R1 aggregate jobs also passed on candidate commit `dc39937`.
+
+It is not a release or a complete R1 gate. R0 is accepted on `main` at
+`2c042ca`, but the R1 candidate has not merged and its base-changing update
+requires fresh exact-head hosted evidence. The full named failure/performance
+matrix still controls acceptance. R1 makes no physical repository, hosted
+provider, API-key/credential, persistence, resume, sandbox, or stable automation
+claim.
 
 ### 12.3 R3 durable synthetic coding gate
 

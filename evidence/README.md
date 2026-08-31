@@ -2,9 +2,10 @@
 
 This directory contains the versioned input, schema, and capture workflow for
 Robin local gate-command evidence. It does not contain a placeholder R0
-acceptance record. A candidate manifest is created only after every configured
-command passes from a clean, committed source tree; GitHub settings, hosted CI,
-pull-request review, and mainline merge remain separate R0 acceptance records.
+or R1 acceptance record. A candidate manifest is created only after every
+configured command passes from a clean, committed source tree; GitHub settings,
+hosted CI, pull-request review, prerequisite status, and mainline merge remain
+separate gate-acceptance records.
 
 ## Tested-commit semantics
 
@@ -49,6 +50,27 @@ or nonzero status, a changed `HEAD`, any tracked or untracked command output,
 path escape, symlinked hashed input, mismatched Robin versions, or a requirement
 completion claim unsupported by schema v1.
 
+## R1 candidate capture
+
+The tracked [R1 capture config](config/r1.json) inherits Gate B and adds the
+versioned session/application/agent/terminal unit corpus, local real-PTY suite,
+and installed-package PTY/install/uninstall smoke. It hashes the R1 PTY driver,
+application-event and turn-reducer contracts, terminal compatibility matrix,
+and reviewed 59-file package inventory.
+
+From a clean R1 candidate commit:
+
+```console
+npm run evidence:validate-config:r1
+npm run evidence:capture:r1
+npm run evidence:validate -- --manifest evidence/manifests/r1.json
+```
+
+The resulting manifest is deliberately local candidate evidence. It cannot
+accept R1 while R0 is unaccepted, does not contain GitHub-hosted Linux/macOS job
+identity, and does not exercise a physical repository, real model API, API key,
+process/Git effect, durable session, or public distribution channel.
+
 Control/configuration inputs are limited to 4 MiB, generated and loaded
 manifests to 8 MiB, tracked audit or hashed evidence files to 64 MiB each, and
 the tracked/hash audit aggregate to 1 GiB. Commands are limited to 100; other
@@ -58,9 +80,9 @@ bounds cannot become multi-gigabyte concurrent Buffer allocations.
 
 Schema v1 deliberately permits only `partial` requirement status. A later
 schema must bind implemented test IDs to reviewed jobs and enforcement points
-before any manifest may mark a normative requirement `complete`. Every R0
+before any manifest may mark a normative requirement `complete`. Every declared
 fixture and artifact is also required to be a tracked regular input at the
-tested commit; ignored command-generated output cannot become R0 evidence.
+tested commit; ignored command-generated output cannot become gate evidence.
 
 The tool launches structured executable-and-argument arrays with `shell: false`.
 It clones the exact tested commit without hard links into a disposable checkout,
@@ -109,18 +131,18 @@ descendant process-tree containment there. This evidence isolation is not a
 claim about Robin's future coding-agent execution sandbox.
 
 Apple's `sandbox-exec` profiles cannot be nested. When the repository test suite
-is itself an R0 capture child, the 21 evidence-controller integration cases that
+is itself a gate-capture child, the 21 evidence-controller integration cases that
 would recursively launch another isolated capture are therefore reported as
 explicit skips; the five non-recursive schema/runtime cases still execute. The
 same 21 integration cases run without skips in ordinary local and hosted CI
-gates before capture. The generated R0 manifest attests the outer isolated gate
+gates before capture. The generated gate manifest attests the outer isolated gate
 commands, not a recursive self-attestation by the evidence controller.
 
 Process groups provide best-effort descendant termination, not a complete
 process-tree boundary: a child can create a new session and briefly outlive its
 original group. Robin's timeout watchdog destroys retained command pipes after
 a fixed post-kill grace so such a child cannot make evidence capture hang; on
-macOS the inherited source-denial policy still applies. R0 does not claim CPU,
+macOS the inherited source-denial policy still applies. Schema v1 does not claim CPU,
 memory, PID, disk, or ignored-output quotas. Those controls require a future
 cgroup, container, job object, or equivalent OS boundary.
 
@@ -139,13 +161,16 @@ including unique identities and paths, command references, replay bytes versus
 observed bytes, duration versus timeout, derived display/summary fields,
 supported/deferred claim disjointness, canonical/self paths, traceability text,
 and Git object/tree binding. Repository tests compile both schemas and exercise
-positive and negative parity fixtures; schema validation alone is never R0
+positive and negative parity fixtures; schema validation alone is never gate
 acceptance.
 
 ## Files
 
 - `config/r0.json` is the reviewed R0 command, trace, claim, deferral, fixture,
   and artifact input.
+- `config/r1.json` is the reviewed local R1 candidate command, trace, claim,
+  deferral, fixture, and artifact input. It never substitutes for hosted jobs or
+  the accepted R0 predecessor.
 - `inventory/r0-cli-tarball-v1.json` pins the exact cross-platform uncompressed
   tar SHA-256/size, reviewed platform/architecture/npm-version gzip SHA-256/sizes, and the
   47-file path/type/mode/size/SHA-256 inventory consumed by both dry-run and
@@ -155,6 +180,11 @@ acceptance.
   tar bytes; npm 10.9.8 produced the same reviewed stream on macOS arm64 and
   Linux x64. Each verified toolchain cell remains explicit. R0 does not retain
   the private development archive itself as a release artifact.
+- `inventory/r1-cli-tarball-v1.json` pins the R1 candidate's cross-platform
+  canonical tar plus 59 exact files. Its gzip profiles were measured under
+  macOS arm64/npm 10.9.8, macOS arm64/npm 11.19.0, and a pinned, network-disabled
+  Linux x64/Node 22/npm 10.9.8 container; unlike the canonical tar, the Linux
+  gzip bytes differ from macOS and are recorded separately.
 - `schema/gate-evidence-capture-config-v1.schema.json` documents capture input.
 - `schema/gate-evidence-manifest-v1.schema.json` documents generated output.
 - `manifests/` contains only genuinely captured records and its policy note.
@@ -163,3 +193,6 @@ acceptance.
   root identities, and canonicalizes cross-file scheduler interleaving while
   preserving semantic test, failure, stdout/stderr, and line-ending differences.
 - `scripts/gate-evidence.mjs` is the dependency-free generator and validator.
+- `scripts/generate-cli-pack-inventory.mjs` creates a bounded tar inventory,
+  verifies npm's listing against parsed tar headers and file hashes, and merges
+  only compression profiles whose canonical tar and full file inventory match.

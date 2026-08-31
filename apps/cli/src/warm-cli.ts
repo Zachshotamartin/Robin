@@ -13,6 +13,7 @@ import {
   exitCodeForResult,
   terminalDiagnostic,
   type CliDependencies,
+  type CliRuntimeContext,
   type CliWriter,
 } from "./main.js";
 import {
@@ -32,12 +33,19 @@ type WarmCliRequest = Exclude<
   | { readonly kind: "resume" }
 >;
 
+const executeDefaultSession: NonNullable<CliDependencies["executeSession"]> = (
+  request,
+  stdout,
+  stderr,
+  runtime,
+) => executeSessionCommand(request, stdout, stderr, undefined, runtime);
+
 const DEFAULT_DEPENDENCIES: CliDependencies = Object.freeze({
   readObjectiveFile,
   runSynthetic: runSyntheticTransformScenario,
   runCoding: runCodingVirtualRepositoryScenario,
   executePolicy: executePolicyCommand,
-  executeSession: executeSessionCommand,
+  executeSession: executeDefaultSession,
 });
 
 export async function executeWarmCliRequest(
@@ -45,6 +53,7 @@ export async function executeWarmCliRequest(
   stdout: CliWriter,
   stderr: CliWriter,
   dependencies: CliDependencies = DEFAULT_DEPENDENCIES,
+  runtime: CliRuntimeContext = {},
 ): Promise<number> {
   if (isPolicyRequest(request)) {
     const result = await dependencies.executePolicy(request);
@@ -54,11 +63,9 @@ export async function executeWarmCliRequest(
   }
 
   if (request.kind === "interactive" || request.kind === "print") {
-    return await (dependencies.executeSession ?? executeSessionCommand)(
-      request,
-      stdout,
-      stderr,
-    );
+    return dependencies.executeSession === undefined
+      ? await executeSessionCommand(request, stdout, stderr, undefined, runtime)
+      : await dependencies.executeSession(request, stdout, stderr, runtime);
   }
 
   if (request.objective.kind !== "builtin") {

@@ -30,11 +30,21 @@ client launches or connects to the same local engine contract without creating
 a second agent loop.
 
 The repository currently contains the accepted Milestones A and B substrate and
-an in-progress R1 preview: an ephemeral, multi-turn, provider-neutral session
-path backed only by the credential-free synthetic provider. The full R0 and R1
-gates remain open. Real workspace tools, file-backed resume, hosted providers,
-credentials, sandboxing, release packaging, and later extension surfaces are
-planned until their named gates in this document pass.
+an unaccepted R1 candidate. One ephemeral provider-neutral application path
+uses a versioned in-memory event journal, pure reducer/replay projection, and
+replay-then-live stream. A credential-free synthetic provider drives a
+multi-request structured loop through two pinned fixture tools. Raw TTY and
+append-only flat terminal modes, queued prompts, cancellation, resize, inert
+bracketed paste, terminal restoration, and experimental headless formats are
+implemented.
+
+Local macOS real-PTY and isolated package install/execute/uninstall tests provide
+candidate evidence only. The configured hosted Linux/macOS PTY, package-smoke,
+and aggregate jobs passed on candidate commit `dc39937`. R0 is accepted on
+`main` at `2c042ca`, but R1 remains open until its refreshed exact-head gate
+passes and the candidate merges. Real workspace tools, file-backed resume,
+hosted providers, credentials/API keys, sandboxing, supported release packaging,
+and later extension surfaces remain planned until their named gates pass.
 
 ## 1. Operating Model and Lifecycle Invariants
 
@@ -385,12 +395,19 @@ Once each job exists, protect `main` with:
 - release environment approval separate from merge approval;
 - tag protection for `v*` and immutable published releases.
 
-The initial required checks are `docs-policy`, `static`, `unit-contract`, and
-`package-smoke`. R1 adds `pty-linux`; R2 adds `repository-tools`; R3 adds
-`session-recovery`; R4 adds `provider-contract` and `credential-redaction`; R5
-adds `permission-sandbox`; R7 adds the provider/Node/OS matrix; R10 adds the full
-release candidate workflow. A required check is enabled only after it exists on
-the default branch so protection does not create an impossible merge state.
+The target initial required checks are `docs-policy`, `static`, `unit-contract`,
+and `package-smoke`. The current R1 candidate workflow configures exact job IDs
+`pty-linux`, `pty-macos`, and `package-smoke`, with `r1-candidate` as the
+aggregate over those jobs and the inherited `gate-b` prerequisite. The displayed
+check names and pinned runners are recorded in Section 12.2. Their presence on a
+candidate branch is configuration evidence only; it is not a hosted result or a
+default-branch protection claim.
+
+R2 adds `repository-tools`; R3 adds `session-recovery`; R4 adds
+`provider-contract` and `credential-redaction`; R5 adds `permission-sandbox`;
+R7 adds the provider/Node/OS matrix; R10 adds the full release-candidate
+workflow. A required check is enabled only after it exists on the default branch
+so protection does not create an impossible merge state.
 
 ### 3.5 Release tags and protected artifacts
 
@@ -503,8 +520,7 @@ node apps/cli/dist/bin.js run --profile coding-virtual
 Those commands are current substrate checks, not the planned interactive
 product.
 
-The in-progress R1 preview must also receive three credential-free smoke checks
-on every developer bootstrap and package-smoke job:
+The current R1 candidate also exposes these credential-free user smoke paths:
 
 ```bash
 node apps/cli/dist/bin.js
@@ -512,16 +528,39 @@ node apps/cli/dist/bin.js "summarize this synthetic session"
 node apps/cli/dist/bin.js -p "summarize this synthetic session"
 ```
 
-The first command must enter the Robin composer and complete a synthetic turn;
-the second must seed the same multi-turn application with an initial prompt;
-the third must produce one headless preview result with no ANSI on stdout. These
-preview smokes are ephemeral, perform no repository I/O, create no durable
-session, use no API key, and contact no network endpoint. The currently
-implemented preview spells machine presentation as `--output-format` and
-ephemeral operation as `--no-save`. The stable R7 surface intentionally migrates
-those spellings to `--output` and `--no-session`; until R7, documentation and
-tests must state which generation they exercise and must not imply that the
-preview schemas are stable.
+The first command enters the raw composer in a capable TTY or the flat fallback
+otherwise. The second seeds the same multi-turn application with an initial
+prompt. The third produces one headless result with no ANSI on stdout. The first
+synthetic turn must stream text, invoke both
+`robin.synthetic.workspace_summary@1` and
+`robin.synthetic.inspect_file@1`, return their fixture observations through a
+second model request, and permit an observation-dependent follow-up.
+
+Contributor automation exercises more than launch smoke:
+
+```bash
+npm run test:pty
+npm run test:package
+npm run test:gate:r1
+```
+
+`test:pty` builds the CLI and runs the source-built real-PTY corpus for two turns,
+queue promotion, cancellation escalation, resize, inert paste, provider/tool
+failures, flat fallback, and terminal restoration. `test:package` checks the
+reviewed tar inventory, installs the package and its local workspace closure
+offline into an isolated prefix containing spaces and Unicode, runs cold
+help/version, headless, policy, and installed-PTY checks, then uninstalls the
+package. `test:gate:r1` is the local aggregate command over checks, inherited
+Gate B evidence, PTY, and packaging. A local pass does not replace the pending
+hosted workflow jobs or prerequisite review.
+
+These paths are ephemeral, perform no physical repository I/O, create no durable
+session, use no API key, and contact no network endpoint. The candidate spells
+machine presentation as `--output-format` and ephemeral operation as
+`--no-save`. The stable R7 surface intentionally migrates those spellings to
+`--output` and `--no-session`; until R7, documentation and tests must state which
+generation they exercise and must not imply that the candidate schemas are
+stable.
 
 ### 4.3 Daily branch bootstrap
 
@@ -910,8 +949,8 @@ or turn repository content into a credential, trust, update, or bypass source.
 Every effective value records its winning source and safely summarized
 overridden sources for `robin config explain`.
 
-This is the complete R8 configuration contract. R1 uses compiled preview
-defaults and explicit preview flags only; R3 persists the exact active snapshot;
+This is the complete R8 configuration contract. R1 uses compiled candidate-only
+defaults and explicit experimental flags; R3 persists the exact active snapshot;
 R4 adds the minimum user-level provider/model/credential references required for
 the first hosted adapter. Project/local-project scopes, managed floors, general
 configuration writes, trust activation, instruction imports, and
@@ -1309,7 +1348,7 @@ temporary roots, and credential fixtures at process exit.
 - Cross-adapter contract suites export one reusable function and are instantiated
   by every implementation.
 - OS integration tests live under package-specific `test/integration/` folders.
-- Packaged CLI/PTy/e2e tests live under `tests/e2e/`.
+- Packaged CLI/PTY/e2e tests live under `tests/e2e/`.
 - Hostile inputs live under `testdata/adversarial/` with provenance and expected
   classification.
 - Persisted compatibility fixtures live under `testdata/compatibility/<schema>/`.
@@ -1689,7 +1728,7 @@ and registered local endpoints do not become release claims until R7.
 | ID | Mechanics | Pass criteria | Earliest gate |
 | --- | --- | --- | --- |
 | PERM-001 | Evaluate every tool operation with complete normalized attributes: tool/version, workspace, paths, command, network, Git target, extension, mutability, sandbox, and risk. | Decision is based on the exact immutable object later executed; missing required attribute fails closed. | R5 |
-| PERM-002 | Combine built-in `default`, `plan`, `accept-edits`, `locked`, and `bypass` modes with user rules, project restrictions, and managed floors for read/edit/process/Git/network/extension actions. | `deny > ask > allow`; each mode matches the canonical enum; lower-trust source cannot weaken a higher floor; the current preview's `ask` spelling migrates to `default`. | R5 |
+| PERM-002 | Combine built-in `default`, `plan`, `accept-edits`, `locked`, and `bypass` modes with user rules, project restrictions, and managed floors for read/edit/process/Git/network/extension actions. | `deny > ask > allow`; each mode matches the canonical enum; lower-trust source cannot weaken a higher floor; the current R1 candidate's experimental `ask` spelling migrates to `default`. | R5 |
 | PERM-003 | Request bounded repository reads, outside-root reads, edits, ordinary command, shell command, Git stage/commit/push, network, hook, MCP, and destructive Git action under default mode. | Reads follow bounded default; consequential actions ask; high-risk actions deny unless explicitly enabled through eligible trusted source. | R5 |
 | PERM-004 | Run plan mode and attempt create/modify/delete/rename, process, Git write, network, hook, and model-emitted self-approval. | Every mutation/execution is denied before handler; read-only planning remains possible; model text cannot change mode. | R5 |
 | PERM-005 | Run accept-edits mode for exact bounded edits, commands, Git writes, network, and edits outside permitted path scope. | Eligible edits may allow; commands/Git/network retain ask/deny; outside/stale edits do not inherit acceptance. | R5 |
@@ -1885,8 +1924,10 @@ cannot prove its budget or fixture isolation does not run.
 | `static` | Every PR; Ubuntu, Node minimum | `npm ci --ignore-scripts`, typecheck, architecture/import checks, lock/dependency policy, formatting/lint when configured | None | No source/lock rewrite, type/import violation, unregistered schema, or unexpected lifecycle/native artifact. |
 | `unit-contract` | Every PR; Ubuntu, Node minimum/current | Unit, golden, reducer, schema, provider synthetic adapter, storage parser, tool and CLI contract suites | None | Deterministic suite passes once with fixed seeds; leak detector is empty. |
 | `generative-seeds` | Every PR bounded; nightly expanded | Property/fuzz regression seed corpus and bounded generated cases | None | No crash/hang/invariant failure; seed/minimized input emitted on failure. |
-| `package-smoke` | Every PR; Ubuntu | Build, `npm pack --dry-run`, tarball allowlist, install in temporary prefix, version/help/current deterministic run, uninstall | None | Packed inventory/hash valid; executable bit/name works; no hidden file/credential/path; data separation holds. |
-| `pty-linux` | R1+ every PR; Ubuntu | Real PTY interactive synthetic corpus, signal/resize/restoration, headless split | None | PTY semantic matrix passes; no terminal/process/handle leak. |
+| `package-smoke` — “R1 installed-package smoke gate” | Current R1 candidate PR/main-push workflow; Ubuntu 24.04, Node 22 | `npm ci --ignore-scripts`; build; `npm run test:package`; dry-run and real tar inventory; offline isolated-prefix install; cold help/version, headless/policy and installed-PTY fixture; uninstall | None | Reviewed inventory/hash/modes hold; binary and fixture loop run outside the workspace; terminal state restores; uninstall removes the installed package root and bin link. |
+| `pty-linux` — “R1 raw-terminal PTY gate (Linux)” | Current R1 candidate PR/main-push workflow; Ubuntu 24.04, Node 22 | `npm ci --ignore-scripts`; `npm run test:pty`; raw interactive scenarios plus non-TTY flat fallback | None | Two-turn/two-tool, queue/cancel, resize/paste, error and restoration scenarios pass under the hosted Linux PTY. |
+| `pty-macos` — “R1 raw-terminal PTY gate (macOS)” | Current R1 candidate PR/main-push workflow; macOS 14, Node 22 | The same source-built `npm run test:pty` corpus as `pty-linux` | None | The same semantic and termios restoration assertions pass on the hosted macOS runner. |
+| `r1-candidate` — “R1 candidate aggregate gate” | Current R1 candidate PR/main-push workflow; Ubuntu 24.04; always evaluates | No source checkout or test rerun; requires result status from `gate-b`, `pty-linux`, `pty-macos`, and `package-smoke` | None | Passes only when every dependency result is exactly `success`; skipped, cancelled, or failed work cannot appear green. |
 | `repository-tools` | R2+ relevant PR and main; Ubuntu | Real temporary filesystem/Git, read/edit/process/Git parser and preservation suites | None | Expected exact delta only; original/outside fixtures unchanged; process groups reaped. |
 | `session-recovery` | R3+ every relevant PR; Ubuntu | File journal, locks, CAS, snapshots, crash harness, resume/continue, migration origin fixtures | None | Every fault reaches expected classification/tip/hash; no database/daemon/network call. |
 | `provider-contract` | R4+ every provider PR; Ubuntu | Loopback synthetic server, recorded dialect fixtures, capability, retry/cancel/usage/redaction | Synthetic auth only | Shared and adapter-specific suites pass; unexpected network denied. |
@@ -1904,6 +1945,14 @@ cannot prove its budget or fixture isolation does not run.
 | `release-candidate` | Protected RC tag/environment | Clean source build, complete matrix evidence query, package/archive/standalone, SBOM, checksums, provenance, install/update/rollback/uninstall/purge | Signing/notarization only in isolated signing steps | All gate evidence from same commit; artifacts verify in clean jobs; compatibility/release notes complete. |
 | `publish-npm` | Approved final tag after RC verification | Download exact verified tarball, compare hash, publish with provenance, reinstall from registry | Short-lived trusted publishing identity | Registry tarball hash/inventory/version match approved artifact; smoke/unpublish-deprecation plan recorded. |
 | `publish-release` | Approved final tag | Upload signed archives/standalone, checksums, SBOM, provenance, compatibility manifest, notes | Release write plus isolated signing/notarization | Uploaded bytes match verified hashes; release/tag immutable; download/install verification passes. |
+
+The four R1 rows above are present in the candidate workflow with third-party
+actions pinned to immutable commit hashes. Their current documentation status is
+**configured; exact stacked candidate result green**: Linux PTY, macOS PTY,
+package smoke, and `r1-candidate` passed on `dc39937`. These results establish
+candidate evidence only. The repository plan does not provide branch-protection
+enforcement, and a base-changing update requires fresh exact-head results before
+mainline acceptance.
 
 ### 12.3 Deterministic workflow network policy
 
@@ -2092,7 +2141,9 @@ Packaging progresses through these stages:
 
 1. **R0 source build and local tarball:** build workspaces, verify executable,
    run `npm pack --dry-run`, install tarball in temporary prefix, do not publish.
-2. **R1–R4 preview npm tarball:** CI produces an immutable artifact for testers;
+2. **R1–R4 candidate npm tarball:** the current package test constructs,
+   verifies, installs, exercises, uninstalls, and removes an ephemeral tarball.
+   Retaining an immutable hosted artifact for testers remains pending; the
    package remains unpublished or preview-channel only.
 3. **R7 npm preview publication:** publish protected prerelease versions after
    multi-provider/headless package evidence passes.
@@ -2121,9 +2172,12 @@ npm pack --workspace @zachshotamartin/robin --dry-run
 npm pack --workspace @zachshotamartin/robin
 ```
 
-The produced tarball name comes from npm and the exact release version. CI
-records its SHA-256. It then installs the tarball into an empty temporary npm
-prefix, executes version/help/synthetic/package tests, and uninstalls it.
+The produced tarball name comes from npm and the exact release version. The
+current R1 package test computes and validates its archive/inventory hashes,
+installs it into an empty temporary npm prefix, executes
+version/help/synthetic/package and installed-PTY tests, and uninstalls it. A
+hosted retained-artifact SHA and release provenance record remain later release
+evidence.
 
 ### 14.3 Npm package allowlist
 
@@ -2804,7 +2858,7 @@ R1 passes when:
   deterministic synthetic provider and normalized coding-agent loop;
 - terminal reducer, renderer, input editor, streaming, queued steering,
   cancellation, raw-mode restoration, flat mode, and headless separation pass
-  TERM/PTy matrices on Tier 1 platforms assigned to the gate;
+  TERM/PTY matrices on Tier 1 platforms assigned to the gate;
 - text/tool/malformed/retry/cancel/budget/context paths use synthetic provider
   scripts and complete tool calls remain inert until normalized;
 - one application service owns interactive and headless loop semantics;
@@ -2813,11 +2867,18 @@ R1 passes when:
 - help/version remain cold and current README says sessions/providers/real tools
   are not yet complete;
 - performance budgets for help, prompt, input, render, and interrupt pass;
-- required evidence includes `unit-contract`, `pty-linux`, macOS PTY release run,
-  `package-smoke`, UNIT/TERM/PTY/PROV-R1 rows, and synthetic e2e E2E-001.
+- required evidence includes `unit-contract`, `gate-b`, `pty-linux`,
+  `pty-macos`, `package-smoke`, the `r1-candidate` aggregate,
+  UNIT/TERM/PTY/PROV-R1 rows, and synthetic e2e E2E-001.
 
 R1 requires no API key, network provider, real workspace mutation, sandbox,
 database, or daemon.
+
+The implementation and local plus hosted PTY/package/aggregate evidence satisfy
+the candidate portions of these criteria on `dc39937`. R0 is accepted on
+`main` at `2c042ca`. R1 remains open until the candidate is refreshed against
+that base, the exact hosted jobs pass again for the reviewed head, and R1 is
+merged with its required evidence attached.
 
 ### 19.3 R2 — Real repository coding tools
 
@@ -2911,8 +2972,8 @@ R5 passes when:
 - the exact `default|plan|accept-edits|locked|bypass` permission enum and
   `deny > ask > allow` precedence pass all permission rows;
 - `headless` is tested as an invocation surface using those modes, not as a
-  permission mode; the current preview spelling `ask` has a documented migration
-  to target `default` and is absent from the stable enum;
+  permission mode; the current R1 candidate spelling `ask` has a documented
+  migration to target `default` and is absent from the stable enum;
 - approval UI exposes exact action/preconditions/risk/sandbox and prevents stale,
   cross-scope, duplicate, forged, or model-generated decisions;
 - handler receives only the immutable normalized object evaluated/approved;
@@ -2963,7 +3024,7 @@ R7 passes when:
   compatibility are versioned;
 - `--print`, target `--output`, target `--no-session`, final JSON, JSONL stream,
   bounded stdin, fixed automation namespace, permission callback, exit codes,
-  and schemas are stable; preview `--output-format`/`--no-save` migration and
+  and schemas are stable; candidate `--output-format`/`--no-save` migration and
   rejection/compatibility behavior are tested explicitly;
 - compaction/context inspection and long-session provider continuation pass;
 - provider/profile/credential rotation/removal/migration workflows pass on clean
@@ -3101,16 +3162,16 @@ the same commit's gate evidence manifest.
 
 | Requirement | Terminal gate | Required tests | Required gate/release evidence |
 | --- | --- | --- | --- |
-| `FR-CLI-001` | R1 | PTY-001, E2E-001 | `pty-linux` and `package-smoke`: packed no-argument launch enters one interactive synthetic session. |
-| `FR-CLI-002` | R1 | PTY-002, E2E-001 | `pty-linux`: positional prompt and follow-up share one ordered session. |
+| `FR-CLI-001` | R1 | PTY-001, E2E-001 | `pty-linux`, `pty-macos`, and `package-smoke`: packed no-argument launch enters one interactive synthetic session; `r1-candidate` requires all results. |
+| `FR-CLI-002` | R1 | PTY-002, E2E-001 | `pty-linux` and `pty-macos`: positional prompt and follow-up share one ordered session. |
 | `FR-CLI-003` | R7 | UNIT-001, PTY-011, E2E-007 | `unit-contract` and `node-os-matrix`: bounded stdin is a distinct attachment and conflicts fail before initialization. |
 | `FR-CLI-004` | R10 | UNIT-001, SEC-001 | `unit-contract` establishes the R0 side-effect-free parser corpus; `release-candidate` closes it over every R10 administrative option with duplicate/conflict/oversize coverage. |
 | `FR-CLI-005` | R1 | UNIT-001 | `unit-contract`: R0 reserves command parsing and R1 closes prompt-versus-command behavior; close misses fail before workspace/provider construction. |
 | `FR-CLI-006` | R10 | UNIT-001, PTY-014 | R0 establishes cold help/version; `package-smoke` and `release-candidate` close installed help/version/completion/schema snapshots for the full command tree. |
-| `FR-CLI-007` | R1 | TERM-011, PTY-003, PTY-005, PTY-015 | `pty-linux` plus macOS PTY evidence: capability, width, Unicode, and reduced-motion cells pass. |
+| `FR-CLI-007` | R1 | TERM-011, PTY-003, PTY-005, PTY-015 | `pty-linux` and `pty-macos`: capability, width, Unicode, and reduced-motion cells pass. |
 | `FR-CLI-008` | R2 | TERM-009, PTY-006, PTY-007 | `pty-linux` and `repository-tools`: first/second interrupt propagation and descendant cleanup are proven. |
 | `FR-CLI-009` | R3 | PTY-009, SES-009 | `session-recovery`: SIGTERM restores terminal/process state and resumes without fabricated success. |
-| `FR-CLI-010` | R1 | TERM-013, PTY-010, PTY-012 | `pty-linux`: raw mode, cursor, styles, and paste state match pre-launch state on every exit path. |
+| `FR-CLI-010` | R1 | TERM-013, PTY-010, PTY-012 | `pty-linux` and `pty-macos`: raw mode, cursor, styles, and paste state match pre-launch state on every exit path. |
 | `FR-CLI-011` | R7 | TERM-012, PTY-011, E2E-007 | `node-os-matrix`: machine stdout parses with no ANSI or human diagnostics. |
 | `FR-CLI-012` | R10 | UNIT-016, E2E-007 | R7 freezes machine exit semantics; `release-candidate` closes stable mappings over every R10 lifecycle/admin result. |
 
@@ -3118,15 +3179,15 @@ the same commit's gate evidence manifest.
 
 | Requirement | Terminal gate | Required tests | Required gate/release evidence |
 | --- | --- | --- | --- |
-| `FR-UI-001` | R1 | TERM-001, TERM-002, TERM-003, PTY-003, PTY-004 | `pty-linux`: grapheme editing, history, paste, and submit semantics pass under a real PTY. |
-| `FR-UI-002` | R1 | TERM-004, PTY-003, PTY-005 | `pty-linux` plus macOS PTY evidence: resize and wide/combining cursor positions match the virtual-screen oracle. |
+| `FR-UI-001` | R1 | TERM-001, TERM-002, TERM-003, PTY-003, PTY-004 | `pty-linux` and `pty-macos`: grapheme editing, history, paste, and submit semantics pass under a real PTY. |
+| `FR-UI-002` | R1 | TERM-004, PTY-003, PTY-005 | `pty-linux` and `pty-macos`: resize and wide/combining cursor positions match the virtual-screen oracle. |
 | `FR-UI-003` | R2 | TERM-005, TERM-006, PROV-001, E2E-002 | `repository-tools`: normalized assistant deltas and real tool/process activity are visible and ordered. |
 | `FR-UI-004` | R2 | TERM-006, PROC-005, PROC-006 | `repository-tools`: flood output remains bounded, expandable by reference, and responsive. |
 | `FR-UI-005` | R5 | TERM-006, SES-018, PROV-022, PERM-002 | `permission-direct`: status derives repository/session/provider/model/mode/budget/change facts from state. |
 | `FR-UI-006` | R8 | TERM-014, EXT-001, EXT-002 | `extension-contract`: slash dispatch and at-resource/skill resolution retain exact provenance. |
-| `FR-UI-007` | R1 | UNIT-004, TERM-006, TERM-009 | `pty-linux`: queued prompts are visible, bounded, and submitted in deterministic order. |
+| `FR-UI-007` | R1 | UNIT-004, TERM-006, TERM-009 | `pty-linux` and `pty-macos`: queued prompts are visible, bounded, and submitted in deterministic order. |
 | `FR-UI-008` | R2 | TERM-009, PTY-006, PTY-007, PROC-008 | `repository-tools`: model/tool/process cancellation settles before later mutation. |
-| `FR-UI-009` | R1 | TERM-011, PTY-011, PTY-015 | `pty-linux`: flat screen-reader flow is complete without cursor addressing. |
+| `FR-UI-009` | R1 | TERM-011, PTY-011, PTY-015 | `pty-linux` and `pty-macos`: flat screen-reader flow is complete without cursor addressing. |
 | `FR-UI-010` | R5 | TERM-007, TERM-011, PTY-015 | `permission-direct`: permission/error/diff state remains explicit with no color or symbol dependence. |
 | `FR-UI-011` | R11 | UNIT-018, TERM-016, E2E-012 | R11 protocol evidence: terminal/headless/editor renderers consume events and have no enforcement imports. |
 | `FR-UI-012` | R10 | UNIT-015, TERM-012, CRED-012 | R4 establishes provider-view redaction; `credential-redaction` plus R10 log/doctor/support evidence closes every rendered surface with zero forbidden occurrences. |
@@ -3326,7 +3387,7 @@ the same commit's gate evidence manifest.
 | `FR-AUTO-001` | R7 | UNIT-018, PTY-011, E2E-007 | external consumer evidence: text stdout contains only final assistant result; progress/diagnostics use stderr. |
 | `FR-AUTO-002` | R7 | TERM-012, E2E-007 | external consumer evidence parses one final envelope or typed monotonic JSON Lines. |
 | `FR-AUTO-003` | R10 | UNIT-001, UNIT-016, TERM-012, E2E-011 | R7 freezes input/output/error schemas; `release-candidate` closes their published lifecycle compatibility and fixtures. |
-| `FR-AUTO-004` | R7 | TERM-012, PTY-011 | `package-smoke` preserves flat implemented R0 paths; `node-os-matrix` closes machine modes with no ANSI, spinner, carriage-return rewrite, or prefix bytes. |
+| `FR-AUTO-004` | R7 | TERM-012, PTY-011 | `package-smoke` exercises the ANSI-free R1 candidate flat/headless paths; `node-os-matrix` closes stable machine modes with no ANSI, spinner, carriage-return rewrite, or prefix bytes. |
 | `FR-AUTO-005` | R7 | SES-001, E2E-007 | headless persistence evidence: `--no-session` creates no transcript/CAS and explicitly disables resume. |
 | `FR-AUTO-006` | R7 | UNIT-002, SES-015 | headless contract evidence: caller IDs are accepted only in the validated namespace without collision. |
 | `FR-AUTO-007` | R8 | PERM-006, EXT-003, EXT-007 | permission/extension evidence: framed callbacks enforce length/nonce/hash/schema/time/resource bounds and no stdout spoof. |

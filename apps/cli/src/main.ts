@@ -19,6 +19,11 @@ export interface CliWriter {
   write(chunk: string): unknown;
 }
 
+export interface CliRuntimeContext {
+  /** Aborted by the executable wrapper when stdout or stderr becomes unusable. */
+  readonly outputFailureSignal?: AbortSignal;
+}
+
 interface ScenarioExecutionView {
   readonly execution: {
     readonly history: readonly RenderableEvent[];
@@ -37,6 +42,7 @@ export interface CliDependencies {
     request: SessionCliRequest,
     stdout: CliWriter,
     stderr: CliWriter,
+    runtime?: CliRuntimeContext,
   ) => Promise<number>;
 }
 
@@ -45,6 +51,7 @@ export async function runCli(
   stdout: CliWriter,
   stderr: CliWriter,
   dependencies?: CliDependencies,
+  runtime: CliRuntimeContext = {},
 ): Promise<number> {
   try {
     const request = parseArgv(argv);
@@ -68,6 +75,7 @@ export async function runCli(
       stdout,
       stderr,
       dependencies,
+      runtime,
     );
   } catch (error) {
     if (isCliUsageError(error)) {
@@ -162,9 +170,9 @@ Global options:
   --help    Show this help
   --version Show the CLI version
 
-The current coding-session preview is credential-free, synthetic, ephemeral, and
-does not read files, run commands, use the network, or persist a session. Those
-capabilities are implemented in later Robin release gates.
+The current coding-session loop is credential-free, synthetic, and ephemeral.
+It demonstrates two policy-gated in-memory fixture tools; it does not access a
+physical repository, run commands, use the network, or persist a session.
 
 Run 'robin run --help' or 'robin policy --help' for compatibility command options.
 `;

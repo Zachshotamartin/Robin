@@ -34,6 +34,13 @@ const COLD_SIDE_EFFECT_SENTINEL = join(
   "scripts",
   "reject-cold-side-effects.mjs",
 );
+const PTY_DRIVER = join(
+  REPOSITORY_ROOT,
+  "tests",
+  "pty",
+  "robin_pty_driver.py",
+);
+const PYTHON = process.env.ROBIN_TEST_PYTHON ?? "/usr/bin/python3";
 
 interface PackResult {
   readonly filename: string;
@@ -87,7 +94,7 @@ const REVIEWED_PACK_INVENTORY_PATH = join(
   REPOSITORY_ROOT,
   "evidence",
   "inventory",
-  "r0-cli-tarball-v1.json",
+  "r1-cli-tarball-v1.json",
 );
 const REVIEWED_PACK_INVENTORY = await loadReviewedPackInventory();
 
@@ -102,7 +109,7 @@ test("the compiled Robin entry point is directly executable", async () => {
 });
 
 test("the actual tarball installs with its local workspace closure and runs offline", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "robin-cli-pack-"));
+  const directory = await mkdtemp(join(tmpdir(), "Robin package Ω space-"));
   t.after(async () => {
     await rm(directory, { recursive: true, force: true });
   });
@@ -322,8 +329,9 @@ test("the actual tarball installs with its local workspace closure and runs offl
   assert.equal(previewResult.stderr, "");
   assert.match(
     previewResult.stdout,
-    /^Robin received: Verify the installed Robin preview\./u,
+    /^I’ll inspect the deterministic workspace summary/u,
   );
+  assert.match(previewResult.stdout, /No physical repository was read or changed/u);
 
   const installedBin = join(
     installRoot,
@@ -407,7 +415,116 @@ test("the actual tarball installs with its local workspace closure and runs offl
   };
   assert.ok(simulationPayload.totalActions >= 1);
   assert.ok((simulationPayload.counts["newly_denied"] ?? 0) >= 1);
+
+  const installedPtyWorkingDirectory = join(
+    directory,
+    "installed PTY working directory Ω",
+  );
+  await mkdir(installedPtyWorkingDirectory);
+  const installedPtyEnvironment: NodeJS.ProcessEnv = {
+    ...coldEnvironment,
+    // The macOS system Python otherwise writes imported-module bytecode under
+    // HOME/Library/Caches/com.apple.python. That is harness state, not Robin
+    // state, and would invalidate the empty-home canary before it can measure
+    // the installed CLI accurately.
+    PYTHONDONTWRITEBYTECODE: "1",
+  };
+  delete installedPtyEnvironment.NODE_OPTIONS;
+  Object.freeze(installedPtyEnvironment);
+  const installedPtyResult = await execFile(
+    PYTHON,
+    [
+      PTY_DRIVER,
+      "--scenario",
+      "happy",
+      "--cwd",
+      installedPtyWorkingDirectory,
+      "--node",
+      process.execPath,
+      "--binary",
+      installedCommand,
+    ],
+    {
+      cwd: installedPtyWorkingDirectory,
+      env: installedPtyEnvironment,
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  assert.equal(installedPtyResult.stderr, "");
+  const installedPtyPayload = JSON.parse(installedPtyResult.stdout) as {
+    readonly schemaVersion: number;
+    readonly scenario: string;
+    readonly exitCode: number;
+    readonly termiosRestored: boolean;
+    readonly transcriptBase64: string;
+    readonly normalizedTranscript: string;
+  };
+  assert.equal(installedPtyPayload.schemaVersion, 1);
+  assert.equal(installedPtyPayload.scenario, "happy");
+  assert.equal(installedPtyPayload.exitCode, 0);
+  assert.equal(
+    installedPtyPayload.termiosRestored,
+    true,
+    installedPtyPayload.normalizedTranscript,
+  );
+  assert.match(
+    installedPtyPayload.normalizedTranscript,
+    /robin\.synthetic\.workspace_summary@1/u,
+  );
+  assert.match(
+    installedPtyPayload.normalizedTranscript,
+    /robin\.synthetic\.inspect_file@1/u,
+  );
+  const installedPtyTranscript = Buffer.from(
+    installedPtyPayload.transcriptBase64,
+    "base64",
+  ).toString("utf8");
+  assert.match(installedPtyTranscript, /\u001b\[\?2004h/u);
+  assert.match(installedPtyTranscript, /\u001b\[\?2004l/u);
+  assert.match(installedPtyTranscript, /\u001b\[\?25h/u);
+  assert.match(installedPtyTranscript, /\u001b\[0m\r+\n/u);
+  assert.deepEqual(await readdir(stateCanaryRoot, { recursive: true }), []);
+  assert.deepEqual(
+    await readdir(installedPtyWorkingDirectory, { recursive: true }),
+    [],
+  );
+
+  await execFile(
+    "npm",
+    [
+      "uninstall",
+      "--ignore-scripts",
+      "--offline",
+      "--no-audit",
+      "--no-fund",
+      "--package-lock=false",
+      "--no-save",
+      REVIEWED_PACK_INVENTORY.packageName,
+    ],
+    {
+      cwd: installRoot,
+      env: await isolatedNpmEnvironment(
+        join(directory, "uninstall-npm-environment"),
+      ),
+      encoding: "utf8",
+      timeout: 60_000,
+      maxBuffer: 4 * 1024 * 1024,
+    },
+  );
+  await assertPathMissing(installedPackageRoot);
+  await assertPathMissing(installedCommand);
 });
+
+async function assertPathMissing(filePath: string): Promise<void> {
+  await assert.rejects(
+    lstat(filePath),
+    (error: unknown) =>
+      (error as NodeJS.ErrnoException).code === "ENOENT",
+    `expected npm uninstall to remove ${filePath}`,
+  );
+}
 
 function assertReviewedPackInventory(result: PackResult): void {
   assert.equal(result.name, REVIEWED_PACK_INVENTORY.packageName);
@@ -632,7 +749,7 @@ async function loadReviewedPackInventory(): Promise<ReviewedPackInventory> {
     assert.match(profile.sha256, SHA256_PATTERN);
   }
   assert.equal(Array.isArray(inventory.files), true);
-  assert.equal(inventory.files!.length, 47);
+  assert.equal(inventory.files!.length, 59);
   const paths = new Set<string>();
   let aggregateBytes = 0;
   for (const [index, file] of inventory.files!.entries()) {

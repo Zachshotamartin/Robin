@@ -10,6 +10,7 @@
     { "path": "../../packages/milestone-a-scenarios" },
     { "path": "../../packages/policy-engine" },
     { "path": "../../packages/policy-language" },
-    { "path": "../../packages/robin-application" }
+    { "path": "../../packages/robin-application" },
+    { "path": "../../packages/robin-terminal" }
   ]
 }

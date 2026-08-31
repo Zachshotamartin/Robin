@@ -6,8 +6,8 @@ substrate for that product, not the product definition.
 
 The root [README](../README.md) is the quick start and current implementation
 snapshot. It distinguishes the intended interactive and resumable Robin
-experience from the accepted Milestones A/B substrate and the in-progress,
-ephemeral R1 synthetic conversation preview.
+experience from the accepted Milestones A/B substrate and the current,
+ephemeral R1 coding-agent candidate. R1 has not passed its full acceptance gate.
 
 ## Product-First Source of Truth
 
@@ -32,10 +32,10 @@ Together these four documents define what Robin is and what gets built next.
 The internal control layer must support their user journeys; it does not
 override their product hierarchy.
 
-## Implemented Milestones A and B
+## Current Implementation Status
 
-These references describe behavior that exists and is covered by deterministic
-tests on the current branch:
+Milestones A and B are accepted substrate. These references describe their
+implemented behavior and deterministic coverage on the current branch:
 
 - [Event Model v1](event-model.md): event envelopes, identifiers, ordering,
   causation, reducer lifecycle, legal intents, command planning, replay, schema
@@ -44,16 +44,32 @@ tests on the current branch:
   formatting, attribute catalogs, three-valued evaluation, decision precedence,
   safe traces, case corpora, simulation, CLI commands, and current limitations.
 
-The implemented CLI exposes an early line-oriented `robin` conversation using a
-credential-free synthetic provider, `robin -p` text/JSON/stream-JSON output,
-`robin run` for the fixed `synthetic-demo` and `coding-virtual` profiles, and
-`robin policy`. The preview is ephemeral and has no repository, process, Git,
-credential, or network tools. It does not expose provider API access, API-key
-onboarding, durable sessions, command execution, or resume. Planned documents
-may specify those features only as planned until their evidence gates pass.
+The current R1 candidate exposes a Claude Code-style `robin` coding-agent
+session. Capable interactive terminals use a raw grapheme-aware editor and
+diff-based renderer; non-TTY, `TERM=dumb`, and screen-reader sessions use an
+append-only flat fallback. The deterministic synthetic provider streams a
+two-tool fixture loop, retains conversation observations for a follow-up, and
+supports bounded queued input, cancellation, resize, and inert bracketed paste.
+`robin -p` provides experimental text, JSON, and streaming-JSON headless
+formats. `robin run` retains the fixed `synthetic-demo` and `coding-virtual`
+profiles, and `robin policy` retains the policy debugger.
+
+R1 coding sessions remain ephemeral. The synthetic tools operate only on an
+in-memory fixture: there is no physical repository access, file editing,
+process execution, Git integration, provider/network request, API key,
+credential storage, durable session, continuation, or resume. Local and hosted
+Linux/macOS PTY plus package/aggregate candidate evidence passed on
+`dc39937`. R0 is accepted on `main` at `2c042ca`; R1 is still a candidate
+until fresh exact-head evidence passes after the base update and the candidate
+merges. Planned documents may specify later features only as planned until their
+evidence gates pass.
 
 ## Product Supporting Specifications
 
+- [Terminal compatibility and R1 verification status](TERMINAL_COMPATIBILITY.md):
+  raw TTY selection, flat and headless fallbacks, keys, paste/resize/queue/
+  cancellation behavior, local and hosted candidate evidence, and the
+  exact-head/mainline conditions that still block R1 acceptance.
 - [Provider, credential, and external-agent compatibility](PROVIDER_AGENT_COMPATIBILITY.md):
   direct provider adapters, declared model capabilities, bring-your-own
   credentials, local and compatible endpoints, MCP, ACP, external agents, and

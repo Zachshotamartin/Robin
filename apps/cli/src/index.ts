@@ -38,7 +38,12 @@ export {
   exitCodeForResult,
   runCli,
 } from "./main.js";
-export type { CliBuildMetadata, CliDependencies, CliWriter } from "./main.js";
+export type {
+  CliBuildMetadata,
+  CliDependencies,
+  CliRuntimeContext,
+  CliWriter,
+} from "./main.js";
 export {
   DEFAULT_SESSION_COMMAND_DEPENDENCIES,
   executeSessionCommand,
@@ -47,6 +52,7 @@ export {
 } from "./session-command.js";
 export type {
   SessionCommandDependencies,
+  SessionCommandRuntime,
   SessionWriter,
 } from "./session-command.js";
 export {

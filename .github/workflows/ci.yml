@@ -79,3 +79,69 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run test:mutation:gate:b
+
+  pty-linux:
+    name: R1 raw-terminal PTY gate (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ROBIN_TEST_PYTHON: /usr/bin/python3
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:pty
+
+  pty-macos:
+    name: R1 raw-terminal PTY gate (macOS)
+    runs-on: macos-14
+    timeout-minutes: 15
+    env:
+      ROBIN_TEST_PYTHON: /usr/bin/python3
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:pty
+
+  package-smoke:
+    name: R1 installed-package smoke gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ROBIN_TEST_PYTHON: /usr/bin/python3
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:package
+
+  r1-candidate:
+    name: R1 candidate aggregate gate
+    if: ${{ always() }}
+    needs: [gate-b, pty-linux, pty-macos, package-smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GATE_B_RESULT: ${{ needs['gate-b'].result }}
+      PTY_LINUX_RESULT: ${{ needs['pty-linux'].result }}
+      PTY_MACOS_RESULT: ${{ needs['pty-macos'].result }}
+      PACKAGE_SMOKE_RESULT: ${{ needs['package-smoke'].result }}
+    steps:
+      - name: Require every inherited and R1-specific gate
+        run: |
+          for result in "$GATE_B_RESULT" "$PTY_LINUX_RESULT" "$PTY_MACOS_RESULT" "$PACKAGE_SMOKE_RESULT"; do
+            if [ "$result" != "success" ]; then
+              echo "R1 prerequisite result was $result" >&2
+              exit 1
+            fi
+          done

@@ -3,15 +3,24 @@
 Document status: normative target architecture for the Robin product pivot.
 
 Implementation status: target design, not an implementation-complete claim. The
-repository currently contains a deterministic event kernel, policy engine,
-context broker, capability gateway, scripted agent driver, synthetic model
-provider, virtual repository capability, and fixture-oriented CLI. The pivot
-branch also contains an in-progress, line-oriented R1 preview with a
-provider-neutral text loop, shared ephemeral application service, basic
-interactive session, and headless formats. Each section below states how that
-substrate is retained or replaced. Robin's complete raw terminal, real provider
-adapters, real workspace tools, resumable local session store, and extension
-system are planned until their named acceptance tests pass.
+repository contains the accepted deterministic event/policy/context substrate
+from Milestones A and B and an unaccepted R1 candidate. The R1 composition uses
+a versioned in-memory application journal, pure reducer/replay projection, and
+replay-then-live subscriber stream over a provider-neutral, multi-request
+structured loop. Its credential-free synthetic provider invokes two pinned
+fixture tools. The CLI has raw TTY and append-only flat modes, queued input,
+cancellation, resize, inert bracketed paste, terminal restoration, and
+experimental headless formats.
+
+Local macOS PTY and isolated package install/execute/uninstall runs are candidate
+evidence only. The configured hosted Linux/macOS PTY, package-smoke, and
+aggregate jobs passed on candidate commit `dc39937`. R0 is accepted on
+`main` at `2c042ca`; R1 has not merged, so it remains unaccepted and its
+base-changing update requires fresh exact-head evidence. Real provider adapters,
+physical workspace tools, API-key/credential handling, a resumable local session
+store, and the extension system remain planned until their named acceptance
+tests pass.
+Each section below states how the implemented substrate is retained or replaced.
 
 This document defines how Robin becomes a coding agent in the terminal. The
 policy-aware runtime remains an internal enforcement subsystem. It is not the
@@ -247,7 +256,7 @@ type RobinCliRequest =
   | { kind: "version"; format: "human" | "json" };
 ```
 
-The target public vocabulary is fixed independently of temporary preview
+The target public vocabulary is fixed independently of temporary candidate
 spelling:
 
 ```ts
@@ -257,8 +266,8 @@ type HeadlessOutput = "text" | "json" | "stream-json";
 
 `headless` is a surface selected by `--print`; it is not a permission mode.
 The target flags are `--output <text|json|stream-json>` and `--no-session`.
-The initial R1 preview currently accepts `ask`, `--output-format`, and
-`--no-save`; these are implementation-preview shims, not stable aliases.
+The R1 candidate currently accepts `ask`, `--output-format`, and `--no-save`;
+these are implementation-candidate shims, not stable aliases.
 Before the public command snapshot, `ask` maps to `default`,
 `--output-format` becomes `--output`, and `--no-save` becomes `--no-session`.
 Help, parser snapshots, completion data, and examples must expose only the
@@ -523,12 +532,14 @@ UI input events such as keystrokes, resize, focus, animation ticks, and local
 picker movement form a separate reducer input vocabulary. They are neither
 application facts nor session authority.
 
-Only canonical durable events receive monotonic per-session sequence numbers
-from the store. Application events that report a committed fact carry that
-durable sequence; live-only application events carry an explicit live ordering
-key and no durable sequence. Wall-clock timestamps are informative. Durable
-order comes from sequence and causation, and live order comes from the bounded
-producer stream.
+The R1 application journal assigns a positive monotonic in-memory `sequence` to
+validate append and replay order. It is erased at process exit and is not a
+durable `SessionSequence`. In the target durable model, only canonical durable
+events receive monotonic per-session sequence numbers from the store.
+Application events that report a committed fact carry that durable sequence;
+live-only application events carry an explicit live ordering key and no durable
+sequence. Wall-clock timestamps are informative. Durable order comes from
+sequence and causation, and live order comes from the bounded producer stream.
 
 ### 6.2 Durable envelope
 
@@ -629,7 +640,7 @@ The minimum mapping is:
 
 | Live agent or subsystem observation | Application event(s) | Canonical durable event(s) | Mapping rule |
 | --- | --- | --- | --- |
-| `turn_started` in the initial R1 preview | `TurnQueued`, then progress events for context compilation | `UserSubmissionAccepted`, `TurnStarted` | The application emits start only after user acceptance is committed; the preview's direct pass-through is temporary. |
+| accepted user/turn-start observation | `TurnQueued`, then progress events for context compilation | `UserSubmissionAccepted`, `TurnStarted` | The application emits start only after user acceptance is committed. |
 | `assistant_text_delta` / provider `content_delta` | `ProviderTextDelta` | none per delta; later `ProviderContentSealed` and `AssistantMessageSealed` | Deltas are bounded live data. Completion or classified interruption seals exact available bytes and hashes before terminal turn state. |
 | provider tool-name/argument fragments | optional bounded tool-progress event | none per fragment | Fragments remain inert and cannot enter permission or execution. |
 | completed normalized provider tool call | `ProviderToolCallCompleted`, then `ToolRequestNormalized` | `ProviderToolCallSealed`, `ToolCallReceived`, then `ToolCallNormalized` | IDs and complete bytes are sealed before normalization; schema or semantic failure maps to `ToolCallRejected`. |
@@ -637,18 +648,36 @@ The minimum mapping is:
 | `tool_status` / execution lifecycle | `ToolExecutionStarted`, `ToolOutputDelta`, `ToolExecutionCompleted` or `ToolExecutionFailed` | `ToolExecutionPrepared`, `ToolExecutionStarted`, `ToolOutputSealed`, then one settled event | Output deltas are live; hashes, retention facts, exit/effect facts, and the released observation are durable. |
 | `process_stdout` / `process_stderr` | `ToolOutputDelta` | none per chunk; later `ToolOutputSealed` | Machine and terminal renderers receive escaped bounded chunks; replay reads the sealed artifact rather than reconstructing chunk timing. |
 | `usage_reported` / provider `usage` | `ProviderUsageReported` | `ProviderUsageRecorded` | Cumulative values must be monotonic; deltas are normalized before the durable total or explicitly partial snapshot is appended. |
-| `turn_completed` in the initial R1 preview | `AssistantMessageCompleted`, `TurnCompleted` | `AssistantMessageSealed`, `TurnCompleted` | The final application event cannot precede assistant sealing and the terminal durable append. |
+| turn-completed observation | `AssistantMessageCompleted`, `TurnCompleted` | `AssistantMessageSealed`, `TurnCompleted` | The final application event cannot precede assistant sealing and the terminal durable append. |
 | `turn_failed` | `TurnFailed` | `TurnFailed` plus the relevant provider/tool failure event | Safe category and diagnostic are mapped; raw thrown objects never cross the application boundary. |
 | `turn_cancelled` | `TurnCancelled` | `TurnCancellationRequested`, then `TurnCancelled` | Cancellation becomes terminal only after owned operations settle or reach a classified bounded outcome. |
 | `backpressure` or transient provider/tool phase | progress/diagnostic application event | none unless it changes semantic outcome | A surface may coalesce these; a terminal consequence such as truncation or budget failure is persisted separately. |
 
-The current `EphemeralRobinApplication` yields the initial R1
-`RobinAgentEvent` union directly. That is an explicitly temporary preview seam,
-not the production application-event contract. R1 completion introduces the
-versioned application mapping above; R3 adds the durable side without changing
-renderer semantics. Tests must independently assert agent event ordering,
-application mapping, durable append ordering, and replayed application views so
-an accidental direct pass-through cannot become permanent.
+The current CLI uses `R1RobinApplication`, not the retained
+`EphemeralRobinApplication` / `RobinAgentEvent` direct-live seam. Its
+schema-version-1 journal records `SessionStarted`, accepted/queued messages,
+turn and assistant deltas, tool start/completion/failure, usage/budget,
+cancellation, terminal turn, and session-close events. Each append is parsed and
+reduced before publication; a subscriber first receives any requested journal
+suffix and then follows live appends. Prefix-replay tests keep the projection and
+live view equivalent. Historical replay is an indexed cursor rather than a
+copied backlog. The implemented defaults bound one journal to 131,072 records
+and 134,217,728 serialized UTF-8 bytes, plus 32 subscribers with 8,192 unread
+live events and 16,777,216 unread live bytes each. Iterator return releases both
+replay and live references. Terminal headroom is reserved before admitting
+nonterminal events so accepted active and queued turns can still receive a
+terminal event. Foreground admission stages `UserMessageAccepted` and
+`TurnStarted` as one batch before mutating in-memory active state; failed new
+admission leaves no active/queued work. Once work is admitted, an authoritative
+append failure faults the application and all streams rather than publishing an
+unrecorded state change. The legacy direct-live class remains only for
+compatibility coverage.
+
+The table above remains the target mapping for the fuller durable vocabulary.
+R3 adds that durable side without changing renderer semantics. Tests must
+independently assert coordinator ordering, application mapping, durable append
+ordering, and replayed application views so an accidental direct pass-through
+cannot return.
 
 ### 6.6 Stream sealing and replay
 
@@ -1262,11 +1291,11 @@ interface ModelProviderAdapter {
 
 This `probe` / `countInput` / `invoke` / `classifyUnknownError` /
 `redactDiagnostic` interface is the canonical production provider port frozen
-for R4. The initial R1 preview currently depends on
+for R4. The R1 candidate currently depends on
 `ModelProvider.respond(SemanticModelRequest, AbortSignal)` from the existing
-`@guard/model-provider` package. `respond` is a temporary preview shim used to
-prove provider-neutral conversation streaming; it is not a second production
-extension point. During the R4 migration, an internal wrapper adapts that shim
+`@guard/model-provider` package. `respond` is a temporary candidate shim used to
+prove provider-neutral multi-request structured streaming; it is not a second
+production extension point. During the R4 migration, an internal wrapper adapts that shim
 to `invoke` for synthetic fixtures, call sites move to this interface, and the
 shim is retired from product composition after its compatibility tests pass.
 
@@ -1565,8 +1594,8 @@ cancellation, managed denials, or a required sandbox. It requires the explicit
 launch confirmation and persistent warning defined by the product requirements.
 Headless is a `--print` surface, not a sixth permission mode: the selected mode
 remains one of the five rows above, and any resulting ask becomes deny unless an
-exact predeclared rule or framed permission callback resolves it. The current
-preview value `ask` migrates to `default`.
+exact predeclared rule or framed permission callback resolves it. The current R1
+candidate value `ask` migrates to `default`.
 
 ### 11.4 Approval scope
 
