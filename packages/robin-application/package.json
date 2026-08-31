@@ -26,6 +26,7 @@
     "@guard/model-provider": "0.0.0",
     "@guard/policy-engine": "0.0.0",
     "@guard/robin-agent": "0.0.0",
-    "@guard/robin-session": "0.0.0"
+    "@guard/robin-session": "0.0.0",
+    "@guard/robin-tools": "0.0.0"
   }
 }
