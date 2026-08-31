@@ -31,7 +31,7 @@ export const MAXIMUM_REPL_INPUT_UTF8_BYTES = 65_536;
 export const MAXIMUM_REPL_TOOL_OUTPUT_DELTAS = 256;
 export const MAXIMUM_REPL_TOOL_OUTPUT_UTF8_BYTES = 256 * 1_024;
 export const MAXIMUM_REPL_TOOL_OUTPUT_DELTA_UTF8_BYTES = 32 * 1_024;
-export const MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES = 1_024;
+export const MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES = 1_536;
 
 export type ReplStatus =
   | "ready"
@@ -304,7 +304,7 @@ export function reduceRepl(state: ReplState, event: ReplEvent): ReplTransition {
           [],
         );
       }
-      const summary = boundToolSummary(event.summary);
+      const summary = settledToolSummary(state, event.callId, event.summary);
       const output = removeToolOutputForCall(state, event.callId);
       return changed(
         state,
@@ -962,25 +962,58 @@ function removeToolOutputForCall(
   });
 }
 
+function settledToolSummary(
+  state: ReplState,
+  callId: string,
+  resultSummary: string,
+): string {
+  const output = state.toolOutput.filter((delta) => delta.callId === callId);
+  if (output.length === 0) return boundToolSummary(resultSummary);
+  const boundedResult = boundUtf8Prefix(resultSummary, 256);
+  const outputText = output
+    .map((delta) => `[${delta.channel} #${delta.sequence}] ${delta.safeText}`)
+    .join("\n");
+  const outputTail = boundUtf8Tail(outputText, 1_152);
+  return boundToolSummary(
+    `${boundedResult}; bounded output tail: ${outputTail}`,
+  );
+}
+
 function boundToolSummary(summary: string): string {
-  if (
-    Buffer.byteLength(summary, "utf8") <=
-    MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES
-  ) {
-    return summary;
-  }
+  return boundUtf8Prefix(summary, MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES);
+}
+
+function boundUtf8Prefix(value: string, maximumBytes: number): string {
+  if (Buffer.byteLength(value, "utf8") <= maximumBytes) return value;
   const suffix = "… [truncated]";
   const maximumPrefixBytes =
-    MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES - Buffer.byteLength(suffix, "utf8");
+    maximumBytes - Buffer.byteLength(suffix, "utf8");
   let prefix = "";
   let prefixBytes = 0;
-  for (const grapheme of segmentGraphemes(summary)) {
+  for (const grapheme of segmentGraphemes(value)) {
     const graphemeBytes = Buffer.byteLength(grapheme, "utf8");
     if (prefixBytes + graphemeBytes > maximumPrefixBytes) break;
     prefix += grapheme;
     prefixBytes += graphemeBytes;
   }
   return prefix + suffix;
+}
+
+function boundUtf8Tail(value: string, maximumBytes: number): string {
+  if (Buffer.byteLength(value, "utf8") <= maximumBytes) return value;
+  const prefix = "… [tail] ";
+  const maximumTailBytes = maximumBytes - Buffer.byteLength(prefix, "utf8");
+  const graphemes = segmentGraphemes(value);
+  const retained: string[] = [];
+  let retainedBytes = 0;
+  for (let index = graphemes.length - 1; index >= 0; index -= 1) {
+    const grapheme = graphemes[index]!;
+    const graphemeBytes = Buffer.byteLength(grapheme, "utf8");
+    if (retainedBytes + graphemeBytes > maximumTailBytes) break;
+    retained.push(grapheme);
+    retainedBytes += graphemeBytes;
+  }
+  return prefix + retained.reverse().join("");
 }
 
 function createApprovalState(

@@ -308,6 +308,19 @@ test("completed output cannot hide later lifecycle and final state in 24 rows", 
   let state = reduceRepl(createReplState({ columns: 80, rows: 24 }), {
     type: "turn_started",
   }).state;
+  for (let index = 0; index < 10; index += 1) {
+    const callId = `history-${index}`;
+    state = reduceRepl(state, {
+      type: "tool_started",
+      callId,
+      name: `robin.repo.history_${index}@1`,
+    }).state;
+    state = reduceRepl(state, {
+      type: "tool_completed",
+      callId,
+      summary: `historical result ${index} ` + "y".repeat(140),
+    }).state;
+  }
   state = reduceRepl(state, {
     type: "tool_started",
     callId: "process-call",
@@ -353,6 +366,7 @@ test("completed output cannot hide later lifecycle and final state in 24 rows", 
   const finalFrame = buildTerminalFrame(state, capability(80, 24));
   const finalText = finalFrame.rows.join("\n");
   assert.match(finalFrame.rows[0] ?? "", /^Robin · ready · 80x24/u);
+  assert.match(finalFrame.rows.at(-1) ?? "", /^> /u);
   assert.equal(finalText.includes("Tool output"), false);
   const processPosition = finalText.indexOf("robin.process.run@1");
   const statusPosition = finalText.indexOf("robin.git.status@1");
@@ -362,6 +376,32 @@ test("completed output cannot hide later lifecycle and final state in 24 rows", 
   assert.equal(statusPosition > processPosition, true);
   assert.equal(diffPosition > statusPosition, true);
   assert.equal(finalPosition > diffPosition, true);
+});
+
+test("pinned headers preserve prompt cursor bounds at tiny and wrapped sizes", () => {
+  let state = reduceRepl(createReplState({ columns: 40, rows: 2 }), {
+    type: "key",
+    key: { type: "text", text: "hello" },
+  }).state;
+  const tiny = buildTerminalFrame(state, capability(40, 2));
+  assert.equal(tiny.rows.length, 2);
+  assert.match(tiny.rows[0] ?? "", /^Robin · ready/u);
+  assert.equal(tiny.rows[1], "> hello");
+  assert.deepEqual(tiny.cursor, { row: 2, column: 8 });
+
+  state = reduceRepl(state, {
+    type: "key",
+    key: { type: "resize", columns: 8, rows: 3 },
+  }).state;
+  const wrapped = buildTerminalFrame(state, capability(8, 3));
+  assert.equal(wrapped.rows.length, 3);
+  assert.match(wrapped.rows[0] ?? "", /^Robin/u);
+  assert.ok(wrapped.cursor.row >= 1 && wrapped.cursor.row <= wrapped.rows.length);
+  assert.ok(wrapped.cursor.column >= 1 && wrapped.cursor.column <= 8);
+
+  const single = buildTerminalFrame(state, capability(8, 1));
+  assert.deepEqual(single.rows, ["Robin · "]);
+  assert.deepEqual(single.cursor, { row: 1, column: 8 });
 });
 
 function applyApproval(

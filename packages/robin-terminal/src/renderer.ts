@@ -61,9 +61,9 @@ export function buildTerminalFrame(
 ): TerminalFrame {
   const columns = Math.max(1, capabilities.columns);
   const availableRows = Math.max(1, capabilities.rows);
+  const headerRows = [...wrapCells(statusHeader(state, capabilities), columns)];
   const rows: string[] = [];
 
-  rows.push(...wrapCells(statusHeader(state, capabilities), columns));
   for (const entry of state.transcript) {
     rows.push(...renderTranscriptEntry(entry, columns));
   }
@@ -142,12 +142,23 @@ export function buildTerminalFrame(
 
   const cursorAbsoluteRow = promptStart + promptCursor.rowOffset;
   const cursorColumn = promptCursor.column;
-  const removedRows = Math.max(0, rows.length - availableRows);
-  const visibleRows = rows.slice(removedRows, removedRows + availableRows);
-  const cursorRow = Math.min(
-    visibleRows.length,
-    Math.max(1, cursorAbsoluteRow - removedRows + 1),
+  const visibleHeaderRows = headerRows.slice(0, availableRows);
+  const availableBodyRows = availableRows - visibleHeaderRows.length;
+  const removedBodyRows = Math.max(0, rows.length - availableBodyRows);
+  const visibleBodyRows = rows.slice(
+    removedBodyRows,
+    removedBodyRows + availableBodyRows,
   );
+  const visibleRows = [...visibleHeaderRows, ...visibleBodyRows];
+  const cursorRow = availableBodyRows === 0
+    ? visibleHeaderRows.length
+    : Math.min(
+        visibleRows.length,
+        Math.max(
+          visibleHeaderRows.length + 1,
+          visibleHeaderRows.length + cursorAbsoluteRow - removedBodyRows + 1,
+        ),
+      );
 
   return Object.freeze({
     revision: state.revision,

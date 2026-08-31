@@ -499,7 +499,8 @@ test("tool settlement evicts only that call's live output and bounds its transcr
   const summary = state.tools.find(
     (tool) => tool.callId === "call-complete",
   )?.summary;
-  assert.ok(summary?.endsWith("… [truncated]"));
+  assert.ok(summary?.includes("… [truncated]"));
+  assert.ok(summary?.endsWith("[stdout #1] first!"));
   assert.ok(
     Buffer.byteLength(summary ?? "", "utf8") <=
       MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES,
