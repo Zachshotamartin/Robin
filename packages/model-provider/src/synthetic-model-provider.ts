@@ -1,3 +1,5 @@
+import { isProxy } from "node:util/types";
+
 import {
   AgentAttemptIdKind,
   canonicalSha256Hex,
@@ -28,11 +30,21 @@ export interface SyntheticModelStep {
   readonly expectedRequest: SemanticModelRequest;
   /** Complete normalized response stream, including its terminal event. */
   readonly events: readonly ModelProviderEvent[];
+  /** Optional deterministic delay before each corresponding event. */
+  readonly delaysBeforeEventsMs?: readonly number[];
 }
 
 export interface SyntheticModelScript {
   readonly scriptId: string;
   readonly steps: readonly SyntheticModelStep[];
+}
+
+export interface SyntheticModelProviderOptions {
+  /** Injectable scheduler used by fake clocks; defaults to an abort-aware timer. */
+  readonly delay?: (
+    milliseconds: number,
+    signal: AbortSignal,
+  ) => void | Promise<void>;
 }
 
 const SYNTHETIC_DESCRIPTOR: ModelProviderDescriptor = Object.freeze({
@@ -81,13 +93,21 @@ export class SyntheticModelProvider implements ModelProvider {
   public readonly descriptor = SYNTHETIC_DESCRIPTOR;
 
   readonly #script: SyntheticModelScript;
+  readonly #delay: (
+    milliseconds: number,
+    signal: AbortSignal,
+  ) => void | Promise<void>;
   readonly #capturedRequestBytes: Uint8Array[] = [];
   #nextStep = 0;
 
-  public constructor(script: SyntheticModelScript) {
+  public constructor(
+    script: SyntheticModelScript,
+    options: SyntheticModelProviderOptions = {},
+  ) {
     const snapshot = cloneAndFreeze(script);
     validateScript(snapshot);
     this.#script = snapshot;
+    this.#delay = captureDelay(options);
   }
 
   public get remainingSteps(): number {
@@ -169,10 +189,18 @@ export class SyntheticModelProvider implements ModelProvider {
     // request can therefore be corrected and retried against the same step.
     this.#nextStep += 1;
 
-    for (const event of step.events) {
-      // Provide a scheduling boundary so a consumer can deterministically
-      // cancel between two events without timers or real transport activity.
-      await Promise.resolve();
+    for (let index = 0; index < step.events.length; index += 1) {
+      const event = step.events[index]!;
+      const delayMs = step.delaysBeforeEventsMs?.[index] ?? 0;
+      try {
+        await this.#delay(delayMs, signal);
+      } catch {
+        if (signal.aborted) throwCancelled();
+        throw createDomainError({
+          code: "infrastructure_failed",
+          message: "The synthetic model delay scheduler failed.",
+        });
+      }
       throwIfCancelled(signal);
       yield event;
     }
@@ -204,9 +232,13 @@ function validateScript(script: SyntheticModelScript): void {
     if (!isRecord(step)) {
       invalidInput(`script.steps[${index}] must be a plain object.`);
     }
+    const delayPath = `script.steps[${index}].delaysBeforeEventsMs`;
+    const hasDelays = Object.hasOwn(step, "delaysBeforeEventsMs");
     requireExactKeys(
       step,
-      ["expectedRequest", "events"],
+      hasDelays
+        ? ["expectedRequest", "events", "delaysBeforeEventsMs"]
+        : ["expectedRequest", "events"],
       `script.steps[${index}]`,
     );
     validateRequest(
@@ -218,7 +250,92 @@ function validateScript(script: SyntheticModelScript): void {
       index,
       step.expectedRequest as SemanticModelRequest,
     );
+    if (hasDelays) {
+      if (
+        !Array.isArray(step.delaysBeforeEventsMs) ||
+        step.delaysBeforeEventsMs.length !==
+          (step.events as readonly ModelProviderEvent[]).length
+      ) {
+        invalidInput(`${delayPath} must contain one delay per event.`);
+      }
+      step.delaysBeforeEventsMs.forEach((delay, delayIndex) => {
+        nonNegativeInteger(delay, `${delayPath}[${delayIndex}]`);
+      });
+    }
   }
+}
+
+function captureDelay(
+  options: SyntheticModelProviderOptions,
+): (milliseconds: number, signal: AbortSignal) => void | Promise<void> {
+  if (
+    typeof options !== "object" ||
+    options === null ||
+    Array.isArray(options) ||
+    isProxy(options) ||
+    (Object.getPrototypeOf(options) !== Object.prototype &&
+      Object.getPrototypeOf(options) !== null)
+  ) {
+    invalidInput("Synthetic model provider options must be a plain object.");
+  }
+  const keys = Reflect.ownKeys(options);
+  if (
+    keys.some((key) => key !== "delay") ||
+    keys.length > 1
+  ) {
+    invalidInput("Synthetic model provider options have unknown fields.");
+  }
+  if (keys.length === 0) return defaultDelay;
+  const descriptor = Object.getOwnPropertyDescriptor(options, "delay");
+  if (
+    descriptor === undefined ||
+    !("value" in descriptor) ||
+    descriptor.enumerable !== true ||
+    typeof descriptor.value !== "function"
+  ) {
+    invalidInput("Synthetic model provider delay must be a function.");
+  }
+  return descriptor.value as (
+    milliseconds: number,
+    signal: AbortSignal,
+  ) => void | Promise<void>;
+}
+
+async function defaultDelay(
+  milliseconds: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (milliseconds === 0) {
+    await Promise.resolve();
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(cancelledError());
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(cancelledError());
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function cancelledError() {
+  return createDomainError({
+    code: "cancelled",
+    message: "Synthetic model response was cancelled.",
+  });
+}
+
+function throwCancelled(): never {
+  throw cancelledError();
 }
 
 function validateRequest(request: SemanticModelRequest, path: string): void {

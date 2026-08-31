@@ -1,7 +1,7 @@
 # Robin
 
 Robin is a local-first, provider-flexible coding agent for the terminal,
-currently available only as the early synthetic preview described below. Its
+currently available only as the deterministic R1 candidate described below. Its
 intended product workflow is to start `robin` in a repository, describe work in
 natural language, and collaborate with an agent that can inspect the codebase,
 edit files, run commands and tests, review Git changes, and resume the same
@@ -14,17 +14,19 @@ UX, provider normalization, and verification workflow. Its policy and runtime
 control layer is internal infrastructure for that coding experience, not the
 product's primary surface.
 
-> **Implementation status:** the pivot branch is an R0 acceptance candidate and
-> contains an initial R1 preview. Cold help/version/error paths, the private
-> tarball inventory, tracked public identity, and clean-commit evidence workflow
-> are now tested; R0 is still not accepted until its generated evidence and
-> hosted checks are reviewed and the candidate is mainline-backed. `robin`
-> starts an ephemeral multi-turn prompt loop and `robin -p` runs the same
-> provider-neutral application path with text, JSON, or streaming JSON output.
-> It uses a deterministic credential-free synthetic model provider and
-> deliberately has no repository, process, Git, network, credential, or
-> persistence tools. Milestones A and B remain the accepted internal substrate,
-> while the complete R1 terminal gate remains open.
+> **Implementation status:** R0 remains an unaccepted pull-request candidate;
+> this branch stacks the R1 implementation candidate on that prerequisite.
+> `robin` now has a raw-mode TTY editor, a non-TTY/accessible flat renderer,
+> streamed multi-turn conversation, prompt queuing, cancellation, resize and
+> paste handling, visible usage, and two deterministic read-only coding-tool
+> calls. `robin -p` uses the same provider-neutral application path with text,
+> JSON, or streaming JSON output. The credential-free synthetic model provider
+> and tools use in-memory fixtures: Robin does not yet read or change the
+> physical repository,
+> run commands or Git, contact a network, store credentials, or persist a
+> session. Milestones A and B remain the accepted internal substrate. Neither
+> R0 nor R1 is accepted until the prerequisite, package, PTY, hosted-matrix, and
+> evidence gates are reviewed and mainline-backed.
 
 ## Intended Robin Experience
 
@@ -87,16 +89,17 @@ package, executable, documentation, and product name are Robin.
 
 ## Current Implementation
 
-The repository currently proves inherited Milestones A and B plus a tested,
-in-progress R1 synthetic session slice. The complete R1 terminal gate remains
-open.
+The repository currently proves inherited Milestones A and B and contains a
+locally tested R1 synthetic coding-loop candidate. R1 is not accepted because
+its R0 prerequisite is not mainline-backed and its hosted/evidence gate has not
+yet been completed. The complete R1 terminal gate therefore remains open.
 
 | Area | Implemented now | Not implemented now |
 |---|---|---|
-| CLI | Ephemeral `robin` and `robin "prompt"` line-oriented interactive sessions; `robin -p` text/JSON/stream-JSON output; retained deterministic `robin run`; implemented `robin policy` debugger | Raw-mode terminal editor, cancellation/resize restoration gate, setup wizard, durable sessions, auth, models, doctor |
-| Agent and model | Provider-neutral multi-turn text loop, shared application service, deterministic streaming synthetic provider, generic provider port, and inherited scripted driver | Structured coding-tool loop, hosted/local provider transport, provider onboarding, external-agent bridge |
-| Repository work | Virtual repository operations for listing, literal search, line reads, patch proposals, and diff inspection | Host repository mutation, Git worktrees, real patch application, command or test execution |
-| Control substrate | Strict contracts, event reducer and replay, policy evaluation, context release, capability mediation, deterministic evidence | Durable approvals, sandbox enforcement, restart reconciliation, production audit storage |
+| CLI | Ephemeral `robin` and `robin "prompt"` raw-mode TTY sessions with streamed output, grapheme-aware editing, bracketed paste, resize, queueing, and one-/two-stage interruption; flat non-TTY/screen-reader fallback; `robin -p` text/JSON/stream-JSON; retained `robin run`; implemented `robin policy` debugger | Setup wizard, durable sessions, auth, models, doctor, shell completion, supported distribution channel |
+| Agent and model | Provider-neutral multi-request structured tool loop, bounded provider-item collection, deterministic streaming synthetic provider, turn/tool/output/time budgets, application-wide ordered events, and inherited scripted driver | Hosted/local provider transport, provider onboarding, production model adapters, external-agent bridge |
+| Repository work | The interactive loop invokes two gateway-mediated, read-only tools over one immutable TypeScript fixture; retained virtual scenarios cover list/search/read/proposed-patch/diff contracts | Physical repository reads or mutation, real patch application, command/test execution, Git or worktrees |
+| Control substrate | Strict contracts, versioned application events, pure turn reducer/replay, cancellation scopes, policy evaluation, context release, capability mediation, and deterministic evidence | Durable approvals, sandbox enforcement, restart reconciliation, production audit storage |
 | Persistence | Atomic in-memory event store for deterministic scenarios | Durable transcripts, saved sessions, crash recovery, background supervision |
 | Credentials | No credential is needed or read | API-key onboarding, OS credential storage, origin-bound injection, rotation |
 
@@ -132,7 +135,7 @@ contracts and current limits.
 - Git for cloning and contributor workflows
 
 PostgreSQL, Docker or Podman, a provider account, and an API key are not needed
-for the current deterministic implementation and synthetic session preview.
+for the current deterministic implementation and synthetic R1 candidate.
 There is no public Robin release or global installer yet; use the repository
 build below.
 
@@ -158,7 +161,7 @@ reviewed boundaries.
 Build first. The local compiled binary is named `robin`; invoking its JavaScript
 entry point avoids implying that a global package has already been published.
 
-Run the ephemeral synthetic conversation preview:
+Run the ephemeral synthetic coding conversation:
 
 ```bash
 node apps/cli/dist/bin.js
@@ -168,11 +171,21 @@ node apps/cli/dist/bin.js --print --output-format json "Explain Robin."
 node apps/cli/dist/bin.js --print --output-format stream-json "Stream one turn."
 ```
 
-Interactive mode supports multiple prompts plus `/help` and `/exit`. Its banner
-and shutdown diagnostic state that the conversation is ephemeral. The
-synthetic provider reflects bounded text through the real normalized session
-path; it never claims to inspect or change the repository. Text output escapes
-terminal control characters. The preview machine formats declare
+In a capable TTY, interactive mode uses a raw terminal editor. Enter submits,
+Ctrl-C cancels the active turn, a second Ctrl-C during the escalation window
+forces shutdown, Ctrl-D closes an idle session, and bracketed paste inserts text
+without submitting it. A prompt entered while a turn is active is queued. On a
+non-TTY, `TERM=dumb`, or the screen-reader override, Robin uses the line-oriented
+flat renderer. `/help`, `/exit`, and `/quit` are available in both interactive
+forms.
+
+The first synthetic turn visibly invokes
+`robin.synthetic.workspace_summary@1` and
+`robin.synthetic.inspect_file@1`. Both read only an immutable in-memory fixture;
+they do not inspect the checkout from which Robin was launched. A follow-up turn
+uses the prior observations to prove in-process conversation continuity. The
+banner and shutdown diagnostic state that the conversation is ephemeral. Text
+output escapes terminal control characters. The experimental machine formats declare
 `stability: "experimental"`; they preserve parsed model text while emitting
 terminal controls as standard JSON escapes and contain no ANSI output.
 
@@ -249,9 +262,9 @@ terminal CLI / headless CLI / future editor client
  events, context release, checkpoints, evidence, persistence
 ```
 
-The pivot branch now contains the first narrow implementation of the upper
-session, application, and provider-neutral loop layers. It is intentionally
-text-only and ephemeral until the full R1 terminal/tool-loop evidence passes.
+The branch now contains the first narrow implementation of the upper terminal,
+session, application, provider-neutral loop, and synthetic tool layers. It is
+intentionally fixture-only and ephemeral until the full R1 evidence gate passes.
 The build order creates a usable vertical coding workflow before deepening
 isolation, distributed durability, evaluation infrastructure, or clients.
 
@@ -329,10 +342,11 @@ The ordered roadmap is:
 1. **Completed substrate — Milestones A and B:** contracts, deterministic event
    loop and replay, strict policy engine, context boundary, virtual repository
    capability, golden scenarios, and the renamed fixture CLI.
-2. **Coding-agent foundation — in progress:** a normalized multi-turn synthetic
-   loop, shared application path, basic interactive shell, headless formats,
-   and output sanitization now exist; the raw terminal lifecycle, event schema,
-   cancellation, synthetic tool calls, and PTY matrix remain open.
+2. **Coding-agent foundation — candidate under verification:** a normalized
+   multi-request synthetic tool loop, shared versioned application path, raw and
+   flat terminal renderers, cancellation/queue/resize behavior, headless formats,
+   output sanitization, and local PTY coverage now exist. R1 remains unaccepted
+   until R0 lands and the full hosted package/PTy/evidence gate is green.
 3. **Hosted-provider alpha (R2–R4):** one real direct provider with BYOK setup,
    real repository search/read/edit tools, command and test execution, Git diff
    review, permission prompts, interruption, continue/resume, and a complete
@@ -367,6 +381,7 @@ Implementation, operations, and evidence references:
 - [Provider, credential, model, and external-agent compatibility](docs/PROVIDER_AGENT_COMPATIBILITY.md)
 - [Implementation guide](docs/IMPLEMENTATION_GUIDE.md)
 - [Installation, testing, operations, and release plan](docs/OPERATIONS_TEST_PLAN.md)
+- [Terminal compatibility and R1 verification matrix](docs/TERMINAL_COMPATIBILITY.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Event Model v1](docs/event-model.md)
 - [Policy Language v1](docs/policy-language.md)

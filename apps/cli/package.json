@@ -45,6 +45,7 @@
     "@guard/milestone-a-scenarios": "0.0.0",
     "@guard/policy-engine": "0.0.0",
     "@guard/policy-language": "0.0.0",
-    "@guard/robin-application": "0.0.0"
+    "@guard/robin-application": "0.0.0",
+    "@guard/robin-terminal": "0.0.0"
   }
 }

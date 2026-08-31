@@ -169,14 +169,16 @@ test("coding-session modes dispatch without starting a compatibility scenario", 
   const stderr = writer();
   let runCalls = 0;
   let sessionCalls = 0;
+  const outputFailure = new AbortController();
   const base = successfulDependencies(() => {
     runCalls += 1;
   });
   const dependencies: CliDependencies = {
     ...base,
-    executeSession: async (request, sessionStdout) => {
+    executeSession: async (request, sessionStdout, _sessionStderr, runtime) => {
       sessionCalls += 1;
       assert.equal(request.kind, "print");
+      assert.equal(runtime?.outputFailureSignal, outputFailure.signal);
       sessionStdout.write("session result\n");
       return 0;
     },
@@ -186,6 +188,7 @@ test("coding-session modes dispatch without starting a compatibility scenario", 
     stdout,
     stderr,
     dependencies,
+    { outputFailureSignal: outputFailure.signal },
   );
   assert.equal(code, 0);
   assert.equal(sessionCalls, 1);

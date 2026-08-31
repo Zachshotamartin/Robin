@@ -338,6 +338,77 @@ test("honors cancellation before and during event delivery", async () => {
   );
 });
 
+test("applies per-event delays through an injected deterministic scheduler", async () => {
+  const delays = SUCCESS_EVENTS.map((_, index) => index * 7);
+  const observed: number[] = [];
+  const provider = new SyntheticModelProvider(
+    {
+      scriptId: "provider-delays-v1",
+      steps: [
+        {
+          expectedRequest: request(),
+          events: SUCCESS_EVENTS,
+          delaysBeforeEventsMs: delays,
+        },
+      ],
+    },
+    {
+      delay(milliseconds, signal) {
+        assert.equal(signal.aborted, false);
+        observed.push(milliseconds);
+      },
+    },
+  );
+
+  assert.deepEqual(
+    await collect(provider.respond(request(), new AbortController().signal)),
+    SUCCESS_EVENTS,
+  );
+  assert.deepEqual(observed, delays);
+  provider.assertExhausted();
+});
+
+test("validates deterministic delay scripts and confirms cancellation after a scheduler boundary", async () => {
+  assert.throws(
+    () =>
+      new SyntheticModelProvider({
+        scriptId: "provider-bad-delays-v1",
+        steps: [
+          {
+            expectedRequest: request(),
+            events: SUCCESS_EVENTS,
+            delaysBeforeEventsMs: [1],
+          },
+        ],
+      }),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+
+  const controller = new AbortController();
+  const provider = new SyntheticModelProvider(
+    {
+      scriptId: "provider-cancelled-delay-v1",
+      steps: [
+        {
+          expectedRequest: request(),
+          events: SUCCESS_EVENTS,
+          delaysBeforeEventsMs: SUCCESS_EVENTS.map(() => 1),
+        },
+      ],
+    },
+    {
+      delay() {
+        controller.abort();
+      },
+    },
+  );
+  await assert.rejects(
+    collect(provider.respond(request(), controller.signal)),
+    (error: unknown) => isDomainCode(error, "cancelled"),
+  );
+  assert.equal(provider.remainingSteps, 0);
+});
+
 test("rejects malformed scripts and normalized event sequences at construction", () => {
   const invalidScripts: readonly unknown[] = [
     { scriptId: "", steps: [] },

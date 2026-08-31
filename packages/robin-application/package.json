@@ -20,8 +20,12 @@
     "test": "npm run build && node --test --test-reporter=../../scripts/deterministic-test-reporter.mjs dist/*.test.js"
   },
   "dependencies": {
+    "@guard/capability-gateway": "0.0.0",
+    "@guard/capability-synthetic": "0.0.0",
     "@guard/contracts": "0.0.0",
     "@guard/model-provider": "0.0.0",
-    "@guard/robin-agent": "0.0.0"
+    "@guard/policy-engine": "0.0.0",
+    "@guard/robin-agent": "0.0.0",
+    "@guard/robin-session": "0.0.0"
   }
 }

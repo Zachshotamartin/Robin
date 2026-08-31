@@ -64,8 +64,9 @@ R9 even though the historical label is numerically lower:
 | R11 | A stable client protocol and measured editor prototype support an editor-client decision. |
 | R12 | The selected editor client ships without a second engine; a Code-OSS fork remains evidence-gated. |
 
-The checked-in line-oriented, ephemeral implementation is an **initial-R1
-preview**, not an accepted R1 gate or a supported release. R4 is only the first
+The checked-in raw/flat-terminal, ephemeral implementation is an **R1
+candidate**, not an accepted R1 gate or a supported release. It uses only a
+deterministic provider and immutable fixture tools. R4 is only the first
 end-to-end hosted-provider alpha. R7 freezes the provider and automation
 contracts, but neither that stable R7 contract nor a supported release exists
 today. The first supported developer release is bundled only after R8; Robin
@@ -173,23 +174,30 @@ Until R1 is accepted, the truthful claim is:
 > substrate and is being pivoted into a coding-agent CLI. The current mainline
 > is not yet a usable coding agent.
 
-The Robin pivot branch contains a tested, line-oriented initial-R1 preview:
-`robin` and `robin "prompt"` use a shared ephemeral application service, while
-`robin --print` uses that same provider-neutral text loop with experimental
-text, JSON, and streaming-JSON renderers. It uses only the credential-free
-synthetic provider and has no physical repository, process, Git, credential,
-network, durable-session, or resume capability. The current
-`EphemeralRobinApplication` also passes live `RobinAgentEvent` values directly
-to renderers; that is a preview seam, not the versioned application-event
-contract.
+The stacked R1 branch contains a locally tested implementation candidate:
+`robin` and `robin "prompt"` use one ephemeral application service with a
+raw-mode TTY editor or flat fallback, while `robin --print` uses the same
+provider-neutral, multi-request structured tool loop with experimental text,
+JSON, and streaming-JSON renderers. Versioned application events are persisted
+to an in-memory journal, reduced and replayed through pure state transitions,
+and exposed as a session-wide ordered replay/live stream. The deterministic
+provider calls two gateway-mediated, non-consequential tools over an immutable
+TypeScript fixture. Prompt queueing, first-/second-interrupt behavior, resize,
+bracketed paste, bounded usage/budgets, terminal cleanup, and PTY error paths
+have local automated coverage.
+
+The candidate still has no physical repository, process, Git, credential,
+network, durable-session, or resume capability. It is not an accepted phase:
+R0 is still an unmerged prerequisite, the R1 package inventory/evidence record
+must be captured from a clean commit, and the required hosted Linux/macOS PTY
+matrix must pass before the section 6.9 claim can change.
 
 The preview currently spells the ordinary ask-first permission label `ask` and
 uses `--output-format` and `--no-save`. Those spellings are experimental. They
 must migrate to target `default`, `--output`, and `--no-session` respectively.
-The complete R1 raw-terminal, synthetic-tool, cancellation, event-mapping, and
-PTY-restoration gate remains open, and the stable R7 automation contract is
-entirely planned. Preview code does not change the accepted-mainline claim
-above.
+The R1 acceptance gate remains open despite the local implementation and test
+results. The stable R7 automation contract is entirely planned. Candidate code
+does not change the accepted-mainline claim above.
 
 `robin auth`, `robin models`, `robin doctor`, and `robin support` are currently
 reserved/unimplemented preview commands. Their target names are fixed here so
@@ -848,7 +856,8 @@ says R0 is the terminal owning gate.
 
 ## 6. R1 — Interactive Synthetic Coding-Agent Loop
 
-**Status:** in-progress preview slice; the R1 phase gate is not accepted.
+**Status:** implementation candidate under local verification; the R1 phase
+gate is not accepted.
 
 **Effort range:** 2–4 part-time weeks.
 
@@ -869,24 +878,33 @@ loop defects cannot hide behind network or model variance.
 
 ### 6.3 Packages, files, interfaces, and data
 
-The current branch already contains a bounded subset of this phase:
+The current stacked branch contains the bounded R1 candidate:
 
 - `packages/model-provider` exposes the temporary
-  `ModelProvider.respond(SemanticModelRequest, AbortSignal)` preview port and a
-  deterministic `SyntheticModelProvider`;
-- `packages/robin-agent` owns a provider-neutral multi-turn text loop;
-- `packages/robin-application` exposes `EphemeralRobinApplication` and currently
-  yields the live `RobinAgentEvent` union directly;
-- `apps/cli` provides line-oriented interactive input plus experimental
-  `--print` text, JSON, and streaming-JSON output; and
-- sessions are explicitly ephemeral, with no workspace/process/Git/network/
-  credential effects.
+  `ModelProvider.respond(SemanticModelRequest, AbortSignal)` port plus scripted,
+  delayed, and deterministic R1 providers;
+- `packages/robin-agent` owns bounded provider-event collection, prompt
+  compilation, multi-request structured tool continuation, serialized dispatch,
+  call-ID replay prevention, budgets, and single-owner turn coordination;
+- `packages/robin-session` owns versioned application-event validation, legal
+  turn transitions, pure reduction, and prefix replay;
+- `packages/robin-application` owns the session journal, monotonic publication,
+  queue promotion, cancellation and terminal ownership, gateway dispatch, error
+  mapping, bounded replay/live event subscriptions, and fail-closed shutdown;
+- `packages/robin-terminal` owns capability detection, grapheme input state,
+  bounded key decoding, raw UI reduction, frame construction/diffing, flat
+  rendering, and `finally`-based terminal restoration;
+- `apps/cli` composes that application for raw TTY, flat interactive, text,
+  experimental JSON, and experimental streaming-JSON modes; and
+- `tests/pty` drives the built process through a real pseudo-terminal for launch,
+  two turns, tool visibility, queueing, resize, paste, single/double interrupt,
+  provider/tool failure, and exact terminal-mode restoration.
 
-Those implemented pieces are preview evidence only. R1 still must introduce the
-versioned live-agent-to-application mapping, complete synthetic tool cycle,
-raw-terminal editor, queued-input and cancellation behavior, PTY restoration,
-and the complete section 6.9 gate. R7, not the preview, owns the stable public
-automation schemas and target flag compatibility contract.
+These implemented pieces remain candidate evidence only. R1 still requires the
+clean package inventory, installed-tarball PTY/uninstall smoke, documented
+terminal matrix, clean-commit evidence manifest, hosted Linux/macOS jobs, an
+accepted R0 predecessor, and the complete section 6.9 review. R7, not R1, owns
+the stable public automation schemas and target flag compatibility contract.
 
 Create `packages/robin-application` with:
 
@@ -975,8 +993,12 @@ The input reducer stores grapheme clusters rather than indexing UTF-16 code
 units. `Intl.Segmenter` provides segmentation; a pinned width helper or generated
 Unicode width table computes cells. Cursor movement changes grapheme boundaries.
 Bracketed paste is treated as text, never as keystrokes or an automatic submit,
-and is capped by bytes and graphemes. Unknown control sequences are discarded and
-counted for diagnostics rather than echoed.
+and both a paste event and the complete composer are capped at 65,536 UTF-8
+bytes. An insertion or paste that would exceed the cap is rejected atomically;
+an oversized paste is discarded through its closing delimiter before the
+decoder accepts ordinary input again. Unknown control sequences are discarded
+and counted for diagnostics rather than echoed. Ordinary decoded text events
+are capped at 4,096 bytes and control sequences at 64 bytes.
 
 Rendering builds an abstract frame of rows, computes the longest common prefix
 and suffix with the prior frame, updates only changed rows, and restores the
@@ -1010,10 +1032,24 @@ inside one process.
 
 The first SIGINT aborts the active turn and renders `Cancelling`; it does not
 terminate the process while the cancellation deadline remains. A second SIGINT
-within the configured window forces bounded shutdown. At every exit path,
+within the 750 ms window forces bounded shutdown. Application close has a
+2,000 ms default deadline, validates overrides in the range 1–30,000 ms, and
+fences all provider output after forced terminal commitment. A provider that
+ignores `AbortSignal` therefore cannot keep `/exit`, EOF, EPIPE, or terminal
+cleanup pending indefinitely. At every exit path,
 `TerminalSession.close()` disables bracketed paste, shows the cursor, resets
 style, exits raw mode, unregisters signal listeners, and flushes the final line.
 Errors during cleanup are aggregated behind the primary error.
+
+The R1 journal is also bounded independently of provider budgets. Defaults are
+131,072 records, 134,217,728 serialized UTF-8 bytes, 32 concurrent subscribers,
+8,192 unread live events per subscriber, and 16,777,216 unread live bytes per
+subscriber. Historical replay is a lazy indexed view rather than a copied
+subscriber backlog. The journal reserves enough record/byte headroom for the
+active and queued turns' terminal events, releases replay/backlog references on
+iterator return, and fails the affected stream—or the whole application when
+the authoritative journal itself cannot append—instead of dropping semantic
+events. Permission-mode mutation occurs only after its event append commits.
 
 ### 6.5 Implementation tickets and sequence
 
@@ -1063,7 +1099,7 @@ Errors during cleanup are aggregated behind the primary error.
 | provider collector | One-byte fragmentation, split multibyte code points, split JSON escapes, unknown item, duplicate call/final, oversized text/args, abort before and after transmission. |
 | input reducer | ASCII, composed/decomposed Unicode, emoji sequences, wide cells, combining marks, selection deletion, history boundaries, bracketed paste, control-byte rejection. |
 | renderer | 40/80/160 columns, resize mid-stream, no color, flat mode, status updates, long tool output summary, escaped OSC/CSI payloads. |
-| application | queued prompts, maximum queue, cancellation fan-out, provider failure, tool failure, cleanup error, event sequence monotonicity. |
+| application | queued prompts, maximum queue, cancellation fan-out, provider failure, tool failure, cleanup error, event sequence monotonicity, lazy replay/live ordering, journal record/byte/subscriber/backlog/read caps, iterator return cleanup, terminal headroom, deadline/clock/ID append faults, non-cooperative providers, idempotent close, and late-provider quarantine. |
 | PTY end to end | no-argument launch, initial prompt, two turns, Ctrl-C, Ctrl-D on empty input, non-TTY rejection, restored terminal, stable exit. |
 | architecture | CLI imports composition interfaces only; terminal renderer cannot import permission/tool/provider adapters. |
 
@@ -1077,6 +1113,10 @@ Errors during cleanup are aggregated behind the primary error.
   the key decoder.
 - Terminal output failure, EPIPE, raw-mode failure, missing dimensions, and
   stdin closure select the flat renderer or terminate with a stable category.
+- Flat and raw turn-consumer rejections are observed immediately. `/exit`, EOF,
+  and output failure use the same bounded application close; late consumer or
+  renderer failures still produce infrastructure exit code `7` after terminal
+  restoration, rather than becoming unhandled rejections or false success.
 - Provider calls never start after parse failure or after turn cancellation.
 - Tool calls execute serially. More than one call may be collected, but R1
   processes them in provider order and records each boundary; malformed calls
@@ -1111,6 +1151,12 @@ R1 is accepted only when a recorded PTY run proves all of the following:
   target `--output`/`--no-session` automation contract remains open through R7;
 - no real repository, provider, API key, durable resume, or sandbox claim appears
   in release notes.
+
+Current candidate evidence is intentionally weaker than acceptance: the local
+unit, adversarial application, CLI subprocess, and PTY suites pass on the
+development host, but a local pass cannot substitute for the clean package
+artifact, hosted operating-system matrix, prerequisite merge, and reviewed
+manifest required above.
 
 ### 6.10 Explicit deferrals
 
@@ -5455,8 +5501,8 @@ The phase sections define 230 implementation tickets:
 
 | Phase | Ticket range | Count | Current status |
 | --- | --- | ---: | --- |
-| R0 | R0.01–R0.12 | 12 | in progress; evidence decides individual completion |
-| R1 | R1.01–R1.13 | 13 | in-progress preview slice; gate not accepted |
+| R0 | R0.01–R0.12 | 12 | pull-request candidate; unaccepted until merged evidence is reviewed |
+| R1 | R1.01–R1.13 | 13 | implementation candidate; prerequisite/hosted/evidence gate not accepted |
 | R2 | R2.01–R2.17 | 17 | planned |
 | R3 | R3.01–R3.18 | 18 | planned |
 | R4 | R4.01–R4.17 | 17 | planned |

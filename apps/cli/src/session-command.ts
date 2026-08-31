@@ -1,38 +1,54 @@
 import { randomUUID } from "node:crypto";
-import { createInterface } from "node:readline";
-import type { Readable, Writable } from "node:stream";
 
 import {
-  createPreviewRobinApplication,
-  type EphemeralRobinApplication,
-  type RobinAgentEvent,
+  type R1RobinApplication,
+  type RobinApplicationEvent,
 } from "@guard/robin-application";
 
 import {
+  DEFAULT_MAXIMUM_SESSION_TURNS,
   CliUsageError,
-  type InteractiveCliRequest,
   type PrintCliRequest,
   type SessionCliRequest,
+  type SessionPermissionMode,
 } from "./argv.js";
-import { exitCodeForErrorCode } from "./exit-codes.js";
+import { createCliSessionApplication } from "./composition.js";
+import { EXIT_CODES, exitCodeForErrorCode } from "./exit-codes.js";
+import {
+  executeInteractiveSession,
+  type InteractiveEnvironment,
+  type InteractiveInput,
+  type InteractiveOutput,
+} from "./interactive.js";
+import type { CliRuntimeContext } from "./main.js";
+import type { InterruptEscalator } from "./signal-handler.js";
 
 export interface SessionWriter {
   write(chunk: string): unknown;
 }
 
 export interface SessionCommandDependencies {
-  readonly input: Readable;
+  readonly input: InteractiveInput;
+  readonly environment?: InteractiveEnvironment;
   readonly createApplication: (
     sessionId: string,
-    modelId?: string,
-  ) => EphemeralRobinApplication;
+    modelId: string,
+    maximumTurns: number,
+    permissionMode: SessionPermissionMode,
+  ) => R1RobinApplication;
   readonly nextSessionId?: () => string;
+}
+
+export interface SessionCommandRuntime extends CliRuntimeContext {
+  /** Test seam for deterministic two-stage interrupt timing. */
+  readonly interruptEscalator?: InterruptEscalator;
 }
 
 export const DEFAULT_SESSION_COMMAND_DEPENDENCIES: SessionCommandDependencies =
   Object.freeze({
     input: process.stdin,
-    createApplication: createPreviewRobinApplication,
+    environment: process.env,
+    createApplication: createCliSessionApplication,
     nextSessionId: () => `ephemeral-${randomUUID()}`,
   });
 
@@ -42,151 +58,88 @@ export async function executeSessionCommand(
   stderr: SessionWriter,
   dependencies: SessionCommandDependencies =
     DEFAULT_SESSION_COMMAND_DEPENDENCIES,
+  runtime: SessionCommandRuntime = {},
 ): Promise<number> {
   if (request.provider !== "synthetic") {
     throw new CliUsageError(
-      "Only the credential-free synthetic provider is available in this preview.",
+      "R1 supports only the credential-free synthetic provider; hosted providers arrive in a later gate.",
     );
   }
-  const modelId = request.model ?? "synthetic-preview-v1";
-  if (modelId !== "synthetic-preview-v1") {
+  const modelId = request.model ?? "synthetic-r1-v1";
+  if (modelId !== "synthetic-r1-v1") {
     throw new CliUsageError(
-      "The synthetic preview supports only model synthetic-preview-v1.",
+      "The R1 synthetic provider supports only model synthetic-r1-v1.",
     );
   }
+  const maximumTurns =
+    request.kind === "print"
+      ? request.maximumTurns
+      : DEFAULT_MAXIMUM_SESSION_TURNS;
   const application = dependencies.createApplication(
     dependencies.nextSessionId?.() ?? `ephemeral-${randomUUID()}`,
     modelId,
+    maximumTurns,
+    request.permissionMode,
   );
   return request.kind === "interactive"
-    ? executeInteractive(request, application, dependencies.input, stdout, stderr)
-    : executePrint(request, application, stdout, stderr);
-}
-
-async function executeInteractive(
-  request: InteractiveCliRequest,
-  application: EphemeralRobinApplication,
-  input: Readable,
-  stdout: SessionWriter,
-  stderr: SessionWriter,
-): Promise<number> {
-  stdout.write(
-    "Robin · synthetic preview · ephemeral · " +
-      request.permissionMode +
-      " mode\n" +
-      "No repository, process, network, credential, or persistence tools are enabled.\n" +
-      "Type /help for local commands or /exit to close.\n\n",
-  );
-
-  if (request.prompt !== null) {
-    await renderInteractiveTurn(application, request.prompt, stdout);
-  }
-
-  const terminal = isTerminalInput(input) && isTerminalOutput(stdout);
-  const lines = createInterface({
-    input,
-    crlfDelay: Infinity,
-    ...(terminal
-      ? { output: stdout as Writable, terminal: true }
-      : { terminal: false }),
-  });
-  try {
-    stdout.write("> ");
-    for await (const line of lines) {
-      const command = line.trim();
-      if (command === "/exit" || command === "/quit") {
-        break;
-      }
-      if (command === "/help") {
-        stdout.write(
-          "Local commands: /help, /exit. Prompts run through the credential-free synthetic preview.\n",
-        );
-      } else if (command.startsWith("/")) {
-        stdout.write("Unknown local command. Type /help for available commands.\n");
-      } else if (command.length > 0) {
-        await renderInteractiveTurn(application, line, stdout);
-      }
-      stdout.write("> ");
-    }
-  } finally {
-    lines.close();
-  }
-  stderr.write("Robin preview session closed; ephemeral conversation was not saved.\n");
-  return 0;
-}
-
-async function renderInteractiveTurn(
-  application: EphemeralRobinApplication,
-  prompt: string,
-  stdout: SessionWriter,
-): Promise<void> {
-  const controller = new AbortController();
-  let wroteText = false;
-  let terminalFailure: Extract<
-    RobinAgentEvent,
-    { readonly type: "turn_failed" | "turn_cancelled" }
-  > | null = null;
-  let didCatch = false;
-  let caughtError: unknown;
-  try {
-    for await (const event of application.submit(prompt, controller.signal)) {
-      if (event.type === "assistant_text_delta") {
-        stdout.write(sanitizeTerminalText(event.delta));
-        wroteText = true;
-      } else if (
-        event.type === "turn_failed" ||
-        event.type === "turn_cancelled"
-      ) {
-        terminalFailure = event;
-      }
-    }
-  } catch (error) {
-    didCatch = true;
-    caughtError = error;
-  }
-  if (terminalFailure === null) {
-    if (didCatch) throw caughtError;
-    if (wroteText) stdout.write("\n\n");
-    return;
-  }
-  if (wroteText) stdout.write("\n");
-  stdout.write(
-      `Robin turn ${terminalFailure.type === "turn_cancelled" ? "cancelled" : "failed"} ` +
-      `(${terminalFailure.error.code}): ` +
-      `${sanitizeTerminalDiagnostic(terminalFailure.error.message)}\n\n`,
-  );
-}
-
-interface PreviewEventRecord {
-  readonly sequence: number;
-  readonly event: RobinAgentEvent;
+    ? executeInteractiveSession(
+        request,
+        application,
+        dependencies.input,
+        stdout as InteractiveOutput,
+        stderr,
+        dependencies.environment ?? process.env,
+        runtime,
+      )
+    : executePrint(request, application, stdout, stderr, runtime);
 }
 
 async function executePrint(
   request: PrintCliRequest,
-  application: EphemeralRobinApplication,
+  application: R1RobinApplication,
   stdout: SessionWriter,
   stderr: SessionWriter,
+  runtime: SessionCommandRuntime,
 ): Promise<number> {
-  const events: PreviewEventRecord[] = [];
+  const events: RobinApplicationEvent[] = [];
+  const submission = new AbortController();
+  let closePromise: Promise<void> | null = null;
+  const closeApplication = (
+    reason: "eof" | "error",
+  ): Promise<void> => {
+    closePromise ??= application.close(reason);
+    return closePromise;
+  };
+  if (abortSignalRaised(runtime.outputFailureSignal)) {
+    await closeApplication("error");
+    return EXIT_CODES.infrastructureFailed;
+  }
+  const detachOutputFailure = linkAbortSignal(
+    runtime.outputFailureSignal,
+    () => {
+      submission.abort("output_failure");
+      void closeApplication("error").catch(() => {});
+    },
+  );
   let finalText = "";
-  let terminalFailure: Extract<
-    RobinAgentEvent,
-    { readonly type: "turn_failed" | "turn_cancelled" }
-  > | null = null;
-  let didCatch = false;
-  let caughtError: unknown;
+  let terminalFailure:
+    | Extract<
+        RobinApplicationEvent,
+        {
+          readonly type:
+            | "TurnFailed"
+            | "TurnCancelled"
+            | "BudgetExhausted";
+        }
+      >
+    | null = null;
   try {
     for await (const event of application.submit(
       request.prompt,
-      new AbortController().signal,
+      submission.signal,
     )) {
-      const portableEvent = event;
-      const record = Object.freeze({
-        sequence: events.length + 1,
-        event: portableEvent,
-      });
-      events.push(record);
+      if (abortSignalRaised(runtime.outputFailureSignal)) break;
+      events.push(event);
       if (request.outputFormat === "stream-json") {
         stdout.write(
           serializeMachineJson({
@@ -195,49 +148,68 @@ async function executePrint(
             sessionId: application.snapshot.sessionId,
             persistence: "ephemeral",
             permissionMode: request.permissionMode,
-            permissions: "inactive-no-tools",
+            permissions: "synthetic-fixture-tools",
             maximumAgentTurns: request.maximumTurns,
-            sequence: record.sequence,
-            event: portableEvent,
+            sequence: event.sequence,
+            event,
           }) + "\n",
         );
       }
-      if (portableEvent.type === "turn_completed") finalText = portableEvent.text;
+      if (event.type === "TurnCompleted") finalText = event.payload.text;
       if (
-        portableEvent.type === "turn_failed" ||
-        portableEvent.type === "turn_cancelled"
+        event.type === "TurnFailed" ||
+        event.type === "TurnCancelled" ||
+        event.type === "BudgetExhausted"
       ) {
-        terminalFailure = portableEvent;
+        terminalFailure = event;
       }
     }
-  } catch (error) {
-    didCatch = true;
-    caughtError = error;
+  } finally {
+    try {
+      await closeApplication(
+        abortSignalRaised(runtime.outputFailureSignal) ? "error" : "eof",
+      );
+    } finally {
+      detachOutputFailure();
+    }
   }
 
-  if (didCatch && terminalFailure === null) {
-    throw caughtError;
+  if (abortSignalRaised(runtime.outputFailureSignal)) {
+    return EXIT_CODES.infrastructureFailed;
   }
+
   if (terminalFailure !== null) {
-    const status =
-      terminalFailure.type === "turn_cancelled" ? "cancelled" : "failed";
+    const code =
+      terminalFailure.type === "TurnCancelled"
+        ? "cancelled"
+        : terminalFailure.type === "BudgetExhausted"
+          ? "budget_exceeded"
+          : terminalFailure.payload.code;
+    const message =
+      terminalFailure.type === "TurnCancelled"
+        ? terminalFailure.payload.reason
+        : terminalFailure.type === "BudgetExhausted"
+          ? `${terminalFailure.payload.dimension} budget exhausted ` +
+            `(${terminalFailure.payload.used}/${terminalFailure.payload.limit})`
+          : terminalFailure.payload.message;
     if (request.outputFormat === "text") {
       stderr.write(
-        `robin: Turn ${status} (${terminalFailure.error.code}): ` +
-          `${sanitizeTerminalDiagnostic(terminalFailure.error.message)}\n`,
+        `robin: Turn ${terminalFailure.type === "TurnCancelled" ? "cancelled" : "failed"} ` +
+          `(${code}): ${sanitizeTerminalDiagnostic(message)}\n`,
       );
     } else if (request.outputFormat === "json") {
       stdout.write(
         serializeMachineJson({
           ...previewResultMetadata(request, application),
-          status,
+          status:
+            terminalFailure.type === "TurnCancelled" ? "cancelled" : "failed",
           result: null,
-          error: terminalFailure.error,
+          error: { code, message },
           events,
         }) + "\n",
       );
     }
-    return exitCodeForErrorCode(terminalFailure.error.code);
+    return exitCodeForErrorCode(code);
   }
 
   if (request.outputFormat === "text") {
@@ -257,7 +229,7 @@ async function executePrint(
 
 function previewResultMetadata(
   request: PrintCliRequest,
-  application: EphemeralRobinApplication,
+  application: R1RobinApplication,
 ): Readonly<Record<string, unknown>> {
   return Object.freeze({
     schemaVersion: 1,
@@ -266,9 +238,9 @@ function previewResultMetadata(
     persistence: "ephemeral",
     saved: false,
     permissionMode: request.permissionMode,
-    permissions: "inactive-no-tools",
+    permissions: "synthetic-fixture-tools",
     maximumAgentTurns: request.maximumTurns,
-    usedAgentTurns: 1,
+    usedAgentTurns: application.snapshot.turnsStarted,
   });
 }
 
@@ -295,35 +267,30 @@ export function sanitizeTerminalText(value: string): string {
 }
 
 export function sanitizeTerminalDiagnostic(value: string): string {
-  let safe = "";
-  for (const character of value) {
-    const codePoint = character.codePointAt(0)!;
-    if (
-      codePoint >= 0x20 &&
-      codePoint !== 0x7f &&
-      (codePoint < 0x80 || codePoint > 0x9f) &&
-      (codePoint < 0xd800 || codePoint > 0xdfff) &&
-      codePoint !== 0x2028 &&
-      codePoint !== 0x2029
-    ) {
-      safe += character;
-    } else {
-      safe += "\\u{" + codePoint.toString(16).padStart(2, "0") + "}";
-    }
-  }
-  return safe;
+  return sanitizeTerminalText(value).replaceAll("\n", "\\n");
 }
 
 function serializeMachineJson(value: unknown): string {
-  return JSON.stringify(value).replace(/[\u007f-\u009f\u2028\u2029]/gu, (character) =>
-    "\\u" + character.codePointAt(0)!.toString(16).padStart(4, "0"),
+  return JSON.stringify(value).replace(
+    /[\u007f-\u009f\u2028\u2029]/gu,
+    (character) =>
+      "\\u" + character.codePointAt(0)!.toString(16).padStart(4, "0"),
   );
 }
 
-function isTerminalInput(input: Readable): boolean {
-  return (input as Readable & { readonly isTTY?: boolean }).isTTY === true;
+function linkAbortSignal(
+  signal: AbortSignal | undefined,
+  abort: () => void,
+): () => void {
+  if (signal === undefined) return () => {};
+  if (signal.aborted) {
+    abort();
+    return () => {};
+  }
+  signal.addEventListener("abort", abort, { once: true });
+  return () => signal.removeEventListener("abort", abort);
 }
 
-function isTerminalOutput(output: SessionWriter): output is SessionWriter & Writable {
-  return (output as SessionWriter & { readonly isTTY?: boolean }).isTTY === true;
+function abortSignalRaised(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }

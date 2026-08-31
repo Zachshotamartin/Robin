@@ -1,33 +1,52 @@
 # `robin` CLI
 
-The Robin CLI now exposes an early ephemeral conversation preview, two retained
-deterministic run demonstrations, and the Milestone B policy debugger.
+The current R1 candidate is an ephemeral, Claude Code-style coding-agent CLI
+backed by deterministic synthetic fixtures. It uses the same in-memory
+application/session path for interactive and headless execution. This is a gate
+candidate, not an accepted R1 release.
 
-The preview uses one provider-neutral multi-turn session path for interactive
-and headless execution:
+Start the coding-agent experience with:
 
 ```text
 robin
 robin "initial prompt"
-robin --provider synthetic --model synthetic-preview-v1 "initial prompt"
+robin --provider synthetic --model synthetic-r1-v1 "initial prompt"
 robin -p "one headless prompt"
 robin --print --output-format json "one headless prompt"
 robin --print --output-format stream-json "one headless prompt"
 ```
 
-Interactive mode accepts multiple prompts and supports `/help`, `/exit`, and
-`/quit`. It is currently line-oriented rather than the planned raw-mode terminal
-editor. The banner identifies the selected synthetic provider, `ask` or `plan`
-permission label, and ephemeral persistence. `ask` is the preview label that
-will migrate to the target `default` permission mode; neither label authorizes
-tools because this slice has none. The synthetic provider performs no
-filesystem, process, Git, credential, or network I/O. Selecting any other
-provider fails explicitly.
+With interactive stdin and stdout, a capable terminal enters raw mode and uses
+a grapheme-aware editor plus a cursor-addressed, diff-based renderer. A
+non-TTY, `TERM=dumb`, or screen-reader session selects the append-only flat
+renderer instead. Both renderers show streamed assistant text, tool boundaries,
+usage, queue state, cancellation, and the `ephemeral` session status.
 
-Print mode requires exactly one prompt. `text` emits the final answer, `json`
-emits one versioned result envelope, and `stream-json` emits one JSON object per
-versioned Robin agent preview event, wrapped with a monotonic CLI sequence
-number. Both machine formats declare `stability: "experimental"`.
+Press Enter to submit. While a turn is active, submitted prompts enter a
+bounded FIFO queue of at most eight messages. Raw mode responds to terminal
+resize events and treats bracketed paste as one inert text insertion: pasted
+newlines and command-looking text do not submit until a separate Enter. The
+first Ctrl-C during work requests cancellation; a second Ctrl-C inside the
+bounded escalation window forces exit with the cancellation exit code. Ctrl-D
+closes an idle session. `/help`, `/exit`, and `/quit` are available as local
+commands. Robin restores the terminal's original input mode and
+bracketed-paste state, cursor visibility, and terminal style on its tested exit
+and error paths.
+
+The only available coding-session provider is `synthetic`, with model
+`synthetic-r1-v1`. Its deterministic first-turn fixture streams text, calls
+`robin.synthetic.workspace_summary@1` and
+`robin.synthetic.inspect_file@1` through the application tool loop, then
+answers a fixture debugging question. A follow-up answer depends on observations
+retained earlier in the same process. The tools inspect an in-memory fixture;
+they do not read or modify the current directory.
+
+Print mode requires exactly one prompt and never enters raw mode. `text` emits
+the final answer, `json` emits one versioned result envelope containing the
+application events, and `stream-json` emits one JSON object per versioned
+application event with a monotonic sequence. Both machine formats declare
+`stability: "experimental"`; their stable automation contract remains assigned
+to a later release gate.
 `--maximum-turns` is bounded from 1 through 256; the current one-prompt
 invocation consumes only one turn. `--no-save` is an explicit statement of the
 current ephemeral behavior. Raw API keys are never accepted in arguments.
@@ -36,9 +55,22 @@ Provider text is sanitized before terminal rendering so ESC, BEL, carriage
 return, C1 control bytes, and other unsafe controls are displayed as escaped
 text. Machine modes preserve the parsed semantic string while serializing
 terminal controls and Unicode line separators as standard JSON escapes, and
-contain no ANSI presentation bytes. The complete R1 raw-terminal, resize,
-queued-input, cancellation, synthetic-tool, and PTY restoration gate remains
-planned.
+contain no ANSI presentation bytes.
+
+Every coding session is in-memory and disappears at exit. The R1 candidate has
+no physical repository access, file editing, command/process execution, Git
+integration, network access, provider API calls, credentials/API keys, durable
+save, continuation, or resume. `ask` remains the preview spelling for the
+future `default` permission mode; `plan` is also accepted. The two pinned,
+non-consequential synthetic fixture tools are the only tool effects.
+
+The raw-terminal scenarios are verified locally under a real macOS PTY,
+including two turns, the two fixture tools, queue promotion, resize, paste,
+single/double interrupt behavior, failure paths, and terminal restoration.
+Required hosted Linux and hosted macOS evidence is still pending, so this
+documentation does not claim that R1 is accepted. See
+[Terminal Compatibility](../../docs/TERMINAL_COMPATIBILITY.md) for the exact
+matrix and fallback behavior.
 
 Retained compatibility commands are:
 

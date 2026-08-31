@@ -226,8 +226,9 @@ test("source-installed bin runs one headless Robin preview turn", async () => {
   const result = await execute(["-p", "Explain the current slice."]);
   assert.equal(result.code, 0);
   assert.equal(result.stderr, "");
-  assert.match(result.stdout, /^Robin received: Explain the current slice\./u);
-  assert.match(result.stdout, /no repository files were read or changed/u);
+  assert.match(result.stdout, /^I’ll inspect the deterministic workspace summary/u);
+  assert.match(result.stdout, /src\/calculate\.ts/u);
+  assert.match(result.stdout, /No physical repository was read or changed/u);
 });
 
 test("source-installed bin emits parseable stream JSON for a preview turn", async () => {
@@ -250,12 +251,12 @@ test("source-installed bin emits parseable stream JSON for a preview turn", asyn
   assert.equal(records.length > 3, true);
   assert.equal(records.every((record) => record.schemaVersion === 1), true);
   assert.equal(records.every((record) => record.persistence === "ephemeral"), true);
-  assert.equal(records[0]?.event.type, "turn_started");
-  assert.equal(records.at(-1)?.event.type, "turn_completed");
+  assert.equal(records[0]?.event.type, "UserMessageAccepted");
+  assert.equal(records.at(-1)?.event.type, "TurnCompleted");
 });
 
 test(
-  "source-installed bin exits quietly when a headless output pipe closes early",
+  "source-installed bin cancels a slow headless turn when its output pipe closes",
   { timeout: 30_000 },
   async () => {
     const child = spawn(
@@ -265,7 +266,7 @@ test(
         "--print",
         "--output-format",
         "stream-json",
-        "x".repeat(12_000),
+        "[scenario:slow]",
       ],
       { stdio: ["ignore", "pipe", "pipe"] },
     );

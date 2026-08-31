@@ -21,6 +21,7 @@ export type {
 } from "./model-provider.js";
 export { SyntheticModelProvider } from "./synthetic-model-provider.js";
 export type {
+  SyntheticModelProviderOptions,
   SyntheticModelScript,
   SyntheticModelStep,
 } from "./synthetic-model-provider.js";

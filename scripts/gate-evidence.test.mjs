@@ -1108,9 +1108,10 @@ test("manifest validation rejects unredacted environment fields and self hashes"
   );
 });
 
-test("repository R0 capture config and JSON schemas stay structurally valid", async () => {
+test("repository R0/R1 capture configs and JSON schemas stay structurally valid", async () => {
   const [
     config,
+    r1Config,
     buildPlan,
     operationsTestPlan,
     manifestSchema,
@@ -1120,6 +1121,7 @@ test("repository R0 capture config and JSON schemas stay structurally valid", as
   ] =
     await Promise.all([
       readFile(path.join(repositoryRoot, "evidence/config/r0.json"), "utf8").then(JSON.parse),
+      readFile(path.join(repositoryRoot, "evidence/config/r1.json"), "utf8").then(JSON.parse),
       readFile(path.join(repositoryRoot, "docs/BUILD_PLAN.md"), "utf8"),
       readFile(path.join(repositoryRoot, "docs/OPERATIONS_TEST_PLAN.md"), "utf8"),
       readFile(
@@ -1146,6 +1148,9 @@ test("repository R0 capture config and JSON schemas stay structurally valid", as
   assert.doesNotThrow(() =>
     validateCaptureConfig(config, { buildPlan, operationsTestPlan }),
   );
+  assert.doesNotThrow(() =>
+    validateCaptureConfig(r1Config, { buildPlan, operationsTestPlan }),
+  );
   assert.equal(manifestSchema.$id, "https://robin.invalid/schema/gate-evidence-manifest-v1.json");
   assert.equal(configSchema.$id, "https://robin.invalid/schema/gate-evidence-capture-config-v1.json");
   assert.equal(manifestSchema.additionalProperties, false);
@@ -1159,6 +1164,11 @@ test("repository R0 capture config and JSON schemas stay structurally valid", as
   const validateManifestSchema = ajv.compile(manifestSchema);
   assert.equal(
     validateConfigSchema(config),
+    true,
+    JSON.stringify(validateConfigSchema.errors),
+  );
+  assert.equal(
+    validateConfigSchema(r1Config),
     true,
     JSON.stringify(validateConfigSchema.errors),
   );
@@ -1182,6 +1192,24 @@ test("repository R0 capture config and JSON schemas stay structurally valid", as
       "gate-a",
       "gate-b",
     ],
+  );
+  assert.deepEqual(
+    r1Config.commands.map(({ id }) => id),
+    [
+      "dependency-install",
+      "dependency-tree",
+      "static",
+      "unit-contract",
+      "pty-local",
+      "package-smoke",
+      "gate-b",
+    ],
+  );
+  assert.equal(
+    r1Config.knownLimitations.some(
+      ({ id }) => id === "unaccepted-r0-prerequisite",
+    ),
+    true,
   );
   assert.equal(
     [...testSource.matchAll(/^recursiveCaptureTest\(/gmu)].length,

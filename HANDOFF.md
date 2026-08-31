@@ -3,139 +3,142 @@
 ## Product Direction
 
 Robin is a provider-flexible coding-agent CLI in the product category of Claude
-Code. The default experience is a persistent terminal conversation inside a
-repository: Robin understands code, invokes repository tools, edits files, runs
-development commands, verifies the result, and supports Git review. The policy,
-context, event, gateway, and isolation components are internal infrastructure;
-they are not the product center.
+Code. The primary product is the terminal coding agent: an interactive
+conversation that will understand a repository, use coding tools, edit files,
+run verification, and help review Git changes. Policy, context, events,
+capability mediation, and isolation are internal control-plane layers. The CLI
+is a client of those layers, not a policy-debugger product with a thin command
+wrapper.
 
 The pivot is recorded in
-[ADR-0007](docs/decisions/ADR-0007-robin-coding-agent-product-pivot.md).
-Normative direction lives in:
+[ADR-0007](docs/decisions/ADR-0007-robin-coding-agent-product-pivot.md). The
+normative plan is split across:
 
-- [Product Requirements](docs/PRODUCT_REQUIREMENTS.md)
-- [Robin CLI Architecture](docs/ROBIN_CLI_ARCHITECTURE.md)
-- [Build Plan](docs/BUILD_PLAN.md)
-- [Provider Compatibility](docs/PROVIDER_AGENT_COMPATIBILITY.md)
-- [Operations and Test Plan](docs/OPERATIONS_TEST_PLAN.md)
+- [Product requirements](docs/PRODUCT_REQUIREMENTS.md)
+- [CLI architecture](docs/ROBIN_CLI_ARCHITECTURE.md)
+- [Exhaustive build plan](docs/BUILD_PLAN.md)
+- [Provider and agent compatibility](docs/PROVIDER_AGENT_COMPATIBILITY.md)
+- [Operations and test plan](docs/OPERATIONS_TEST_PLAN.md)
+- [Terminal compatibility](docs/TERMINAL_COMPATIBILITY.md)
 
 ## Repository and Git State
 
 - Local repository: `/Users/zacharymartin/Desktop/portfolio_projects/Robin`
 - GitHub repository: `https://github.com/Zachshotamartin/Robin`
-- Visibility: private
 - Origin: `https://github.com/Zachshotamartin/Robin.git`
-- Active pivot branch: `codex/robin-cli-pivot`
-- Pivot base: main commit `77902fd`, the green Milestone B baseline
-- Superseded draft pull request: #1, closed with an archival explanation
+- Default branch baseline: `main` at `77902fd`
+- R0 candidate branch: `codex/robin-cli-pivot` at `23c99a8`
+- R0 pull request: #2; it remains a prerequisite candidate and must not be
+  described as accepted merely because its local or hosted checks are green.
+- R1 candidate branch: `codex/robin-r1-interactive-loop`, stacked on the R0
+  candidate until R0 is explicitly merged.
+- Superseded pull request #1 is closed and archival.
 
-The unfinished Milestone C runtime prototype is preserved on
-`milestone/c-isolated-filesystem-execution` at commit `4743044`. Its audit is
+The unfinished pre-pivot Milestone C prototype remains preserved on
+`milestone/c-isolated-filesystem-execution` at `4743044`. Its audit is
 `docs/MILESTONE_C_WIP_AUDIT.md` on that branch. It has known artifact-store,
-worktree, gateway, and lockfile defects and must not be merged wholesale.
-Review and port individual pieces only when a Robin coding-agent vertical slice
-needs them.
+worktree, gateway, and lockfile defects; port reviewed pieces only when a Robin
+vertical slice needs them.
 
-## Implemented Baseline
+## Accepted Baseline
 
-Milestones A and B remain complete for their narrow claims:
+Milestones A and B remain accepted only for their narrow internal-substrate
+claims: strict contracts, deterministic event/replay behavior, policy parsing
+and evaluation, bounded context, a capability gateway, virtual repository
+fixtures, deterministic scenarios, mutation checks, and their existing evidence.
+They are not a usable coding-agent release.
 
-- strict generic contracts and UUIDv7 identifiers;
-- a deterministic pure run kernel and replay;
-- an in-memory event store;
-- scripted agent and synthetic provider test ports;
-- a handwritten `.guard` policy language and deterministic policy engine;
-- a bounded context broker;
-- virtual and contained-read repository capabilities;
-- a policy-mediated capability gateway;
-- deterministic synthetic and virtual-coding histories;
-- policy, context, canary, replay, mutation, packaging, and repository tests.
+## Unaccepted R1 Candidate
 
-This baseline is internal substrate. The pivot branch additionally provides an
-early ephemeral multi-turn synthetic session and headless output path. It does
-not yet provide real workspace mutation, process execution, local session
-resume, live provider/API-key use, Git write tools, MCP client, hooks, skills,
-subagents, a daemon, or an editor client.
+The R1 branch implements a credential-free, no-network vertical slice of the
+terminal product:
 
-## Pivot Work on the Active Branch
+- `packages/robin-session`: schema-version-1 application events, strict parsing,
+  a pure session reducer, prefix replay, and projections;
+- `packages/robin-agent`: provider-item collection, prompt compilation, explicit
+  budgets, a provider-neutral multi-request tool loop, and serialized turn
+  coordination;
+- `packages/robin-application`: one ephemeral application path, an in-memory
+  bounded ordered journal, lazy replay-then-live subscriptions with per-reader
+  backlog limits, FIFO prompt queue, cancellation ownership, bounded close with
+  late-provider fencing, gateway tool dispatch, and deterministic provider
+  composition;
+- `packages/robin-terminal`: capability detection, grapheme-aware editing,
+  exact 65,536-byte composer/paste bounds, reducer-driven terminal state, raw
+  and flat renderers, single-owner interrupt escalation, stale-frame rejection,
+  and terminal restoration;
+- `apps/cli`: `robin`, `robin "prompt"`, and experimental `robin -p` text,
+  JSON, and streaming-JSON surfaces over the same application path;
+- two pinned read-only synthetic coding tools over immutable in-memory fixtures;
+- real-PTY scenarios for multi-turn use, queuing, cancellation escalation,
+  resize, bracketed paste, provider/tool failures, flat fallback, and restoration;
+- reviewed package inventory generation, isolated offline installation,
+  installed raw-PTY execution, state/cwd canaries, and uninstall verification;
+- SHA-pinned Linux PTY, macOS PTY, package-smoke, and fail-closed R1 aggregate CI
+  jobs plus an R1 evidence-capture descriptor.
 
-The active branch contains or is expected to contain:
+This candidate does **not** read or modify the physical repository, execute a
+process or Git command, call a hosted model, accept an API key, persist or resume
+a session, provide a strict sandbox, publish a supported package, or expose the
+stable automation protocol. Those capabilities remain owned by later gates.
+R1 also remains unaccepted until the R0 prerequisite and the exact reviewed
+hosted Linux/macOS/package/aggregate evidence pass on the candidate commit.
 
-- the public repository and executable identity `Robin` / `robin`;
-- root package name `robin`;
-- CLI package `@zachshotamartin/robin`, private until publication ownership and
-  packaging are explicitly verified;
-- an executable-bit packaging regression for the compiled binary;
-- `packages/robin-agent`, a provider-neutral text-only multi-turn loop plus a
-  deterministic no-I/O preview provider;
-- `packages/robin-application`, the shared ephemeral session application path;
-- `robin`, `robin "prompt"`, and `robin -p` preview modes with text, JSON, and
-  stream-JSON rendering, terminal-control sanitization, and offline package
-  installation coverage;
-- rewritten coding-agent-first requirements, architecture, build plan, README,
-  documentation index, compatibility plan, and repository instructions;
-- internal `@guard/*` workspace names and `.guard` policy syntax preserved
-  temporarily to avoid invalidating deterministic fixtures during the product
-  pivot.
+## Immediate Next Work
 
-Before publishing an npm package, verify ownership of the chosen scope and
-global executable collision behavior. The unscoped `robin` and `robin-cli`
-package names are not assumed available.
+1. Complete review and acceptance of R0 pull request #2 without weakening its
+   evidence or treating a candidate manifest as mainline acceptance.
+2. Review the stacked R1 pull request, require `gate-b`, `pty-linux`,
+   `pty-macos`, `package-smoke`, and `r1-candidate` to pass on the exact head,
+   validate the clean-commit R1 evidence manifest, and only then mark R1
+   accepted.
+3. Build R2 as the first genuinely useful local coding slice: bounded physical
+   repository status/list/search/read, exact-preimage create/edit/apply, direct
+   argv-based process execution, focused verification, and final status/diff in
+   disposable real-Git fixtures. Delete, move, shell strings, network, and Git
+   writes remain registered but denied at that gate.
+4. Build R3 durable local sessions, crash recovery, `continue`, and `resume` on
+   the R2 tool path.
+5. Build R4 around the frozen provider-neutral port with one hosted provider,
+   model discovery, session-scoped bring-your-own-key onboarding, redaction, and
+   explicit manual real-provider smokes. CI must remain credential-free.
+6. Continue through R5 permissions and strict sandboxing, R6 daily Git workflow,
+   R7 provider breadth and stable automation, and R8 configuration, trust, and
+   instructions before calling Robin a supported first release.
 
-## Immediate Implementation Sequence
-
-1. Commit the R0 cold-path, package-inventory, public-identity, and gate-evidence
-   closeout on `codex/robin-cli-pivot`; generate and validate the R0 manifest
-   only from that clean commit.
-2. Push the refreshed candidate to existing draft pull request #2, attach the
-   exact manifest/test summary, require hosted CI to pass, then make the pull
-   request review-ready and merge it before calling R0 accepted.
-3. From the accepted R0 mainline, complete R1 with the versioned
-   application-event/reducer model, deterministic
-   synthetic tool calls, queued input, signal cancellation, raw terminal input,
-   renderer state, PTY restoration tests, and terminal compatibility evidence.
-4. Complete R2 repository understanding and bounded workspace mutation in
-   temporary Git fixtures: status, list/search/read, diff, exact-preimage apply,
-   create, structured direct process execution, focused verification, and final
-   status/diff. Register but deny delete, move, shell, network, and Git writes;
-   disclose that R2 has manual approval but no strict sandbox guarantee.
-5. Complete R3 local durable sessions, recovery, continue, and resume on the
-   R2 tool path.
-6. Complete R4 with one hosted direct provider and session-scoped BYOK
-   onboarding after the semantic loop and repository tools are provider-neutral.
-7. Complete R5 persistent permission modes/rules, approvals, explicit shell,
-   strict sandbox backends, stronger process limits, and cancellation evidence;
-   then R6 batch/delete/move, checkpoints, rewind, and daily Git workflow.
-8. Continue through provider breadth and stable automation in R7,
-   configuration/trust/instructions in R8, and the remaining post-1.0 gates in
-   `docs/BUILD_PLAN.md`.
-
-## Required Verification
+## Verification
 
 Run from the repository root:
 
 ```bash
 npm ci --ignore-scripts
-npm run check
-npm run build
+npm run evidence:validate-config:r1
+npm run test:repository
+npm run test:unit
 npm run test:gate:b
+npm run test:pty
+npm run test:package
+npm run test:gate:r1
 git diff --check
 ```
 
-Interactive work additionally requires PTY or terminal-double tests. Workspace
-work requires real temporary Git repositories, dirty-state preservation,
-symlink/path traversal, stale-preimage, cancellation, and process-tree tests.
-Provider work requires synthetic-server conformance and credential-canary scans.
+The local aggregate intentionally overlaps narrower commands so that individual
+failures remain diagnosable. Local macOS results do not substitute for the
+configured hosted Linux and macOS jobs. The reviewed package inventory must be
+regenerated only after source freeze and measured on every recorded platform/npm
+profile; never infer or hand-author an unmeasured archive hash.
 
-## Rules That Must Survive the Pivot
+## Invariants That Must Survive
 
-- Do not claim planned coding-agent behavior is already implemented.
-- Do not expose or accept a raw API key through argv, logs, transcripts, project
-  files, tool results, diagnostics, or child environments.
-- Do not execute partial or unvalidated provider tool calls.
-- Permission must evaluate the same immutable normalized action that executes.
-- Preserve pre-existing and subsequent user workspace changes.
-- Do not silently fall back from a requested strict sandbox.
-- Do not turn an incomplete or uncertain effect into a successful resumed turn.
+- Planned behavior stays labeled planned; candidate evidence is not acceptance.
+- No real secret or private source enters code, fixtures, argv, logs,
+  transcripts, diagnostics, package contents, or CI artifacts.
+- Partial or unvalidated provider tool calls never execute.
+- Policy evaluates the same immutable normalized action that a handler receives.
+- Replay never performs effects, and an uncertain effect never becomes success.
+- Existing and concurrent user workspace changes must be preserved.
+- Requested strict isolation must fail closed instead of silently degrading.
+- Provider and UI adapters depend on the shared application contracts; they do
+  not fork the agent loop or become enforcement boundaries.
 - Do not build a VS Code fork before the CLI engine and client protocol prove
   that an ordinary extension is insufficient.
