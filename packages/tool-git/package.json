@@ -1,0 +1,22 @@
+{
+  "name": "@guard/tool-git",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Controlled read-only Git identity, status, diff, log, and attribution for Robin.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build",
+    "test": "npm run build && node --test --test-reporter=../../scripts/deterministic-test-reporter.mjs dist/*.test.js"
+  }
+}
