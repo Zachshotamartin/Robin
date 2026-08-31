@@ -351,6 +351,10 @@ function entriesByPath(snapshot) {
   return new Map(snapshot.workspace.entries.map((entry) => [entry.path, entry]));
 }
 
+function treeEntriesByPath(tree) {
+  return new Map((tree?.entries ?? []).map((entry) => [entry.path, entry]));
+}
+
 function comparableEntry(entry) {
   const { path: _path, ...rest } = entry;
   return rest;
@@ -412,6 +416,46 @@ export function diffRepositorySnapshots(before, after) {
     },
     git: { changed: gitChanged },
   };
+}
+
+export function diffGitStorageSnapshots(before, after) {
+  const beforeEntries = treeEntriesByPath(before.gitStorage);
+  const afterEntries = treeEntriesByPath(after.gitStorage);
+  const added = [];
+  const changed = [];
+  const removed = [];
+
+  for (const [entryPath, afterEntry] of afterEntries) {
+    const beforeEntry = beforeEntries.get(entryPath);
+    if (beforeEntry === undefined) {
+      added.push(entryPath);
+    } else if (
+      !isDeepStrictEqual(comparableEntry(beforeEntry), comparableEntry(afterEntry))
+    ) {
+      changed.push(entryPath);
+    }
+  }
+  for (const entryPath of beforeEntries.keys()) {
+    if (!afterEntries.has(entryPath)) {
+      removed.push(entryPath);
+    }
+  }
+  return {
+    added: added.sort(),
+    changed: changed.sort(),
+    removed: removed.sort(),
+  };
+}
+
+export function assertGitStorageUnchanged(before, after) {
+  const delta = diffGitStorageSnapshots(before, after);
+  if (
+    delta.added.length !== 0 ||
+    delta.changed.length !== 0 ||
+    delta.removed.length !== 0
+  ) {
+    throw new Error(`Git storage changed: ${stableJson(delta)}`);
+  }
 }
 
 export function assertRepositoryDelta(before, after, expected) {

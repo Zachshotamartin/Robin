@@ -4,8 +4,10 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  assertGitStorageUnchanged,
   assertRepositoryDelta,
   createRepositoryFixture,
+  diffGitStorageSnapshots,
   diffRepositorySnapshots,
   snapshotRepository,
 } from "./repository-fixture.mjs";
@@ -125,6 +127,12 @@ test("delta oracle identifies exact file and Git changes", async (context) => {
   assert.deepEqual(delta.workspace.removed, []);
   assert.deepEqual(delta.workspace.changed, ["src/answer.txt"]);
   assert.equal(delta.git.changed, true);
+  assert.deepEqual(diffGitStorageSnapshots(before, after), {
+    added: [],
+    changed: [],
+    removed: [],
+  });
+  assert.doesNotThrow(() => assertGitStorageUnchanged(before, after));
   assert.doesNotThrow(() =>
     assertRepositoryDelta(before, after, {
       added: ["created.txt"],
@@ -142,6 +150,27 @@ test("delta oracle identifies exact file and Git changes", async (context) => {
         gitChanged: true,
       }),
     /unexpected repository delta/u,
+  );
+});
+
+test("Git-storage oracle distinguishes worktree edits from prohibited index writes", async (context) => {
+  const fixture = await createRepositoryFixture({ variant: "clean" });
+  context.after(() => fixture.cleanup());
+  const before = fixture.initialSnapshot;
+
+  await writeFile(path.join(fixture.workspaceRoot, "src", "answer.txt"), "42\n");
+  const worktreeOnly = await snapshotRepository(fixture.workspaceRoot);
+  assert.doesNotThrow(() => assertGitStorageUnchanged(before, worktreeOnly));
+
+  await fixture.runGit(["add", "--", "src/answer.txt"]);
+  const indexChanged = await snapshotRepository(fixture.workspaceRoot);
+  assert.match(
+    diffGitStorageSnapshots(worktreeOnly, indexChanged).changed.join("\n"),
+    /index/u,
+  );
+  assert.throws(
+    () => assertGitStorageUnchanged(worktreeOnly, indexChanged),
+    /Git storage changed/u,
   );
 });
 
