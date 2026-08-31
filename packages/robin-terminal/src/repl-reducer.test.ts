@@ -11,6 +11,10 @@ import {
   type ReplState,
 } from "./repl-reducer.js";
 import { TerminalKeyDecoder } from "./key-decoder.js";
+import type {
+  TerminalApprovalRequest,
+  TerminalApprovalResolution,
+} from "./approval.js";
 
 const encoder = new TextEncoder();
 
@@ -243,3 +247,165 @@ test("local command results never settle or dequeue an active turn", () => {
     { kind: "error", text: "Unknown local command" },
   ]);
 });
+
+test("approval input is isolated, exact, one-shot, and has no Enter default", () => {
+  let state = apply(
+    createReplState({ columns: 80, rows: 24 }),
+    { type: "turn_started" },
+    { type: "key", key: { type: "text", text: "unrelated queued prompt" } },
+    { type: "approval_requested", request: approvalRequest() },
+  );
+  const preservedComposer = state.input;
+  assert.equal(state.approval?.phase, "presenting");
+
+  state = reduceRepl(state, {
+    type: "approval_presented",
+    approvalId: approvalRequest().approvalId,
+  }).state;
+  const approvalBeforeResize = state.approval;
+  state = reduceRepl(state, {
+    type: "key",
+    key: { type: "resize", columns: 132, rows: 41 },
+  }).state;
+  assert.equal(state.approval, approvalBeforeResize);
+  assert.equal(state.input, preservedComposer);
+
+  let transition = reduceRepl(state, { type: "key", key: { type: "enter" } });
+  assert.deepEqual(transition.effects, []);
+  assert.equal(
+    transition.state.diagnostics.at(-1)?.code,
+    "approval_decision_required",
+  );
+
+  transition = reduceRepl(transition.state, {
+    type: "key",
+    key: { type: "paste", text: "y" },
+  });
+  assert.deepEqual(transition.effects, []);
+  assert.equal(
+    transition.state.diagnostics.at(-1)?.code,
+    "approval_paste_rejected",
+  );
+
+  state = apply(
+    transition.state,
+    { type: "key", key: { type: "text", text: "yes" } },
+  );
+  transition = reduceRepl(state, { type: "key", key: { type: "enter" } });
+  assert.deepEqual(transition.effects, []);
+  assert.equal(inputBufferText(transition.state.approval!.input), "");
+
+  state = apply(
+    transition.state,
+    { type: "key", key: { type: "text", text: "allow-once" } },
+  );
+  transition = reduceRepl(state, { type: "key", key: { type: "enter" } });
+  assert.deepEqual(transition.effects, [
+    {
+      type: "resolve_approval",
+      approvalId: approvalRequest().approvalId,
+      decision: "allow_once",
+    },
+  ]);
+  assert.equal(transition.state.approval?.phase, "response_submitted");
+  assert.equal(transition.state.input, preservedComposer);
+
+  const duplicate = reduceRepl(transition.state, {
+    type: "key",
+    key: { type: "enter" },
+  });
+  assert.deepEqual(duplicate.effects, []);
+});
+
+test("approval denial, invalidation, Ctrl-C, and Ctrl-D remain visibly safe", () => {
+  const request = approvalRequest();
+  let state = apply(
+    createReplState(),
+    { type: "turn_started" },
+    { type: "approval_requested", request },
+    { type: "approval_presented", approvalId: request.approvalId },
+  );
+  const ctrlD = reduceRepl(state, { type: "key", key: { type: "ctrl_d" } });
+  assert.deepEqual(ctrlD.effects, []);
+  assert.equal(ctrlD.state.approval?.approvalId, request.approvalId);
+
+  const cancelled = reduceRepl(ctrlD.state, {
+    type: "key",
+    key: { type: "ctrl_c" },
+  });
+  assert.deepEqual(cancelled.effects, [{ type: "request_cancel" }]);
+  assert.equal(cancelled.state.status, "cancelling");
+  assert.equal(cancelled.state.approval?.phase, "cancelling");
+  const lateY = reduceRepl(cancelled.state, {
+    type: "key",
+    key: { type: "text", text: "y" },
+  });
+  assert.deepEqual(lateY.effects, []);
+
+  state = apply(
+    createReplState(),
+    { type: "turn_started" },
+    { type: "approval_requested", request },
+    { type: "approval_presented", approvalId: request.approvalId },
+  );
+  state = reduceRepl(state, {
+    type: "approval_resolved",
+    resolution: approvalResolution(request, "deny", "denied"),
+  }).state;
+  assert.equal(state.approval, null);
+  assert.match(
+    state.transcript.at(-1)?.text ?? "",
+    /denied.*no execution authority/iu,
+  );
+
+  state = reduceRepl(state, {
+    type: "approval_invalidated",
+    invalidation: {
+      ...approvalBinding(request),
+      invalidatedAt: "2026-08-30T02:00:03.000Z",
+      observedPreconditionHash: "5".repeat(64),
+      reason: "preconditions_changed",
+    },
+  }).state;
+  assert.match(
+    state.transcript.at(-1)?.text ?? "",
+    /invalidated.*no execution authority/iu,
+  );
+});
+
+function approvalRequest(): TerminalApprovalRequest {
+  return Object.freeze({
+    actionHash: "1".repeat(64),
+    actionId: "act_018f05a0-7b01-7000-8000-000000000291",
+    approvalId: "apr_018f05a0-7b01-7000-8000-000000000292",
+    callId: "call-approval-1",
+    displayedSummaryHash: "2".repeat(64),
+    expiresAt: "2026-08-30T02:05:00.000Z",
+    normalizedRequestHash: "3".repeat(64),
+    policySnapshotHash: "4".repeat(64),
+    preconditionHash: "5".repeat(64),
+    requestedAt: "2026-08-30T02:00:01.000Z",
+    toolName: "robin.edit.apply@1",
+    turnId: "turn-approval-1",
+    canonicalSummary:
+      '{"operation":"replace exact text","path":"src/calculate.ts","sandboxed":false}',
+  });
+}
+
+function approvalBinding(request: TerminalApprovalRequest) {
+  const { canonicalSummary: _canonicalSummary, ...binding } = request;
+  return binding;
+}
+
+function approvalResolution(
+  request: TerminalApprovalRequest,
+  decision: "allow_once" | "deny",
+  outcome: "granted" | "denied" | "stale",
+): TerminalApprovalResolution {
+  return Object.freeze({
+    ...approvalBinding(request),
+    decision,
+    outcome,
+    resolvedAt: "2026-08-30T02:00:02.000Z",
+  });
+}

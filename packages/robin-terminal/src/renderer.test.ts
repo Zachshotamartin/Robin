@@ -9,7 +9,9 @@ import {
   StaleTerminalFrameError,
   wrapCells,
   writeTerminalFrame,
+  renderApprovalRequestBlock,
 } from "./renderer.js";
+import type { TerminalApprovalRequest } from "./approval.js";
 import { detectTerminalCapabilities } from "./terminal-capabilities.js";
 
 function capability(columns: number, rows = 24) {
@@ -225,3 +227,68 @@ test("ASCII fallback headers and multiline prompt cursors are deterministic", ()
   assert.deepEqual(multilineFrame.rows.slice(-2), ["> one", "two"]);
   assert.deepEqual(multilineFrame.cursor, { row: 3, column: 4 });
 });
+
+test("approval rendering is complete, deterministic, and control-injection safe", () => {
+  const request: TerminalApprovalRequest = Object.freeze({
+    actionHash: "1".repeat(64),
+    actionId: "act-safe\u001b[2J",
+    approvalId: "apr-safe\u0007",
+    callId: "call-safe\rspoof",
+    displayedSummaryHash: "2".repeat(64),
+    expiresAt: "2026-08-30T02:05:00.000Z",
+    normalizedRequestHash: "3".repeat(64),
+    policySnapshotHash: "4".repeat(64),
+    preconditionHash: "5".repeat(64),
+    requestedAt: "2026-08-30T02:00:01.000Z",
+    toolName: "robin.edit.apply@1\tspoof",
+    turnId: "turn-safe",
+    canonicalSummary:
+      '{"command":"printf \\"complete summary\\"","sandboxed":false}',
+  });
+  const block = renderApprovalRequestBlock(request);
+  assert.equal(block.includes("\u001b"), false);
+  assert.equal(block.includes("\u0007"), false);
+  assert.equal(block.includes("\r"), false);
+  assert.equal(block.includes("\t"), false);
+  assert.match(block, /act-safe\\u\{1b\}\[2J/u);
+  assert.match(block, /apr-safe\\u\{07\}/u);
+  assert.match(block, /Canonical summary: \{"command"/u);
+  assert.match(block, /there is no default decision/u);
+  for (const label of [
+    "Tool:",
+    "Approval ID:",
+    "Action ID:",
+    "Call ID:",
+    "Turn ID:",
+    "Action hash:",
+    "Normalized request hash:",
+    "Precondition hash:",
+    "Policy snapshot hash:",
+    "Displayed summary hash:",
+  ]) {
+    assert.equal(block.includes(label), true, label);
+  }
+
+  let state = applyApproval(createReplState({ columns: 160, rows: 80 }), request);
+  const frame = buildTerminalFrame(state, capability(160, 80));
+  assert.equal(frame.rows.some((row) => row.startsWith("approval> ")), true);
+  assert.equal(frame.rows.join("\n").includes("complete summary"), true);
+  const identity = state.approval;
+  state = reduceRepl(state, {
+    type: "key",
+    key: { type: "resize", columns: 100, rows: 50 },
+  }).state;
+  assert.equal(state.approval, identity);
+});
+
+function applyApproval(
+  initial: ReplState,
+  request: TerminalApprovalRequest,
+): ReplState {
+  let state = reduceRepl(initial, { type: "turn_started" }).state;
+  state = reduceRepl(state, { type: "approval_requested", request }).state;
+  return reduceRepl(state, {
+    type: "approval_presented",
+    approvalId: request.approvalId,
+  }).state;
+}

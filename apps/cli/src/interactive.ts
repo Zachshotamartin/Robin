@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
 
+import { canonicalize } from "@guard/contracts";
 import type {
   R1RobinApplication,
   RobinApplicationEvent,
@@ -13,11 +14,16 @@ import {
   createReplState,
   detectTerminalCapabilities,
   inputBufferText,
+  parseTerminalApprovalDecision,
   reduceRepl,
+  renderApprovalRequestBlock,
   writeTerminalFrame,
   type DecodedKeyEvent,
   type ReplEvent,
   type ReplState,
+  type TerminalApprovalInvalidation,
+  type TerminalApprovalRequest,
+  type TerminalApprovalResolution,
   type TerminalCapabilities,
   type TerminalFrame,
 } from "@guard/robin-terminal";
@@ -61,6 +67,19 @@ export interface InteractiveSessionRuntime {
   readonly outputFailureSignal?: AbortSignal;
   /** Test seam for deterministic two-stage interrupt timing. */
   readonly interruptEscalator?: InterruptEscalator;
+}
+
+interface FlatPendingApproval {
+  readonly request: TerminalApprovalRequest;
+  acceptingInput: boolean;
+  responseSubmitted: boolean;
+}
+
+interface FlatApprovalCallbacks {
+  requested(request: TerminalApprovalRequest): void;
+  resolved(resolution: TerminalApprovalResolution): void;
+  invalidated(invalidation: TerminalApprovalInvalidation): void;
+  terminal(): void;
 }
 
 export async function executeInteractiveSession(
@@ -143,6 +162,9 @@ async function runFlatSession(
   let cleanupFailure: unknown;
   let outputFailed = abortSignalRaised(runtime.outputFailureSignal);
   let closePromise: Promise<void> | null = null;
+  let pendingApproval: FlatPendingApproval | null = null;
+  let inputEnded = false;
+  const activeApproval = (): FlatPendingApproval | null => pendingApproval;
 
   const rememberFailure = (error: unknown): void => {
     if (!primaryFailureSet) {
@@ -185,6 +207,17 @@ async function runFlatSession(
     runtime.outputFailureSignal,
     handleOutputFailure,
   );
+  const handleFlatInterrupt = (): void => {
+    try {
+      if (pendingApproval !== null) pendingApproval.acceptingInput = false;
+      if (application.cancelActiveTurn("user_interrupt")) {
+        renderer.append({ type: "cancelling" });
+      }
+    } catch (error) {
+      fail(error);
+    }
+  };
+  process.on("SIGINT", handleFlatInterrupt);
 
   const launch = (prompt: string): "continue" | "exit" => {
     const command = prompt.trim();
@@ -192,6 +225,44 @@ async function runFlatSession(
       closeInput();
       void closeApplication("user");
       return "exit";
+    }
+    if (pendingApproval !== null) {
+      const decision = parseTerminalApprovalDecision(prompt);
+      if (!pendingApproval.acceptingInput || pendingApproval.responseSubmitted) {
+        renderer.append({
+          type: "diagnostic",
+          code: "approval_input_locked",
+          message:
+            "The approval is not accepting another response; no prompt was submitted.",
+        });
+        return "continue";
+      }
+      if (decision === null) {
+        renderer.append({
+          type: "diagnostic",
+          code: "approval_decision_required",
+          message:
+            "No authority was granted. Type exactly y or allow-once, or n or deny.",
+        });
+        return "continue";
+      }
+      pendingApproval.responseSubmitted = true;
+      renderer.append({
+        type: "approval_response_submitted",
+        approvalId: pendingApproval.request.approvalId,
+        decision,
+      });
+      if (!application.resolveApproval(pendingApproval.request.approvalId, decision)) {
+        renderer.append({
+          type: "diagnostic",
+          code: "approval_response_rejected",
+          message:
+            `Approval ${pendingApproval.request.approvalId} is no longer active; ` +
+            "no execution authority was granted.",
+        });
+        pendingApproval = null;
+      }
+      return "continue";
     }
     if (command === "/help") {
       renderer.append({
@@ -209,12 +280,43 @@ async function runFlatSession(
       });
       return "continue";
     }
+    if (prompt.trim().length === 0) return "continue";
     renderer.append({ type: "user_message", text: prompt });
     let running!: Promise<void>;
     running = consumeFlatTurn(
       application.submit(prompt, new AbortController().signal),
       renderer,
       runtime.outputFailureSignal,
+      {
+        requested(request) {
+          pendingApproval = {
+            request,
+            acceptingInput: false,
+            responseSubmitted: false,
+          };
+          renderer.append({ type: "approval_required", request });
+          if (inputEnded) {
+            application.cancelActiveTurn("input_eof_during_approval");
+          } else {
+            pendingApproval.acceptingInput = true;
+          }
+        },
+        resolved(resolution) {
+          renderer.append({ type: "approval_resolved", resolution });
+          if (pendingApproval?.request.approvalId === resolution.approvalId) {
+            pendingApproval = null;
+          }
+        },
+        invalidated(invalidation) {
+          renderer.append({ type: "approval_invalidated", invalidation });
+          if (pendingApproval?.request.approvalId === invalidation.approvalId) {
+            pendingApproval = null;
+          }
+        },
+        terminal() {
+          pendingApproval = null;
+        },
+      },
     )
       .then(undefined, fail)
       .finally(() => pending.delete(running));
@@ -234,8 +336,9 @@ async function runFlatSession(
         lines = createInterface({ input, crlfDelay: Infinity, terminal: false });
         for await (const line of lines) {
           if (outputFailed || primaryFailureSet) break;
-          if (line.trim().length > 0 && launch(line) === "exit") break;
+          if (launch(line) === "exit") break;
         }
+        inputEnded = true;
       }
       // Flat input is commonly a finite pipe. Let already-submitted work finish
       // naturally on EOF, but explicit exit/failure starts bounded close above.
@@ -244,6 +347,11 @@ async function runFlatSession(
         !outputFailed &&
         !primaryFailureSet
       ) {
+        const approvalAtEof = activeApproval();
+        if (approvalAtEof !== null) {
+          approvalAtEof.acceptingInput = false;
+          application.cancelActiveTurn("input_eof_during_approval");
+        }
         await settleConsumers(pending);
       }
     }
@@ -258,6 +366,7 @@ async function runFlatSession(
   );
   await settleConsumers(pending);
   detachOutputFailure();
+  process.off("SIGINT", handleFlatInterrupt);
   if (primaryFailureSet && cleanupFailure !== undefined) {
     throw new AggregateError(
       [primaryFailure, cleanupFailure],
@@ -275,6 +384,7 @@ async function consumeFlatTurn(
   events: AsyncIterable<RobinApplicationEvent>,
   renderer: FlatRenderer,
   outputFailureSignal: AbortSignal | undefined,
+  approvals: FlatApprovalCallbacks,
 ): Promise<void> {
   for await (const event of events) {
     if (abortSignalRaised(outputFailureSignal)) break;
@@ -312,6 +422,15 @@ async function consumeFlatTurn(
           summary: `${event.payload.code}: ${event.payload.message}`,
         });
         break;
+      case "ApprovalRequested":
+        approvals.requested(toTerminalApprovalRequest(event));
+        break;
+      case "ApprovalResolved":
+        approvals.resolved(toTerminalApprovalResolution(event));
+        break;
+      case "ApprovalInvalidated":
+        approvals.invalidated(toTerminalApprovalInvalidation(event));
+        break;
       case "UsageReported":
         renderer.append({
           type: "usage",
@@ -323,15 +442,18 @@ async function consumeFlatTurn(
         renderer.append({ type: "cancelling" });
         break;
       case "TurnCancelled":
+        approvals.terminal();
         renderer.append({ type: "error", message: event.payload.reason });
         break;
       case "TurnFailed":
+        approvals.terminal();
         renderer.append({
           type: "error",
           message: `${event.payload.code}: ${event.payload.message}`,
         });
         break;
       case "BudgetExhausted":
+        approvals.terminal();
         renderer.append({
           type: "error",
           message:
@@ -340,10 +462,12 @@ async function consumeFlatTurn(
         });
         break;
       case "TurnCompleted":
+        approvals.terminal();
         renderer.append({ type: "completed", text: event.payload.text });
         break;
       case "SessionStarted":
       case "PermissionModeChanged":
+      case "PermissionDecided":
       case "UserMessageAccepted":
       case "TurnStarted":
       case "BudgetWarning":
@@ -474,6 +598,14 @@ async function runRawSession(
         case "request_cancel":
           application.cancelActiveTurn("user_interrupt");
           break;
+        case "resolve_approval":
+          if (!application.resolveApproval(effect.approvalId, effect.decision)) {
+            apply({
+              type: "approval_response_rejected",
+              approvalId: effect.approvalId,
+            });
+          }
+          break;
         case "force_exit":
           finish(EXIT_CODES.cancelled, "shutdown");
           break;
@@ -520,6 +652,26 @@ async function runRawSession(
           summary: `${event.payload.code}: ${event.payload.message}`,
         });
         break;
+      case "ApprovalRequested": {
+        const request = toTerminalApprovalRequest(event);
+        apply({ type: "approval_requested", request });
+        stdout.write("\r\n" + renderApprovalRequestBlock(request, "\r\n"));
+        previousFrame = null;
+        apply({ type: "approval_presented", approvalId: request.approvalId });
+        break;
+      }
+      case "ApprovalResolved":
+        apply({
+          type: "approval_resolved",
+          resolution: toTerminalApprovalResolution(event),
+        });
+        break;
+      case "ApprovalInvalidated":
+        apply({
+          type: "approval_invalidated",
+          invalidation: toTerminalApprovalInvalidation(event),
+        });
+        break;
       case "UsageReported":
         apply({
           type: "usage_reported",
@@ -551,18 +703,22 @@ async function runRawSession(
         interrupts.reset();
         apply({ type: "turn_cancelled", message: event.payload.reason });
         break;
+      case "TurnCancellationRequested":
+        apply({ type: "turn_cancellation_requested" });
+        break;
       case "SessionStarted":
       case "PermissionModeChanged":
+      case "PermissionDecided":
       case "UserMessageQueued":
       case "UserMessageAccepted":
       case "BudgetWarning":
-      case "TurnCancellationRequested":
       case "SessionClosed":
         break;
     }
   };
 
   const applyLocalCommand = (): boolean => {
+    if (state.approval !== null) return false;
     const command = inputBufferText(state.input).trim();
     if (command === "/exit" || command === "/quit") {
       finish(EXIT_CODES.success, "user");
@@ -740,4 +896,37 @@ function summarizeObservation(observation: object): string {
   const serialized = JSON.stringify(observation);
   return [...serialized].slice(0, 160).join("") +
     ([...serialized].length > 160 ? "…" : "");
+}
+
+function toTerminalApprovalRequest(
+  event: Extract<RobinApplicationEvent, { readonly type: "ApprovalRequested" }>,
+): TerminalApprovalRequest {
+  const payload = event.payload;
+  return Object.freeze({
+    actionHash: payload.actionHash,
+    actionId: payload.actionId,
+    approvalId: payload.approvalId,
+    callId: payload.callId,
+    displayedSummaryHash: payload.displayedSummaryHash,
+    expiresAt: payload.expiresAt,
+    normalizedRequestHash: payload.normalizedRequestHash,
+    policySnapshotHash: payload.policySnapshotHash,
+    preconditionHash: payload.preconditionHash,
+    requestedAt: payload.requestedAt,
+    toolName: payload.toolName,
+    turnId: payload.turnId,
+    canonicalSummary: canonicalize(payload.displayedSummary),
+  });
+}
+
+function toTerminalApprovalResolution(
+  event: Extract<RobinApplicationEvent, { readonly type: "ApprovalResolved" }>,
+): TerminalApprovalResolution {
+  return Object.freeze({ ...event.payload });
+}
+
+function toTerminalApprovalInvalidation(
+  event: Extract<RobinApplicationEvent, { readonly type: "ApprovalInvalidated" }>,
+): TerminalApprovalInvalidation {
+  return Object.freeze({ ...event.payload });
 }

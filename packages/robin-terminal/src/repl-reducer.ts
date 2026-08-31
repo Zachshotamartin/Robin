@@ -13,6 +13,15 @@ import {
   type InputBuffer,
 } from "./input-buffer.js";
 import type { DecodedKeyEvent, KeyDecoderDiagnostic } from "./key-decoder.js";
+import {
+  MAXIMUM_APPROVAL_INPUT_UTF8_BYTES,
+  parseTerminalApprovalDecision,
+  sameTerminalApprovalBinding,
+  type TerminalApprovalDecision,
+  type TerminalApprovalInvalidation,
+  type TerminalApprovalRequest,
+  type TerminalApprovalResolution,
+} from "./approval.js";
 
 export const MAXIMUM_QUEUED_MESSAGES = 8;
 export const MAXIMUM_REPL_HISTORY = 100;
@@ -48,6 +57,16 @@ export interface ReplUsage {
   readonly outputTokens: number;
 }
 
+export interface ReplApprovalState extends TerminalApprovalRequest {
+  readonly input: InputBuffer;
+  readonly phase:
+    | "presenting"
+    | "awaiting_input"
+    | "response_submitted"
+    | "cancelling";
+  readonly submittedDecision: TerminalApprovalDecision | null;
+}
+
 export interface ReplState {
   readonly revision: number;
   readonly status: ReplStatus;
@@ -62,6 +81,7 @@ export interface ReplState {
   readonly columns: number;
   readonly rows: number;
   readonly diagnostics: readonly ReplDiagnostic[];
+  readonly approval: ReplApprovalState | null;
 }
 
 export type ReplEvent =
@@ -83,6 +103,21 @@ export type ReplEvent =
   | { readonly type: "turn_completed"; readonly text: string }
   | { readonly type: "turn_failed"; readonly message: string }
   | { readonly type: "turn_cancelled"; readonly message: string }
+  | { readonly type: "turn_cancellation_requested" }
+  | {
+      readonly type: "approval_requested";
+      readonly request: TerminalApprovalRequest;
+    }
+  | { readonly type: "approval_presented"; readonly approvalId: string }
+  | {
+      readonly type: "approval_resolved";
+      readonly resolution: TerminalApprovalResolution;
+    }
+  | {
+      readonly type: "approval_invalidated";
+      readonly invalidation: TerminalApprovalInvalidation;
+    }
+  | { readonly type: "approval_response_rejected"; readonly approvalId: string }
   | {
       readonly type: "local_command";
       readonly kind: "notice" | "error";
@@ -93,6 +128,11 @@ export type ReplEvent =
 export type ReplEffect =
   | { readonly type: "submit_message"; readonly text: string; readonly queued: boolean }
   | { readonly type: "request_cancel" }
+  | {
+      readonly type: "resolve_approval";
+      readonly approvalId: string;
+      readonly decision: TerminalApprovalDecision;
+    }
   | { readonly type: "force_exit" }
   | { readonly type: "close" };
 
@@ -118,6 +158,7 @@ export function createReplState(
     columns: validDimension(options.columns, 80),
     rows: validDimension(options.rows, 24),
     diagnostics: [],
+    approval: null,
   });
 }
 
@@ -142,6 +183,7 @@ export function reduceRepl(state: ReplState, event: ReplEvent): ReplTransition {
           assistantStream: "",
           tools: [],
           usage: Object.freeze({ inputTokens: 0, outputTokens: 0 }),
+          approval: null,
         },
         [],
       );
@@ -219,6 +261,129 @@ export function reduceRepl(state: ReplState, event: ReplEvent): ReplTransition {
       return settleTurn(state, "error", event.message);
     case "turn_cancelled":
       return settleTurn(state, "notice", event.message);
+    case "turn_cancellation_requested":
+      if (state.status !== "working") return transition(state, []);
+      return changed(
+        state,
+        {
+          status: "cancelling",
+          approval: state.approval === null
+            ? null
+            : updateApproval(state.approval, {
+                input: createInputBuffer(),
+                phase: "cancelling",
+              }),
+        },
+        [],
+      );
+    case "approval_requested":
+      if (state.approval !== null || state.status !== "working") {
+        return changed(
+          state,
+          {
+            diagnostics: addDiagnostic(
+              state.diagnostics,
+              "unexpected_approval_request",
+            ),
+          },
+          [],
+        );
+      }
+      return changed(
+        state,
+        {
+          approval: createApprovalState(event.request),
+        },
+        [],
+      );
+    case "approval_presented":
+      if (
+        state.approval === null ||
+        state.approval.approvalId !== event.approvalId ||
+        state.approval.phase !== "presenting"
+      ) {
+        return changed(
+          state,
+          {
+            diagnostics: addDiagnostic(
+              state.diagnostics,
+              "unknown_approval_presentation",
+            ),
+          },
+          [],
+        );
+      }
+      return changed(
+        state,
+        { approval: updateApproval(state.approval, { phase: "awaiting_input" }) },
+        [],
+      );
+    case "approval_resolved":
+      if (
+        state.approval === null ||
+        !sameTerminalApprovalBinding(state.approval, event.resolution)
+      ) {
+        return changed(
+          state,
+          {
+            diagnostics: addDiagnostic(
+              state.diagnostics,
+              "unknown_approval_resolution",
+            ),
+          },
+          [],
+        );
+      }
+      return changed(
+        state,
+        {
+          approval: null,
+          transcript: appendTranscript(state.transcript, {
+            kind: event.resolution.outcome === "granted" ? "notice" : "error",
+            text: approvalResolutionNotice(event.resolution),
+          }),
+        },
+        [],
+      );
+    case "approval_invalidated":
+      return changed(
+        state,
+        {
+          approval:
+            state.approval !== null &&
+            sameTerminalApprovalBinding(state.approval, event.invalidation)
+              ? null
+              : state.approval,
+          transcript: appendTranscript(state.transcript, {
+            kind: "error",
+            text:
+              `Approval ${event.invalidation.approvalId} for ` +
+              `${event.invalidation.toolName} was invalidated ` +
+              `(${event.invalidation.reason}); no execution authority remains.`,
+          }),
+        },
+        [],
+      );
+    case "approval_response_rejected":
+      if (
+        state.approval === null ||
+        state.approval.approvalId !== event.approvalId
+      ) {
+        return transition(state, []);
+      }
+      return changed(
+        state,
+        {
+          approval: null,
+          transcript: appendTranscript(state.transcript, {
+            kind: "error",
+            text:
+              `Approval ${event.approvalId} is no longer active; ` +
+              "no execution authority was granted.",
+          }),
+        },
+        [],
+      );
     case "local_command":
       return completeLocalCommand(state, event.kind, event.message);
     case "fatal":
@@ -237,6 +402,7 @@ export function reduceRepl(state: ReplState, event: ReplEvent): ReplTransition {
 }
 
 function reduceKey(state: ReplState, key: DecodedKeyEvent): ReplTransition {
+  if (state.approval !== null) return reduceApprovalKey(state, key);
   switch (key.type) {
     case "text":
     case "paste":
@@ -283,6 +449,139 @@ function reduceKey(state: ReplState, key: DecodedKeyEvent): ReplTransition {
   }
 }
 
+function reduceApprovalKey(
+  state: ReplState,
+  key: DecodedKeyEvent,
+): ReplTransition {
+  const approval = state.approval!;
+  if (key.type === "resize") {
+    return changed(state, { columns: key.columns, rows: key.rows }, []);
+  }
+  if (key.type === "ctrl_c") {
+    if (state.status !== "working") return transition(state, []);
+    return changed(
+      state,
+      {
+        status: "cancelling",
+        approval: updateApproval(approval, {
+          input: createInputBuffer(),
+          phase: "cancelling",
+        }),
+      },
+      [{ type: "request_cancel" }],
+    );
+  }
+  if (key.type === "ctrl_d") return transition(state, []);
+  if (approval.phase !== "awaiting_input") return transition(state, []);
+
+  switch (key.type) {
+    case "text":
+      return insertApprovalText(state, key.text);
+    case "paste":
+      return changed(
+        state,
+        {
+          diagnostics: addDiagnostic(
+            state.diagnostics,
+            "approval_paste_rejected",
+          ),
+        },
+        [],
+      );
+    case "left":
+      return changeApprovalInput(state, moveInputCursorBy(approval.input, -1));
+    case "right":
+      return changeApprovalInput(state, moveInputCursorBy(approval.input, 1));
+    case "home":
+    case "ctrl_a":
+      return changeApprovalInput(state, moveInputCursor(approval.input, 0));
+    case "end":
+    case "ctrl_e":
+      return changeApprovalInput(
+        state,
+        moveInputCursor(approval.input, approval.input.graphemes.length),
+      );
+    case "backspace":
+      return changeApprovalInput(state, deleteInputBackward(approval.input));
+    case "delete":
+      return changeApprovalInput(state, deleteInputForward(approval.input));
+    case "ctrl_u":
+      return changeApprovalInput(state, deleteInputBeforeCursor(approval.input));
+    case "ctrl_k":
+      return changeApprovalInput(state, deleteInputAfterCursor(approval.input));
+    case "ctrl_w":
+      return changeApprovalInput(state, deleteInputWordBackward(approval.input));
+    case "enter":
+      return submitApprovalInput(state);
+    case "up":
+    case "down":
+      return transition(state, []);
+  }
+}
+
+function insertApprovalText(state: ReplState, text: string): ReplTransition {
+  const approval = state.approval!;
+  if (
+    text.length === 0 ||
+    Buffer.byteLength(inputBufferText(approval.input) + text, "utf8") >
+      MAXIMUM_APPROVAL_INPUT_UTF8_BYTES
+  ) {
+    return text.length === 0
+      ? transition(state, [])
+      : changed(
+          state,
+          {
+            diagnostics: addDiagnostic(
+              state.diagnostics,
+              "approval_input_rejected",
+            ),
+          },
+          [],
+        );
+  }
+  return changeApprovalInput(state, insertInputText(approval.input, text));
+}
+
+function changeApprovalInput(
+  state: ReplState,
+  input: InputBuffer,
+): ReplTransition {
+  return changed(
+    state,
+    { approval: updateApproval(state.approval!, { input }) },
+    [],
+  );
+}
+
+function submitApprovalInput(state: ReplState): ReplTransition {
+  const approval = state.approval!;
+  const decision = parseTerminalApprovalDecision(inputBufferText(approval.input));
+  if (decision === null) {
+    return changed(
+      state,
+      {
+        approval: updateApproval(approval, { input: createInputBuffer() }),
+        diagnostics: addDiagnostic(
+          state.diagnostics,
+          "approval_decision_required",
+        ),
+      },
+      [],
+    );
+  }
+  return changed(
+    state,
+    {
+      approval: updateApproval(approval, {
+        input: createInputBuffer(),
+        phase: "response_submitted",
+        submittedDecision: decision,
+      }),
+    },
+    [{ type: "resolve_approval", approvalId: approval.approvalId, decision }],
+  );
+}
+
 function submitInput(state: ReplState): ReplTransition {
   const text = inputBufferText(state.input);
   if (text.trim().length === 0) return transition(state, []);
@@ -299,6 +598,7 @@ function submitInput(state: ReplState): ReplTransition {
         transcript,
         assistantStream: "",
         tools: [],
+        approval: null,
       },
       [{ type: "submit_message", text, queued: false }],
     );
@@ -402,6 +702,7 @@ function settleTurn(
         transcript,
         assistantStream: "",
         tools: [],
+        approval: null,
       },
       [],
     );
@@ -414,6 +715,7 @@ function settleTurn(
       transcript,
       assistantStream: "",
       tools: [],
+      approval: null,
     },
     [],
   );
@@ -505,7 +807,49 @@ function freezeState(state: ReplState): ReplState {
     diagnostics: Object.freeze(
       state.diagnostics.map((diagnostic) => Object.freeze({ ...diagnostic })),
     ),
+    approval: state.approval,
   });
+}
+
+function createApprovalState(
+  request: TerminalApprovalRequest,
+): ReplApprovalState {
+  return Object.freeze({
+    ...request,
+    input: createInputBuffer(),
+    phase: "presenting",
+    submittedDecision: null,
+  });
+}
+
+function updateApproval(
+  approval: ReplApprovalState,
+  patch: Partial<
+    Pick<ReplApprovalState, "input" | "phase" | "submittedDecision">
+  >,
+): ReplApprovalState {
+  return Object.freeze({ ...approval, ...patch });
+}
+
+function approvalResolutionNotice(
+  resolution: TerminalApprovalResolution,
+): string {
+  if (resolution.outcome === "granted") {
+    return (
+      `Approval ${resolution.approvalId} granted once for ` +
+      `${resolution.toolName}; the one-use response was submitted.`
+    );
+  }
+  if (resolution.outcome === "stale") {
+    return (
+      `Approval ${resolution.approvalId} for ${resolution.toolName} became ` +
+      "stale; no execution authority was granted."
+    );
+  }
+  return (
+    `Approval ${resolution.approvalId} for ${resolution.toolName} was denied; ` +
+    "no execution authority was granted."
+  );
 }
 
 function validDimension(value: number | undefined, fallback: number): number {

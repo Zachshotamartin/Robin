@@ -30,6 +30,21 @@ export {
 export type { InputBuffer, InputSelection } from "./input-buffer.js";
 
 export {
+  MAXIMUM_APPROVAL_INPUT_UTF8_BYTES,
+  parseTerminalApprovalDecision,
+  sameTerminalApprovalBinding,
+} from "./approval.js";
+export type {
+  TerminalApprovalBinding,
+  TerminalApprovalDecision,
+  TerminalApprovalInvalidation,
+  TerminalApprovalInvalidationReason,
+  TerminalApprovalOutcome,
+  TerminalApprovalRequest,
+  TerminalApprovalResolution,
+} from "./approval.js";
+
+export {
   DEFAULT_KEY_DECODER_LIMITS,
   TerminalKeyDecoder,
 } from "./key-decoder.js";
@@ -50,6 +65,7 @@ export {
 } from "./repl-reducer.js";
 export type {
   ReplDiagnostic,
+  ReplApprovalState,
   ReplEffect,
   ReplEvent,
   ReplState,
@@ -63,6 +79,10 @@ export {
   buildTerminalFrame,
   diffTerminalFrames,
   sanitizeTerminalData,
+  renderApprovalInvalidationLine,
+  renderApprovalRequestBlock,
+  renderApprovalRequestLines,
+  renderApprovalResolutionLine,
   wrapCells,
   writeTerminalFrame,
   StaleTerminalFrameError,

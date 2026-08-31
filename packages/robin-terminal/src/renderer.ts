@@ -5,6 +5,11 @@ import {
 } from "./input-buffer.js";
 import type { ReplState, ReplTranscriptEntry } from "./repl-reducer.js";
 import { MAXIMUM_REPL_INPUT_UTF8_BYTES } from "./repl-reducer.js";
+import type {
+  TerminalApprovalInvalidation,
+  TerminalApprovalRequest,
+  TerminalApprovalResolution,
+} from "./approval.js";
 import type { TerminalCapabilities } from "./terminal-capabilities.js";
 
 const ESC = "\u001b";
@@ -71,6 +76,11 @@ export function buildTerminalFrame(
       ),
     );
   }
+  if (state.approval !== null) {
+    for (const line of renderApprovalRequestLines(state.approval)) {
+      rows.push(...wrapCells(line, columns));
+    }
+  }
   if (state.usage.inputTokens > 0 || state.usage.outputTokens > 0) {
     rows.push(
       ...wrapCells(
@@ -89,10 +99,13 @@ export function buildTerminalFrame(
   });
   if (state.status === "cancelling") rows.push("Cancelling...");
 
-  const promptPrefix = "> ";
-  const input = sanitizeTerminalData(inputBufferText(state.input));
+  const prompt = approvalPrompt(state);
+  const promptPrefix = prompt.prefix;
+  const input = sanitizeTerminalData(inputBufferText(prompt.input));
   const promptRows = [...wrapCells(promptPrefix + input, columns)];
-  const inputBeforeCursor = state.input.graphemes.slice(0, state.input.cursor).join("");
+  const inputBeforeCursor = prompt.input.graphemes
+    .slice(0, prompt.input.cursor)
+    .join("");
   const promptCursor = cursorAfterText(
     promptPrefix + sanitizeTerminalData(inputBeforeCursor),
     columns,
@@ -201,6 +214,64 @@ export function sanitizeTerminalData(value: string): string {
   return safe;
 }
 
+/** Complete, terminal-safe approval presentation used by raw and flat modes. */
+export function renderApprovalRequestLines(
+  request: TerminalApprovalRequest,
+): readonly string[] {
+  const safe = sanitizeTerminalData;
+  return Object.freeze([
+    "Approval required - there is no default decision.",
+    `Tool: ${safe(request.toolName)}`,
+    `Approval ID: ${safe(request.approvalId)}`,
+    `Action ID: ${safe(request.actionId)}`,
+    `Call ID: ${safe(request.callId)}`,
+    `Turn ID: ${safe(request.turnId)}`,
+    `Requested at: ${safe(request.requestedAt)}`,
+    `Expires at: ${safe(request.expiresAt)}`,
+    `Action hash: ${safe(request.actionHash)}`,
+    `Normalized request hash: ${safe(request.normalizedRequestHash)}`,
+    `Precondition hash: ${safe(request.preconditionHash)}`,
+    `Policy snapshot hash: ${safe(request.policySnapshotHash)}`,
+    `Displayed summary hash: ${safe(request.displayedSummaryHash)}`,
+    `Canonical summary: ${safe(request.canonicalSummary)}`,
+    "Decision: type exactly y or allow-once to allow this action once; " +
+      "type exactly n or deny to deny; then press Enter.",
+  ]);
+}
+
+export function renderApprovalRequestBlock(
+  request: TerminalApprovalRequest,
+  lineEnding: "\n" | "\r\n" = "\n",
+): string {
+  return renderApprovalRequestLines(request).join(lineEnding) + lineEnding;
+}
+
+export function renderApprovalResolutionLine(
+  resolution: TerminalApprovalResolution,
+): string {
+  return (
+    `Approval ${sanitizeTerminalData(resolution.approvalId)} ` +
+    `for ${sanitizeTerminalData(resolution.toolName)}: ` +
+    `decision=${sanitizeTerminalData(resolution.decision)} ` +
+    `outcome=${sanitizeTerminalData(resolution.outcome)} ` +
+    `resolved_at=${sanitizeTerminalData(resolution.resolvedAt)}.`
+  );
+}
+
+export function renderApprovalInvalidationLine(
+  invalidation: TerminalApprovalInvalidation,
+): string {
+  return (
+    `Approval ${sanitizeTerminalData(invalidation.approvalId)} ` +
+    `for ${sanitizeTerminalData(invalidation.toolName)} was invalidated: ` +
+    `reason=${sanitizeTerminalData(invalidation.reason)} ` +
+    `observed_precondition_hash=${sanitizeTerminalData(
+      invalidation.observedPreconditionHash ?? "null",
+    )} invalidated_at=${sanitizeTerminalData(invalidation.invalidatedAt)}; ` +
+    "no execution authority remains."
+  );
+}
+
 export function wrapCells(value: string, columns: number): readonly string[] {
   const width = Math.max(1, Math.trunc(columns));
   const rows: string[] = [""];
@@ -259,9 +330,51 @@ function renderDiagnostic(code: string, count: number): string {
         `Notice [${code}] Paste exceeded the terminal input limit and was ` +
         `rejected; paste a smaller selection.${occurrence}`
       );
+    case "approval_paste_rejected":
+      return (
+        `Notice [${code}] Pasted text cannot answer an approval; type an ` +
+        `exact decision and press Enter.${occurrence}`
+      );
+    case "approval_input_rejected":
+      return (
+        `Notice [${code}] Approval input exceeded its bound and was ` +
+        `rejected.${occurrence}`
+      );
+    case "approval_decision_required":
+      return (
+        `Notice [${code}] No authority was granted. Type exactly y or ` +
+        `allow-once, or n or deny, then press Enter.${occurrence}`
+      );
     default:
       return `Notice [${sanitizeTerminalData(code)}] Terminal input was rejected.${occurrence}`;
   }
+}
+
+function approvalPrompt(state: ReplState): {
+  readonly prefix: string;
+  readonly input: ReplState["input"];
+} {
+  const approval = state.approval;
+  if (approval === null) return { prefix: "> ", input: state.input };
+  if (approval.phase === "awaiting_input") {
+    return { prefix: "approval> ", input: approval.input };
+  }
+  if (approval.phase === "response_submitted") {
+    const decision = approval.submittedDecision === "allow_once"
+      ? "allow-once"
+      : "deny";
+    return {
+      prefix: `approval> ${decision} submitted; waiting for validation `,
+      input: approval.input,
+    };
+  }
+  if (approval.phase === "cancelling") {
+    return {
+      prefix: "approval> cancelling; no decision accepted ",
+      input: approval.input,
+    };
+  }
+  return { prefix: "approval> presenting summary ", input: approval.input };
 }
 
 function cursorMove(row: number, column: number): string {
