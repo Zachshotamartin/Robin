@@ -2,6 +2,7 @@ import { isProxy } from "node:util/types";
 
 import {
   ActionIdKind,
+  ApprovalIdKind,
   CONTRACT_SCHEMA_VERSION,
   PolicyVersionIdKind,
   canonicalBytes,
@@ -12,6 +13,7 @@ import {
 } from "@guard/contracts";
 import type {
   ActionPrecondition,
+  ApprovalId,
   JsonObject,
   NormalizedAction,
   ResourceRef,
@@ -24,6 +26,16 @@ import type {
 
 import type {
   CapabilityActionProposal,
+  CapabilityApprovalChallenge,
+  CapabilityApprovalChallengeInput,
+  CapabilityApprovalClock,
+  CapabilityApprovalGrant,
+  CapabilityApprovalIdSource,
+  CapabilityApprovalResolution,
+  CapabilityApprovalResponse,
+  CapabilityAuthorizationResult,
+  CapabilityAuthorizedExecutionContext,
+  CapabilityAuthorizedExecutionResult,
   CapabilityAgentContextReleaseClaim,
   CapabilityAgentContextReleaseDefinition,
   CapabilityAgentContextReleaseDescriptor,
@@ -36,6 +48,7 @@ import type {
   CapabilityReleasedViews,
   CapabilitySemanticNormalization,
   EvaluatedCapabilityAction,
+  AuthorizedCapabilityAction,
   PreparedCapabilityAction,
 } from "./capability-types.js";
 import {
@@ -65,6 +78,37 @@ interface EvaluatedProvenance extends PreparedProvenance {
   consumed: boolean;
 }
 
+interface ApprovalChallengeProvenance extends EvaluatedProvenance {
+  readonly challenge: CapabilityApprovalChallenge;
+  readonly challengeHash: string;
+  readonly normalizedRequestHash: string;
+  readonly preconditionHash: string;
+  readonly policySnapshotHash: string;
+  readonly displayedSummaryHash: string;
+  readonly requestedAtMs: number;
+  readonly expiresAtMs: number;
+  resolved: boolean;
+}
+
+interface ApprovalGrantProvenance extends ApprovalChallengeProvenance {
+  readonly grant: CapabilityApprovalGrant;
+  readonly grantHash: string;
+  readonly grantedAtMs: number;
+  grantConsumed: boolean;
+}
+
+interface AuthorizationProvenance extends PreparedProvenance {
+  readonly authorization: AuthorizedCapabilityAction;
+  readonly authorizationHash: string;
+  readonly decision: PolicyDecision;
+  readonly decisionHash: string;
+  readonly preconditionHash: string;
+  readonly approvalId: ApprovalId | null;
+  readonly grantedAtMs: number | null;
+  readonly expiresAtMs: number | null;
+  authorizationConsumed: boolean;
+}
+
 interface CapabilityGatewayLimits {
   readonly maximumInputBytes: number;
   readonly maximumRawOutputBytes: number;
@@ -72,11 +116,27 @@ interface CapabilityGatewayLimits {
   readonly maximumCombinedReleasedViewBytes: number;
 }
 
+interface CapabilityGatewayConfiguration extends CapabilityGatewayLimits {
+  readonly approvalClock: CapabilityApprovalClock;
+  readonly approvalIdSource: CapabilityApprovalIdSource;
+  readonly defaultApprovalLifetimeMs: number;
+  readonly maximumApprovalLifetimeMs: number;
+}
+
 const DEFAULT_GATEWAY_LIMITS: CapabilityGatewayLimits = Object.freeze({
   maximumInputBytes: 1024 * 1024,
   maximumRawOutputBytes: 1024 * 1024,
   maximumReleasedViewBytes: 1024 * 1024,
   maximumCombinedReleasedViewBytes: 2 * 1024 * 1024,
+});
+
+const DEFAULT_APPROVAL_LIFETIME_MS = 5 * 60 * 1_000;
+const DEFAULT_MAXIMUM_APPROVAL_LIFETIME_MS = 24 * 60 * 60 * 1_000;
+const SYSTEM_APPROVAL_CLOCK: CapabilityApprovalClock = Object.freeze({
+  now: () => new Date().toISOString(),
+});
+const SYSTEM_APPROVAL_ID_SOURCE: CapabilityApprovalIdSource = Object.freeze({
+  nextApprovalId: () => ApprovalIdKind.generate(),
 });
 
 /**
@@ -91,10 +151,27 @@ export class CapabilityGateway {
   readonly #prepared = new WeakMap<PreparedCapabilityAction, PreparedProvenance>();
   readonly #evaluatedPrepared = new WeakSet<PreparedCapabilityAction>();
   readonly #evaluated = new WeakMap<EvaluatedCapabilityAction, EvaluatedProvenance>();
+  readonly #approvalChallenges = new WeakMap<
+    CapabilityApprovalChallenge,
+    ApprovalChallengeProvenance
+  >();
+  readonly #approvalGrants = new WeakMap<
+    CapabilityApprovalGrant,
+    ApprovalGrantProvenance
+  >();
+  readonly #authorizations = new WeakMap<
+    AuthorizedCapabilityAction,
+    AuthorizationProvenance
+  >();
+  readonly #usedApprovalIds = new Set<ApprovalId>();
   readonly #maximumInputBytes: number;
   readonly #maximumRawOutputBytes: number;
   readonly #maximumReleasedViewBytes: number;
   readonly #maximumCombinedReleasedViewBytes: number;
+  readonly #approvalClock: CapabilityApprovalClock;
+  readonly #approvalIdSource: CapabilityApprovalIdSource;
+  readonly #defaultApprovalLifetimeMs: number;
+  readonly #maximumApprovalLifetimeMs: number;
 
   constructor(
     registry: CapabilityPackRegistry,
@@ -107,14 +184,18 @@ export class CapabilityGateway {
         message: "The capability gateway requires a recognized pack registry.",
       });
     }
-    const limits = normalizeGatewayOptions(options);
+    const configuration = normalizeGatewayOptions(options);
     this.#registry = registry;
     this.#policyEvaluator = capturePinnedPolicyEvaluator(policyEvaluator);
-    this.#maximumInputBytes = limits.maximumInputBytes;
-    this.#maximumRawOutputBytes = limits.maximumRawOutputBytes;
-    this.#maximumReleasedViewBytes = limits.maximumReleasedViewBytes;
+    this.#maximumInputBytes = configuration.maximumInputBytes;
+    this.#maximumRawOutputBytes = configuration.maximumRawOutputBytes;
+    this.#maximumReleasedViewBytes = configuration.maximumReleasedViewBytes;
     this.#maximumCombinedReleasedViewBytes =
-      limits.maximumCombinedReleasedViewBytes;
+      configuration.maximumCombinedReleasedViewBytes;
+    this.#approvalClock = configuration.approvalClock;
+    this.#approvalIdSource = configuration.approvalIdSource;
+    this.#defaultApprovalLifetimeMs = configuration.defaultApprovalLifetimeMs;
+    this.#maximumApprovalLifetimeMs = configuration.maximumApprovalLifetimeMs;
     Object.freeze(this);
   }
 
@@ -234,30 +315,293 @@ export class CapabilityGateway {
     return receipt;
   }
 
+  /**
+   * Converts an allow decision or a valid one-use approval grant into opaque
+   * execution authority. Expected denial is returned as a bounded model-safe
+   * observation instead of being confused with a gateway failure.
+   */
+  authorize(
+    candidate: EvaluatedCapabilityAction | CapabilityApprovalGrant,
+  ): CapabilityAuthorizationResult {
+    const grantProvenance = this.#approvalGrants.get(
+      candidate as CapabilityApprovalGrant,
+    );
+    if (grantProvenance !== undefined) {
+      return this.#authorizeGrant(
+        candidate as CapabilityApprovalGrant,
+        grantProvenance,
+      );
+    }
+
+    const provenance = this.#evaluatedProvenance(
+      candidate as EvaluatedCapabilityAction,
+    );
+    if (provenance.consumed) {
+      throw invariant("An evaluated capability action receipt may be consumed only once.");
+    }
+    if (provenance.decision.effect === "require_approval") {
+      return Object.freeze({ status: "approval_required" });
+    }
+    provenance.consumed = true;
+    if (provenance.decision.effect === "deny") {
+      return Object.freeze({
+        status: "denied",
+        observation: refusalObservation(provenance.action, {
+          status: "denied",
+          code: "policy_denied",
+          reason: "policy_denied",
+          nextAction: "choose_alternative",
+        }),
+      });
+    }
+    return Object.freeze({
+      status: "authorized",
+      authorization: this.#issueAuthorization(provenance, {
+        source: "policy",
+        approvalId: null,
+        grantedAtMs: null,
+        expiresAtMs: null,
+      }),
+    });
+  }
+
+  /** Creates one immutable challenge for the exact approval-gated receipt. */
+  createApprovalChallenge(
+    evaluated: EvaluatedCapabilityAction,
+    input: CapabilityApprovalChallengeInput,
+  ): CapabilityApprovalChallenge {
+    const provenance = this.#evaluatedProvenance(evaluated);
+    if (provenance.consumed) {
+      throw invariant("An evaluated capability action receipt may be consumed only once.");
+    }
+    if (provenance.decision.effect !== "require_approval") {
+      throw invalidInput(
+        "An approval challenge requires an exact approval-gated policy decision.",
+      );
+    }
+    const challengeInput = normalizeApprovalChallengeInput(
+      input,
+      this.#defaultApprovalLifetimeMs,
+      this.#maximumApprovalLifetimeMs,
+    );
+    assertByteBound(
+      challengeInput.displayedSummary,
+      "approval displayed summary",
+      this.#maximumReleasedViewBytes,
+      "maximumReleasedViewBytes",
+    );
+
+    // Consume before calling clock/ID ports so hostile reentrancy cannot issue
+    // two challenges for one evaluated action. Port failure leaves it unusable.
+    provenance.consumed = true;
+    const requested = readApprovalInstant(this.#approvalClock);
+    const approvalId = readApprovalId(this.#approvalIdSource);
+    if (this.#usedApprovalIds.has(approvalId)) {
+      throw createDomainError({
+        code: "infrastructure_failed",
+        message: "The approval identifier source repeated an identifier.",
+      });
+    }
+    this.#usedApprovalIds.add(approvalId);
+    const expiresAtMs = requested.epochMs + challengeInput.lifetimeMs;
+    if (!Number.isSafeInteger(expiresAtMs)) {
+      throw createDomainError({
+        code: "infrastructure_failed",
+        message: "The approval expiry could not be represented safely.",
+      });
+    }
+    const normalizedRequestHash = normalizedRequestHashFor(provenance.action);
+    const preconditionHash = preconditionHashFor(provenance.action.preconditions);
+    const policySnapshotHash = policySnapshotHashFor(provenance.decision);
+    const displayedSummaryHash = canonicalSha256Hex(
+      challengeInput.displayedSummary,
+    );
+    const challenge = snapshot({
+      schemaVersion: 1,
+      approvalId,
+      actionId: provenance.action.actionId,
+      actionHash: provenance.actionHash,
+      normalizedRequestHash,
+      preconditionHash,
+      policySnapshotHash,
+      displayedSummary: challengeInput.displayedSummary,
+      displayedSummaryHash,
+      requestedAt: requested.iso,
+      expiresAt: new Date(expiresAtMs).toISOString(),
+    }) as CapabilityApprovalChallenge;
+    const challengeProvenance: ApprovalChallengeProvenance = {
+      ...provenance,
+      challenge,
+      challengeHash: canonicalSha256Hex(challenge),
+      normalizedRequestHash,
+      preconditionHash,
+      policySnapshotHash,
+      displayedSummaryHash,
+      requestedAtMs: requested.epochMs,
+      expiresAtMs,
+      resolved: false,
+    };
+    this.#approvalChallenges.set(challenge, challengeProvenance);
+    return challenge;
+  }
+
+  /** Resolves one exact displayed challenge into denial, staleness, or a grant. */
+  resolveApproval(
+    challenge: CapabilityApprovalChallenge,
+    response: CapabilityApprovalResponse,
+  ): CapabilityApprovalResolution {
+    const provenance = this.#approvalChallengeProvenance(challenge);
+    if (provenance.resolved) {
+      throw invariant("An approval challenge may be resolved only once.");
+    }
+    // First attempted response owns the challenge. Invalid or mismatched input
+    // fails closed instead of leaving a second approval path available.
+    provenance.resolved = true;
+    const captured = normalizeApprovalResponse(response);
+    if (
+      captured.approvalId !== challenge.approvalId ||
+      captured.normalizedRequestHash !== provenance.normalizedRequestHash ||
+      captured.preconditionHash !== provenance.preconditionHash ||
+      captured.policySnapshotHash !== provenance.policySnapshotHash ||
+      captured.displayedSummaryHash !== provenance.displayedSummaryHash
+    ) {
+      throw approvalInvalid(
+        "The approval response does not match the displayed request.",
+      );
+    }
+    const responded = readApprovalInstant(this.#approvalClock);
+    if (responded.epochMs < provenance.requestedAtMs) {
+      throw approvalInvalid("The approval clock moved before the request time.");
+    }
+    if (responded.epochMs >= provenance.expiresAtMs) {
+      return Object.freeze({
+        status: "stale",
+        observation: refusalObservation(provenance.action, {
+          status: "stale",
+          code: "approval_invalid",
+          reason: "approval_expired",
+          nextAction: "request_fresh_approval",
+        }),
+      });
+    }
+    if (captured.decision === "deny") {
+      return Object.freeze({
+        status: "denied",
+        observation: refusalObservation(provenance.action, {
+          status: "denied",
+          code: "policy_denied",
+          reason: "user_denied",
+          nextAction: "choose_alternative",
+        }),
+      });
+    }
+
+    const grant = snapshot({
+      schemaVersion: 1,
+      approvalId: challenge.approvalId,
+      actionId: provenance.action.actionId,
+      actionHash: provenance.actionHash,
+      normalizedRequestHash: provenance.normalizedRequestHash,
+      preconditionHash: provenance.preconditionHash,
+      policySnapshotHash: provenance.policySnapshotHash,
+      displayedSummaryHash: provenance.displayedSummaryHash,
+      grantedAt: responded.iso,
+      expiresAt: challenge.expiresAt,
+    }) as CapabilityApprovalGrant;
+    const grantProvenance: ApprovalGrantProvenance = {
+      ...provenance,
+      grant,
+      grantHash: canonicalSha256Hex(grant),
+      grantedAtMs: responded.epochMs,
+      grantConsumed: false,
+    };
+    this.#approvalGrants.set(grant, grantProvenance);
+    return Object.freeze({ status: "granted", grant });
+  }
+
+  /**
+   * Re-observes live preconditions inside the one-use execution call. Changed
+   * state returns a bounded no-effect observation and never reaches the tool.
+   */
+  async executeAuthorized(
+    authorization: AuthorizedCapabilityAction,
+    context: CapabilityAuthorizedExecutionContext,
+  ): Promise<CapabilityAuthorizedExecutionResult> {
+    const provenance = this.#authorizationProvenance(authorization);
+    if (provenance.authorizationConsumed) {
+      throw invariant("A capability authorization may be executed only once.");
+    }
+    provenance.authorizationConsumed = true;
+    const capturedContext = validateAuthorizedExecutionContext(context);
+    assertNotAborted(capturedContext.signal);
+
+    const beforeObservation = provenance.expiresAtMs === null
+      ? null
+      : readApprovalInstant(this.#approvalClock);
+    if (
+      beforeObservation !== null &&
+      approvalExpired(provenance, beforeObservation.epochMs)
+    ) {
+      return staleApprovalExecution(provenance.action);
+    }
+
+    let currentUnknown: unknown;
+    try {
+      currentUnknown = await capturedContext.revalidate(
+        provenance.action,
+        Object.freeze({ signal: capturedContext.signal }),
+      );
+    } catch (error: unknown) {
+      assertNotAborted(capturedContext.signal);
+      if (isDomainError(error)) throw error;
+      throw createDomainError({
+        code: "action_failed",
+        message: "Capability precondition revalidation failed.",
+      });
+    }
+    assertNotAborted(capturedContext.signal);
+    const current = normalizeObservedPreconditions(currentUnknown);
+    const observedPreconditionHash = preconditionHashFor(current);
+    if (observedPreconditionHash !== provenance.preconditionHash) {
+      return Object.freeze({
+        status: "stale",
+        observation: refusalObservation(provenance.action, {
+          status: "stale",
+          code: "approval_invalid",
+          reason: "preconditions_changed",
+          nextAction: "reobserve_and_retry",
+          expectedPreconditionHash: provenance.preconditionHash,
+          observedPreconditionHash,
+        }),
+      });
+    }
+
+    if (beforeObservation !== null) {
+      const afterObservation = readApprovalInstant(this.#approvalClock);
+      if (
+        afterObservation.epochMs < beforeObservation.epochMs ||
+        approvalExpired(provenance, afterObservation.epochMs)
+      ) {
+        return staleApprovalExecution(provenance.action);
+      }
+    }
+    assertNotAborted(capturedContext.signal);
+    return Object.freeze({
+      status: "executed",
+      result: await this.#executeOperation(provenance, capturedContext.signal),
+    });
+  }
+
   async execute(
     evaluated: EvaluatedCapabilityAction,
     context: CapabilityExecutionContext,
   ): Promise<CapabilityExecutionResult> {
-    const provenance = this.#evaluated.get(evaluated);
-    if (
-      provenance === undefined ||
-      evaluated.prepared !== provenance.prepared ||
-      evaluated.decision !== provenance.decision ||
-      provenance.prepared.action !== provenance.action ||
-      provenance.prepared.actionHash !== provenance.actionHash ||
-      canonicalSha256Hex(provenance.action) !== provenance.actionHash ||
-      canonicalSha256Hex(provenance.decision) !== provenance.decisionHash
-    ) {
-      throw createDomainError({
-        code: "invariant_violated",
-        message: "Capability dispatch requires this gateway's evaluated action receipt.",
-      });
-    }
+    const provenance = this.#evaluatedProvenance(evaluated);
     if (provenance.consumed) {
       throw invariant("An evaluated capability action receipt may be consumed only once.");
     }
-    provenance.consumed = true;
     if (provenance.decision.effect === "deny") {
+      provenance.consumed = true;
       throw createDomainError({
         code: "policy_denied",
         message: "The pinned policy snapshot denied this capability action.",
@@ -279,9 +623,16 @@ export class CapabilityGateway {
         },
       });
     }
+    provenance.consumed = true;
     const signal = validateExecutionContext(context);
     assertNotAborted(signal);
+    return this.#executeOperation(provenance, signal);
+  }
 
+  async #executeOperation(
+    provenance: PreparedProvenance,
+    signal: AbortSignal,
+  ): Promise<CapabilityExecutionResult> {
     let rawUnknown: unknown;
     try {
       rawUnknown = await provenance.operation.execute(
@@ -367,6 +718,158 @@ export class CapabilityGateway {
       "maximumCombinedReleasedViewBytes",
     );
     return snapshot({ raw: structurallyValidRaw, ...views });
+  }
+
+  #evaluatedProvenance(
+    evaluated: EvaluatedCapabilityAction,
+  ): EvaluatedProvenance {
+    const provenance = this.#evaluated.get(evaluated);
+    if (
+      provenance === undefined ||
+      evaluated.prepared !== provenance.prepared ||
+      evaluated.decision !== provenance.decision ||
+      provenance.prepared.action !== provenance.action ||
+      provenance.prepared.actionHash !== provenance.actionHash ||
+      canonicalSha256Hex(provenance.action) !== provenance.actionHash ||
+      canonicalSha256Hex(provenance.decision) !== provenance.decisionHash
+    ) {
+      throw invariant(
+        "Capability authorization requires this gateway's evaluated action receipt.",
+      );
+    }
+    return provenance;
+  }
+
+  #approvalChallengeProvenance(
+    challenge: CapabilityApprovalChallenge,
+  ): ApprovalChallengeProvenance {
+    const provenance = this.#approvalChallenges.get(challenge);
+    if (
+      provenance === undefined ||
+      provenance.challenge !== challenge ||
+      canonicalSha256Hex(challenge) !== provenance.challengeHash ||
+      canonicalSha256Hex(provenance.action) !== provenance.actionHash ||
+      canonicalSha256Hex(provenance.decision) !== provenance.decisionHash ||
+      normalizedRequestHashFor(provenance.action) !==
+        provenance.normalizedRequestHash ||
+      preconditionHashFor(provenance.action.preconditions) !==
+        provenance.preconditionHash ||
+      policySnapshotHashFor(provenance.decision) !==
+        provenance.policySnapshotHash ||
+      canonicalSha256Hex(challenge.displayedSummary) !==
+        provenance.displayedSummaryHash
+    ) {
+      throw invariant(
+        "Approval resolution requires this gateway's exact challenge object.",
+      );
+    }
+    return provenance;
+  }
+
+  #authorizeGrant(
+    grant: CapabilityApprovalGrant,
+    provenance: ApprovalGrantProvenance,
+  ): CapabilityAuthorizationResult {
+    if (
+      provenance.grant !== grant ||
+      canonicalSha256Hex(grant) !== provenance.grantHash ||
+      grant.approvalId !== provenance.challenge.approvalId ||
+      grant.actionId !== provenance.action.actionId ||
+      grant.actionHash !== provenance.actionHash ||
+      grant.normalizedRequestHash !== provenance.normalizedRequestHash ||
+      grant.preconditionHash !== provenance.preconditionHash ||
+      grant.policySnapshotHash !== provenance.policySnapshotHash ||
+      grant.displayedSummaryHash !== provenance.displayedSummaryHash ||
+      canonicalSha256Hex(provenance.decision) !== provenance.decisionHash
+    ) {
+      throw invariant(
+        "Capability authorization requires this gateway's exact approval grant.",
+      );
+    }
+    if (provenance.grantConsumed) {
+      throw invariant("An approval grant may authorize only once.");
+    }
+    provenance.grantConsumed = true;
+    const now = readApprovalInstant(this.#approvalClock);
+    if (now.epochMs < provenance.grantedAtMs) {
+      throw approvalInvalid("The approval clock moved before the grant time.");
+    }
+    if (now.epochMs >= provenance.expiresAtMs) {
+      return Object.freeze({
+        status: "stale",
+        observation: refusalObservation(provenance.action, {
+          status: "stale",
+          code: "approval_invalid",
+          reason: "approval_expired",
+          nextAction: "request_fresh_approval",
+        }),
+      });
+    }
+    return Object.freeze({
+      status: "authorized",
+      authorization: this.#issueAuthorization(provenance, {
+        source: "approval",
+        approvalId: grant.approvalId,
+        grantedAtMs: provenance.grantedAtMs,
+        expiresAtMs: provenance.expiresAtMs,
+      }),
+    });
+  }
+
+  #issueAuthorization(
+    provenance: EvaluatedProvenance,
+    input: {
+      readonly source: "policy" | "approval";
+      readonly approvalId: ApprovalId | null;
+      readonly grantedAtMs: number | null;
+      readonly expiresAtMs: number | null;
+    },
+  ): AuthorizedCapabilityAction {
+    const authorization = snapshot({
+      schemaVersion: 1,
+      actionId: provenance.action.actionId,
+      actionHash: provenance.actionHash,
+      source: input.source,
+      approvalId: input.approvalId,
+    }) as AuthorizedCapabilityAction;
+    this.#authorizations.set(authorization, {
+      operation: provenance.operation,
+      action: provenance.action,
+      actionHash: provenance.actionHash,
+      authorization,
+      authorizationHash: canonicalSha256Hex(authorization),
+      decision: provenance.decision,
+      decisionHash: provenance.decisionHash,
+      preconditionHash: preconditionHashFor(provenance.action.preconditions),
+      approvalId: input.approvalId,
+      grantedAtMs: input.grantedAtMs,
+      expiresAtMs: input.expiresAtMs,
+      authorizationConsumed: false,
+    });
+    return authorization;
+  }
+
+  #authorizationProvenance(
+    authorization: AuthorizedCapabilityAction,
+  ): AuthorizationProvenance {
+    const provenance = this.#authorizations.get(authorization);
+    if (
+      provenance === undefined ||
+      provenance.authorization !== authorization ||
+      canonicalSha256Hex(authorization) !== provenance.authorizationHash ||
+      authorization.actionId !== provenance.action.actionId ||
+      authorization.actionHash !== provenance.actionHash ||
+      authorization.approvalId !== provenance.approvalId ||
+      canonicalSha256Hex(provenance.action) !== provenance.actionHash ||
+      canonicalSha256Hex(provenance.decision) !== provenance.decisionHash ||
+      preconditionHashFor(provenance.action.preconditions) !==
+        provenance.preconditionHash
+    ) {
+      throw invariant(
+        "Capability execution requires this gateway's exact authorization object.",
+      );
+    }
+    return provenance;
   }
 
   #preparedProvenance(prepared: PreparedCapabilityAction): PreparedProvenance {
@@ -1044,6 +1547,324 @@ function readExactInvariantDataProperties(
   }
 }
 
+function normalizeApprovalChallengeInput(
+  value: CapabilityApprovalChallengeInput,
+  defaultLifetimeMs: number,
+  maximumLifetimeMs: number,
+): { readonly displayedSummary: JsonObject; readonly lifetimeMs: number } {
+  const detached = snapshotObject(value, "Capability approval challenge input");
+  if (
+    !hasExactOptionalKeys(
+      detached,
+      ["displayedSummary"],
+      ["lifetimeMs"],
+    ) ||
+    !isPlainRecord(detached["displayedSummary"])
+  ) {
+    throw invalidInput(
+      "An approval challenge requires one displayed summary and an optional lifetime.",
+    );
+  }
+  const lifetimeMs = Object.hasOwn(detached, "lifetimeMs")
+    ? detached["lifetimeMs"]
+    : defaultLifetimeMs;
+  if (
+    typeof lifetimeMs !== "number" ||
+    !Number.isSafeInteger(lifetimeMs) ||
+    lifetimeMs < 1 ||
+    lifetimeMs > maximumLifetimeMs
+  ) {
+    throw invalidInput(
+      "Approval lifetime must be a positive safe integer within the configured maximum.",
+    );
+  }
+  return Object.freeze({
+    displayedSummary: snapshotObject(
+      detached["displayedSummary"],
+      "Capability approval displayed summary",
+    ),
+    lifetimeMs,
+  });
+}
+
+function normalizeApprovalResponse(
+  value: CapabilityApprovalResponse,
+): CapabilityApprovalResponse {
+  let detached: JsonObject;
+  try {
+    detached = snapshotObject(value, "Capability approval response");
+  } catch {
+    throw approvalInvalid("The approval response is malformed.");
+  }
+  if (
+    !hasExactKeys(detached, [
+      "schemaVersion",
+      "approvalId",
+      "decision",
+      "normalizedRequestHash",
+      "preconditionHash",
+      "policySnapshotHash",
+      "displayedSummaryHash",
+    ]) ||
+    detached["schemaVersion"] !== 1 ||
+    !ApprovalIdKind.is(detached["approvalId"]) ||
+    (detached["decision"] !== "allow_once" &&
+      detached["decision"] !== "deny") ||
+    !isSha256(detached["normalizedRequestHash"]) ||
+    !isSha256(detached["preconditionHash"]) ||
+    !isSha256(detached["policySnapshotHash"]) ||
+    !isSha256(detached["displayedSummaryHash"])
+  ) {
+    throw approvalInvalid("The approval response is malformed.");
+  }
+  return Object.freeze({
+    schemaVersion: 1,
+    approvalId: detached["approvalId"],
+    decision: detached["decision"],
+    normalizedRequestHash: detached["normalizedRequestHash"],
+    preconditionHash: detached["preconditionHash"],
+    policySnapshotHash: detached["policySnapshotHash"],
+    displayedSummaryHash: detached["displayedSummaryHash"],
+  });
+}
+
+function normalizedRequestHashFor(action: NormalizedAction): string {
+  return canonicalSha256Hex({
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    capabilityPackId: action.capabilityPackId,
+    capabilityPackVersion: action.capabilityPackVersion,
+    operationId: action.operationId,
+    operationVersion: action.operationVersion,
+    subject: action.subject,
+    resource: action.resource,
+    environment: action.environment,
+    request: action.request,
+    normalizedInput: action.normalizedInput,
+    sideEffectClass: action.sideEffectClass,
+  });
+}
+
+function preconditionHashFor(
+  preconditions: readonly ActionPrecondition[],
+): string {
+  return canonicalSha256Hex({
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    preconditions,
+  });
+}
+
+function policySnapshotHashFor(decision: PolicyDecision): string {
+  return canonicalSha256Hex({
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    policyVersionId: decision.policyVersionId,
+    policyContentHash: decision.trace["policyContentHash"]!,
+    decision,
+  });
+}
+
+function refusalObservation(
+  action: NormalizedAction,
+  input: {
+    readonly status: "denied" | "stale";
+    readonly code: "policy_denied" | "approval_invalid";
+    readonly reason:
+      | "policy_denied"
+      | "user_denied"
+      | "approval_expired"
+      | "preconditions_changed";
+    readonly nextAction:
+      | "choose_alternative"
+      | "request_fresh_approval"
+      | "reobserve_and_retry";
+    readonly expectedPreconditionHash?: string;
+    readonly observedPreconditionHash?: string;
+  },
+): JsonObject {
+  return snapshot({
+    schemaVersion: 1,
+    status: input.status,
+    code: input.code,
+    reason: input.reason,
+    effectOccurred: false,
+    actionId: action.actionId,
+    capabilityPackId: action.capabilityPackId,
+    capabilityPackVersion: action.capabilityPackVersion,
+    operationId: action.operationId,
+    operationVersion: action.operationVersion,
+    nextAction: input.nextAction,
+    ...(input.expectedPreconditionHash === undefined
+      ? {}
+      : { expectedPreconditionHash: input.expectedPreconditionHash }),
+    ...(input.observedPreconditionHash === undefined
+      ? {}
+      : { observedPreconditionHash: input.observedPreconditionHash }),
+  });
+}
+
+function staleApprovalExecution(
+  action: NormalizedAction,
+): CapabilityAuthorizedExecutionResult {
+  return Object.freeze({
+    status: "stale",
+    observation: refusalObservation(action, {
+      status: "stale",
+      code: "approval_invalid",
+      reason: "approval_expired",
+      nextAction: "request_fresh_approval",
+    }),
+  });
+}
+
+function approvalExpired(
+  provenance: AuthorizationProvenance,
+  nowMs: number,
+): boolean {
+  if (provenance.expiresAtMs === null) return false;
+  if (
+    provenance.grantedAtMs === null ||
+    nowMs < provenance.grantedAtMs
+  ) {
+    throw approvalInvalid("The approval clock moved before the grant time.");
+  }
+  return nowMs >= provenance.expiresAtMs;
+}
+
+function readApprovalInstant(
+  clock: CapabilityApprovalClock,
+): { readonly iso: string; readonly epochMs: number } {
+  try {
+    const value = clock.now();
+    if (typeof value !== "string" || value.length > 64) throw new TypeError();
+    const instant = new Date(value);
+    const epochMs = instant.valueOf();
+    if (
+      !Number.isSafeInteger(epochMs) ||
+      Number.isNaN(epochMs) ||
+      instant.toISOString() !== value
+    ) {
+      throw new TypeError();
+    }
+    return Object.freeze({ iso: value, epochMs });
+  } catch {
+    throw createDomainError({
+      code: "infrastructure_failed",
+      message: "The approval clock returned an invalid timestamp.",
+    });
+  }
+}
+
+function readApprovalId(source: CapabilityApprovalIdSource): ApprovalId {
+  try {
+    const value = source.nextApprovalId();
+    if (!ApprovalIdKind.is(value)) throw new TypeError();
+    return value;
+  } catch {
+    throw createDomainError({
+      code: "infrastructure_failed",
+      message: "The approval identifier source returned an invalid identifier.",
+    });
+  }
+}
+
+function validateAuthorizedExecutionContext(
+  context: CapabilityAuthorizedExecutionContext,
+): {
+  readonly signal: AbortSignal;
+  readonly revalidate: CapabilityAuthorizedExecutionContext["revalidate"];
+} {
+  try {
+    if (
+      typeof context !== "object" ||
+      context === null ||
+      Array.isArray(context) ||
+      isProxy(context)
+    ) {
+      throw new TypeError();
+    }
+    const prototype: unknown = Object.getPrototypeOf(context);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError();
+    }
+    const keys = Reflect.ownKeys(context);
+    if (
+      keys.length !== 2 ||
+      !keys.includes("signal") ||
+      !keys.includes("revalidate")
+    ) {
+      throw new TypeError();
+    }
+    const signalDescriptor = Object.getOwnPropertyDescriptor(context, "signal");
+    const revalidateDescriptor = Object.getOwnPropertyDescriptor(
+      context,
+      "revalidate",
+    );
+    if (
+      signalDescriptor === undefined ||
+      !("value" in signalDescriptor) ||
+      signalDescriptor.enumerable !== true ||
+      !(signalDescriptor.value instanceof AbortSignal) ||
+      revalidateDescriptor === undefined ||
+      !("value" in revalidateDescriptor) ||
+      revalidateDescriptor.enumerable !== true ||
+      typeof revalidateDescriptor.value !== "function" ||
+      isProxy(revalidateDescriptor.value)
+    ) {
+      throw new TypeError();
+    }
+    readAbortState(signalDescriptor.value);
+    return Object.freeze({
+      signal: signalDescriptor.value,
+      revalidate: Function.prototype.bind.call(
+        revalidateDescriptor.value,
+        context,
+      ) as CapabilityAuthorizedExecutionContext["revalidate"],
+    });
+  } catch {
+    throw invalidInput(
+      "An authorized execution context requires exact signal and revalidate ports.",
+    );
+  }
+}
+
+function normalizeObservedPreconditions(
+  value: unknown,
+): readonly ActionPrecondition[] {
+  let detached: JsonObject;
+  try {
+    detached = snapshotObject(
+      { preconditions: value },
+      "Observed capability preconditions",
+      "invariant_violated",
+    );
+  } catch {
+    throw invariant("A capability revalidator returned invalid preconditions.");
+  }
+  const values = detached["preconditions"];
+  if (!Array.isArray(values)) {
+    throw invariant("A capability revalidator must return an array of preconditions.");
+  }
+  return Object.freeze(
+    values.map((entry) => normalizePrecondition(entry as ActionPrecondition)),
+  );
+}
+
+function hasExactOptionalKeys(
+  value: Readonly<Record<string, unknown>>,
+  required: readonly string[],
+  optional: readonly string[],
+): boolean {
+  const actual = Object.keys(value);
+  const allowed = new Set([...required, ...optional]);
+  return (
+    required.every((key) => Object.hasOwn(value, key)) &&
+    actual.every((key) => allowed.has(key))
+  );
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+
 function validateExecutionContext(
   context: CapabilityExecutionContext,
 ): AbortSignal {
@@ -1096,16 +1917,32 @@ function readAbortState(signal: AbortSignal): boolean {
 
 function normalizeGatewayOptions(
   options: CapabilityGatewayOptions,
-): CapabilityGatewayLimits {
-  const detached = snapshotObject(options, "Capability gateway options");
+): CapabilityGatewayConfiguration {
   const allowed = new Set([
     "maximumInputBytes",
     "maximumRawOutputBytes",
     "maximumReleasedViewBytes",
     "maximumCombinedReleasedViewBytes",
+    "approvalClock",
+    "approvalIdSource",
+    "defaultApprovalLifetimeMs",
+    "maximumApprovalLifetimeMs",
   ]);
-  if (Object.keys(detached).some((key) => !allowed.has(key))) {
-    throw invalidInput("Capability gateway options contain an unknown property.");
+  const detached = inspectGatewayOptions(options, allowed);
+  const maximumApprovalLifetimeMs = positiveOption(
+    detached,
+    "maximumApprovalLifetimeMs",
+    DEFAULT_MAXIMUM_APPROVAL_LIFETIME_MS,
+  );
+  const defaultApprovalLifetimeMs = positiveOption(
+    detached,
+    "defaultApprovalLifetimeMs",
+    Math.min(DEFAULT_APPROVAL_LIFETIME_MS, maximumApprovalLifetimeMs),
+  );
+  if (defaultApprovalLifetimeMs > maximumApprovalLifetimeMs) {
+    throw invalidInput(
+      "defaultApprovalLifetimeMs cannot exceed maximumApprovalLifetimeMs.",
+    );
   }
   return Object.freeze({
     maximumInputBytes: positiveOption(
@@ -1128,12 +1965,20 @@ function normalizeGatewayOptions(
       "maximumCombinedReleasedViewBytes",
       DEFAULT_GATEWAY_LIMITS.maximumCombinedReleasedViewBytes,
     ),
+    approvalClock: captureApprovalClock(
+      detached["approvalClock"] ?? SYSTEM_APPROVAL_CLOCK,
+    ),
+    approvalIdSource: captureApprovalIdSource(
+      detached["approvalIdSource"] ?? SYSTEM_APPROVAL_ID_SOURCE,
+    ),
+    defaultApprovalLifetimeMs,
+    maximumApprovalLifetimeMs,
   });
 }
 
 function positiveOption(
-  options: JsonObject,
-  field: keyof CapabilityGatewayLimits,
+  options: Readonly<Record<string, unknown>>,
+  field: string,
   fallback: number,
 ): number {
   if (!Object.hasOwn(options, field)) return fallback;
@@ -1142,6 +1987,105 @@ function positiveOption(
     throw invalidInput(`${field} must be a positive safe integer.`);
   }
   return value;
+}
+
+function inspectGatewayOptions(
+  value: CapabilityGatewayOptions,
+  allowed: ReadonlySet<string>,
+): Readonly<Record<string, unknown>> {
+  try {
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      Array.isArray(value) ||
+      isProxy(value)
+    ) {
+      throw new TypeError();
+    }
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError();
+    }
+    const keys = Reflect.ownKeys(value);
+    if (
+      keys.some((key) => typeof key !== "string" || !allowed.has(key))
+    ) {
+      throw new TypeError();
+    }
+    const captured: Record<string, unknown> = {};
+    for (const key of keys as string[]) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (
+        descriptor === undefined ||
+        !("value" in descriptor) ||
+        descriptor.enumerable !== true
+      ) {
+        throw new TypeError();
+      }
+      captured[key] = descriptor.value;
+    }
+    return Object.freeze(captured);
+  } catch {
+    throw invalidInput(
+      "Capability gateway options contain an unknown or unsafe property.",
+    );
+  }
+}
+
+function captureApprovalClock(value: unknown): CapabilityApprovalClock {
+  const method = captureExactPortMethod(value, "now", "approval clock");
+  return Object.freeze({ now: method as CapabilityApprovalClock["now"] });
+}
+
+function captureApprovalIdSource(value: unknown): CapabilityApprovalIdSource {
+  const method = captureExactPortMethod(
+    value,
+    "nextApprovalId",
+    "approval identifier source",
+  );
+  return Object.freeze({
+    nextApprovalId: method as CapabilityApprovalIdSource["nextApprovalId"],
+  });
+}
+
+function captureExactPortMethod(
+  value: unknown,
+  name: string,
+  label: string,
+): (...args: readonly unknown[]) => unknown {
+  try {
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      Array.isArray(value) ||
+      isProxy(value)
+    ) {
+      throw new TypeError();
+    }
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError();
+    }
+    const keys = Reflect.ownKeys(value);
+    const descriptor = Object.getOwnPropertyDescriptor(value, name);
+    if (
+      keys.length !== 1 ||
+      keys[0] !== name ||
+      descriptor === undefined ||
+      !("value" in descriptor) ||
+      descriptor.enumerable !== true ||
+      typeof descriptor.value !== "function" ||
+      isProxy(descriptor.value)
+    ) {
+      throw new TypeError();
+    }
+    return Function.prototype.bind.call(
+      descriptor.value,
+      value,
+    ) as (...args: readonly unknown[]) => unknown;
+  } catch {
+    throw invalidInput(`The ${label} must provide one exact trusted method.`);
+  }
 }
 
 function assertByteBound(
@@ -1174,6 +2118,10 @@ function validatePositive(value: unknown, field: string): asserts value is numbe
 
 function invalidInput(message: string) {
   return createDomainError({ code: "invalid_input", message });
+}
+
+function approvalInvalid(message: string) {
+  return createDomainError({ code: "approval_invalid", message });
 }
 
 function invariant(message: string) {
