@@ -517,6 +517,40 @@ test("tool settlement evicts only that call's live output and bounds its transcr
   assert.equal(state.tools.find((tool) => tool.callId === "call-active")?.status, "failed");
 });
 
+test("settled output retains bounded grapheme-safe head and tail diagnostics", () => {
+  const headDiagnostic = "labels must be uppercase";
+  const tailDiagnostic = "process exited with status 1";
+  let state = apply(
+    createReplState(),
+    { type: "turn_started" },
+    { type: "tool_started", callId: "call-edges", name: "robin.process.run@1" },
+    toolOutputEvent({
+      byteLength: 4_096,
+      callId: "call-edges",
+      name: "robin.process.run@1",
+      safeText: `${"h".repeat(640)}\n${headDiagnostic}\n${"🦉".repeat(1_024)}\n${tailDiagnostic}`,
+    }),
+  );
+
+  state = reduceRepl(state, {
+    type: "tool_failed",
+    callId: "call-edges",
+    summary: "verification failed",
+  }).state;
+
+  const summary = state.tools.find(
+    (tool) => tool.callId === "call-edges",
+  )?.summary ?? "";
+  assert.match(summary, /labels must be uppercase/u);
+  assert.match(summary, /… \[middle omitted\] …/u);
+  assert.match(summary, /process exited with status 1/u);
+  assert.ok(
+    Buffer.byteLength(summary, "utf8") <= MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES,
+  );
+  assert.equal(summary.includes("�"), false);
+  assert.deepEqual(state.toolOutput, []);
+});
+
 function approvalRequest(): TerminalApprovalRequest {
   return Object.freeze({
     actionHash: "1".repeat(64),

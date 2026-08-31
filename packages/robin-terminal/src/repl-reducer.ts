@@ -973,9 +973,9 @@ function settledToolSummary(
   const outputText = output
     .map((delta) => `[${delta.channel} #${delta.sequence}] ${delta.safeText}`)
     .join("\n");
-  const outputTail = boundUtf8Tail(outputText, 1_152);
+  const outputEdges = boundUtf8Edges(outputText, 1_152);
   return boundToolSummary(
-    `${boundedResult}; bounded output tail: ${outputTail}`,
+    `${boundedResult}; bounded output head/tail: ${outputEdges}`,
   );
 }
 
@@ -999,21 +999,43 @@ function boundUtf8Prefix(value: string, maximumBytes: number): string {
   return prefix + suffix;
 }
 
-function boundUtf8Tail(value: string, maximumBytes: number): string {
+function boundUtf8Edges(value: string, maximumBytes: number): string {
   if (Buffer.byteLength(value, "utf8") <= maximumBytes) return value;
-  const prefix = "… [tail] ";
-  const maximumTailBytes = maximumBytes - Buffer.byteLength(prefix, "utf8");
+  const marker = "\n… [middle omitted] …\n";
+  const markerBytes = Buffer.byteLength(marker, "utf8");
+  const contentBytes = Math.max(0, maximumBytes - markerBytes);
+  // Failure diagnostics generally precede verbose stacks and runner summaries,
+  // so retain two thirds of the bounded preview from the start while still
+  // preserving the process-settlement tail.
+  const headBytes = Math.ceil((contentBytes * 2) / 3);
+  const tailBytes = contentBytes - headBytes;
+  return takeUtf8Prefix(value, headBytes) + marker + takeUtf8Tail(value, tailBytes);
+}
+
+function takeUtf8Prefix(value: string, maximumBytes: number): string {
+  let prefix = "";
+  let prefixBytes = 0;
+  for (const grapheme of segmentGraphemes(value)) {
+    const graphemeBytes = Buffer.byteLength(grapheme, "utf8");
+    if (prefixBytes + graphemeBytes > maximumBytes) break;
+    prefix += grapheme;
+    prefixBytes += graphemeBytes;
+  }
+  return prefix;
+}
+
+function takeUtf8Tail(value: string, maximumBytes: number): string {
   const graphemes = segmentGraphemes(value);
   const retained: string[] = [];
   let retainedBytes = 0;
   for (let index = graphemes.length - 1; index >= 0; index -= 1) {
     const grapheme = graphemes[index]!;
     const graphemeBytes = Buffer.byteLength(grapheme, "utf8");
-    if (retainedBytes + graphemeBytes > maximumTailBytes) break;
+    if (retainedBytes + graphemeBytes > maximumBytes) break;
     retained.push(grapheme);
     retainedBytes += graphemeBytes;
   }
-  return prefix + retained.reverse().join("");
+  return retained.reverse().join("");
 }
 
 function createApprovalState(
