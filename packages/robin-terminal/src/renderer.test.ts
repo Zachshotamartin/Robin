@@ -304,6 +304,66 @@ test("tool output labels every stdout and stderr line without interpreting contr
   assert.match(lines[1]!, /second\\u\{0d\}line/u);
 });
 
+test("completed output cannot hide later lifecycle and final state in 24 rows", () => {
+  let state = reduceRepl(createReplState({ columns: 80, rows: 24 }), {
+    type: "turn_started",
+  }).state;
+  state = reduceRepl(state, {
+    type: "tool_started",
+    callId: "process-call",
+    name: "robin.process.run@1",
+  }).state;
+  for (let sequence = 1; sequence <= 12; sequence += 1) {
+    state = reduceRepl(state, {
+      type: "tool_output",
+      byteLength: 60,
+      callId: "process-call",
+      channel: sequence % 2 === 0 ? "stderr" : "stdout",
+      limitExceeded: false,
+      name: "robin.process.run@1",
+      safeText: `${sequence}:` + "x".repeat(58),
+      sequence,
+      textTruncated: false,
+    }).state;
+  }
+  const liveFrame = buildTerminalFrame(state, capability(80, 24));
+  assert.match(liveFrame.rows.join("\n"), /\[(?:stdout|stderr) #12\]/u);
+
+  state = reduceRepl(state, {
+    type: "tool_completed",
+    callId: "process-call",
+    summary: "direct test passed",
+  }).state;
+  for (const [callId, name, summary] of [
+    ["status-call", "robin.git.status@1", "working tree inspected"],
+    ["diff-call", "robin.git.diff@1", "diff inspected"],
+  ] as const) {
+    state = reduceRepl(state, { type: "tool_started", callId, name }).state;
+    state = reduceRepl(state, {
+      type: "tool_completed",
+      callId,
+      summary,
+    }).state;
+  }
+  state = reduceRepl(state, {
+    type: "turn_completed",
+    text: "Repair verified and final diff reviewed.",
+  }).state;
+
+  const finalFrame = buildTerminalFrame(state, capability(80, 24));
+  const finalText = finalFrame.rows.join("\n");
+  assert.match(finalFrame.rows[0] ?? "", /^Robin · ready · 80x24/u);
+  assert.equal(finalText.includes("Tool output"), false);
+  const processPosition = finalText.indexOf("robin.process.run@1");
+  const statusPosition = finalText.indexOf("robin.git.status@1");
+  const diffPosition = finalText.indexOf("robin.git.diff@1");
+  const finalPosition = finalText.indexOf("Repair verified");
+  assert.equal(processPosition >= 0, true);
+  assert.equal(statusPosition > processPosition, true);
+  assert.equal(diffPosition > statusPosition, true);
+  assert.equal(finalPosition > diffPosition, true);
+});
+
 function applyApproval(
   initial: ReplState,
   request: TerminalApprovalRequest,

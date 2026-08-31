@@ -10,6 +10,7 @@ import {
   insertInputText,
   moveInputCursor,
   moveInputCursorBy,
+  segmentGraphemes,
   type InputBuffer,
 } from "./input-buffer.js";
 import type { DecodedKeyEvent, KeyDecoderDiagnostic } from "./key-decoder.js";
@@ -30,6 +31,7 @@ export const MAXIMUM_REPL_INPUT_UTF8_BYTES = 65_536;
 export const MAXIMUM_REPL_TOOL_OUTPUT_DELTAS = 256;
 export const MAXIMUM_REPL_TOOL_OUTPUT_UTF8_BYTES = 256 * 1_024;
 export const MAXIMUM_REPL_TOOL_OUTPUT_DELTA_UTF8_BYTES = 32 * 1_024;
+export const MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES = 1_024;
 
 export type ReplStatus =
   | "ready"
@@ -302,18 +304,21 @@ export function reduceRepl(state: ReplState, event: ReplEvent): ReplTransition {
           [],
         );
       }
+      const summary = boundToolSummary(event.summary);
+      const output = removeToolOutputForCall(state, event.callId);
       return changed(
         state,
         {
           tools: upsertTool(state.tools, {
             ...existing,
             status: event.type === "tool_completed" ? "completed" : "failed",
-            summary: event.summary,
+            summary,
           }),
           transcript: appendTranscript(state.transcript, {
             kind: "tool",
-            text: `${existing.name}: ${event.summary}`,
+            text: `${existing.name}: ${summary}`,
           }),
+          ...output,
         },
         [],
       );
@@ -791,6 +796,9 @@ function settleTurn(
         transcript,
         assistantStream: "",
         tools: [],
+        toolOutput: [],
+        toolOutputOmittedDeltas: 0,
+        toolOutputUtf8Bytes: 0,
         approval: null,
       },
       [],
@@ -804,6 +812,9 @@ function settleTurn(
       transcript,
       assistantStream: "",
       tools: [],
+      toolOutput: [],
+      toolOutputOmittedDeltas: 0,
+      toolOutputUtf8Bytes: 0,
       approval: null,
     },
     [],
@@ -928,6 +939,48 @@ function appendBoundedToolOutput(
     toolOutputOmittedDeltas: omitted,
     toolOutputUtf8Bytes: retainedBytes,
   });
+}
+
+function removeToolOutputForCall(
+  state: ReplState,
+  callId: string,
+): Pick<
+  ReplState,
+  "toolOutput" | "toolOutputOmittedDeltas" | "toolOutputUtf8Bytes"
+> {
+  const retained = state.toolOutput.filter((delta) => delta.callId !== callId);
+  return Object.freeze({
+    toolOutput: Object.freeze(retained),
+    // The upstream session admits output for one exact active call at a time.
+    // If a defensive reducer caller interleaves calls, retained live deltas
+    // remain visible and their future evictions rebuild this counter.
+    toolOutputOmittedDeltas: 0,
+    toolOutputUtf8Bytes: retained.reduce(
+      (total, delta) => total + Buffer.byteLength(delta.safeText, "utf8"),
+      0,
+    ),
+  });
+}
+
+function boundToolSummary(summary: string): string {
+  if (
+    Buffer.byteLength(summary, "utf8") <=
+    MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES
+  ) {
+    return summary;
+  }
+  const suffix = "… [truncated]";
+  const maximumPrefixBytes =
+    MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES - Buffer.byteLength(suffix, "utf8");
+  let prefix = "";
+  let prefixBytes = 0;
+  for (const grapheme of segmentGraphemes(summary)) {
+    const graphemeBytes = Buffer.byteLength(grapheme, "utf8");
+    if (prefixBytes + graphemeBytes > maximumPrefixBytes) break;
+    prefix += grapheme;
+    prefixBytes += graphemeBytes;
+  }
+  return prefix + suffix;
 }
 
 function createApprovalState(

@@ -6,6 +6,7 @@ import {
   MAXIMUM_QUEUED_MESSAGES,
   MAXIMUM_REPL_INPUT_UTF8_BYTES,
   MAXIMUM_REPL_TOOL_OUTPUT_DELTAS,
+  MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES,
   createReplState,
   reduceRepl,
   type ReplEvent,
@@ -460,6 +461,59 @@ test("raw live tool output retains a bounded ordered tail", () => {
     MAXIMUM_REPL_TOOL_OUTPUT_DELTAS + 1,
   );
   assert.equal(state.toolOutputUtf8Bytes, MAXIMUM_REPL_TOOL_OUTPUT_DELTAS);
+});
+
+test("tool settlement evicts only that call's live output and bounds its transcript summary", () => {
+  let state = apply(
+    createReplState(),
+    { type: "turn_started" },
+    { type: "tool_started", callId: "call-complete", name: "process-one" },
+    { type: "tool_started", callId: "call-active", name: "process-two" },
+    toolOutputEvent({
+      byteLength: 6,
+      callId: "call-complete",
+      name: "process-one",
+      safeText: "first!",
+    }),
+    toolOutputEvent({
+      byteLength: 7,
+      callId: "call-active",
+      name: "process-two",
+      safeText: "second!",
+    }),
+  );
+  const longSummary = "🦉".repeat(MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES);
+  state = reduceRepl(state, {
+    type: "tool_completed",
+    callId: "call-complete",
+    summary: longSummary,
+  }).state;
+
+  assert.deepEqual(
+    state.toolOutput.map((delta) => delta.callId),
+    ["call-active"],
+  );
+  assert.equal(state.toolOutputUtf8Bytes, 7);
+  assert.equal(state.toolOutputOmittedDeltas, 0);
+  assert.equal(state.tools.find((tool) => tool.callId === "call-complete")?.status, "completed");
+  const summary = state.tools.find(
+    (tool) => tool.callId === "call-complete",
+  )?.summary;
+  assert.ok(summary?.endsWith("… [truncated]"));
+  assert.ok(
+    Buffer.byteLength(summary ?? "", "utf8") <=
+      MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES,
+  );
+  assert.match(state.transcript.at(-1)?.text ?? "", /^process-one: /u);
+
+  state = reduceRepl(state, {
+    type: "tool_failed",
+    callId: "call-active",
+    summary: "failed safely",
+  }).state;
+  assert.deepEqual(state.toolOutput, []);
+  assert.equal(state.toolOutputUtf8Bytes, 0);
+  assert.equal(state.tools.find((tool) => tool.callId === "call-active")?.status, "failed");
 });
 
 function approvalRequest(): TerminalApprovalRequest {
