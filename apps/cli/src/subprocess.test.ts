@@ -356,6 +356,27 @@ test("default headless R2 binds the physical repository and denies edits", async
   assert.match(decoded.result, /denied/u);
 });
 
+test("default R2 reports a non-repository without creating state", async (t) => {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), "robin-cli-r2-nonrepository-"),
+  );
+  t.after(async () => rm(workingDirectory, { recursive: true, force: true }));
+  const canaryPath = path.join(workingDirectory, "user-canary.txt");
+  await writeFile(canaryPath, "preserve me\n", "utf8");
+
+  const result = await execute(["-p", "Inspect this directory."], {
+    cwd: workingDirectory,
+  });
+
+  assert.equal(result.code, 7);
+  assert.equal(result.stdout, "");
+  assert.equal(
+    result.stderr,
+    "robin: The run failed (not_repository).\n",
+  );
+  assert.equal(await readFile(canaryPath, "utf8"), "preserve me\n");
+});
+
 test(
   "source-installed bin cancels a slow headless turn when its output pipe closes",
   { timeout: 30_000 },
