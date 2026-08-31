@@ -47,6 +47,16 @@ const requiredBoundaryMutationIds = Object.freeze([
   "runtime-skip-event-transition-guard",
 ]);
 
+const requiredR2ToolPackages = Object.freeze([
+  "@guard/tool-workspace",
+  "@guard/tool-process",
+  "@guard/tool-git",
+  "@guard/robin-tools",
+  "@guard/robin-session",
+  "@guard/robin-application",
+  "@guard/robin-terminal",
+]);
+
 async function rootManifest() {
   return JSON.parse(
     await readFile(path.join(repositoryRoot, "package.json"), "utf8"),
@@ -248,4 +258,62 @@ test("CI runs deterministic evals explicitly before the bounded Gate B mutation 
       assert.match(action, /^[^@\s]+@[0-9a-f]{40}$/u);
     }
   }
+});
+
+test("R2 CI isolates repository boundaries and aggregates every inherited gate", async () => {
+  const manifest = await rootManifest();
+  const scripts = manifest.scripts ?? {};
+  const expectedToolCommand =
+    "npm run test " +
+    requiredR2ToolPackages
+      .map((packageName) => `--workspace ${packageName}`)
+      .join(" ");
+  assert.equal(scripts["test:r2:tools"], expectedToolCommand);
+  assert.equal(
+    scripts["test:gate:r2"],
+    "npm run test:gate:r1 && npm run test:r2:tools",
+  );
+
+  const manifests = await workspaceManifests();
+  for (const packageName of requiredR2ToolPackages) {
+    const workspace = manifests.get(packageName);
+    assert.ok(workspace, `R2 references missing workspace ${packageName}`);
+    assert.match(
+      workspace.scripts?.test ?? "",
+      /^npm run build && /u,
+      `${packageName} must build its exact dependency graph before testing`,
+    );
+  }
+
+  const workflow = await readFile(
+    path.join(repositoryRoot, ".github", "workflows", "ci.yml"),
+    "utf8",
+  );
+  const toolsJob = workflowJob(workflow, "r2-tools");
+  const aggregateJob = workflowJob(workflow, "r2-candidate");
+  assert.match(toolsJob, /^    needs: \[static, contracts\]$/mu);
+  assert.match(toolsJob, /^    runs-on: ubuntu-24\.04$/mu);
+  assert.match(toolsJob, /^    timeout-minutes: 20$/mu);
+  assert.match(toolsJob, /^      - run: npm ci --ignore-scripts$/mu);
+  assert.match(toolsJob, /^      - run: npm run test:r2:tools$/mu);
+  assert.doesNotMatch(toolsJob, /npm run test:gate:r[12]\b/u);
+  const actions = [...toolsJob.matchAll(/^      - uses: ([^\s#]+)/gmu)].map(
+    (match) => match[1],
+  );
+  assert.equal(actions.length, 2);
+  for (const action of actions) assert.match(action, /^[^@\s]+@[0-9a-f]{40}$/u);
+
+  assert.match(aggregateJob, /^    if: \$\{\{ always\(\) \}\}$/mu);
+  assert.match(aggregateJob, /^    needs: \[r1-candidate, r2-tools\]$/mu);
+  assert.match(aggregateJob, /^    timeout-minutes: 5$/mu);
+  assert.match(
+    aggregateJob,
+    /^      R1_CANDIDATE_RESULT: \$\{\{ needs\['r1-candidate'\]\.result \}\}$/mu,
+  );
+  assert.match(
+    aggregateJob,
+    /^      R2_TOOLS_RESULT: \$\{\{ needs\['r2-tools'\]\.result \}\}$/mu,
+  );
+  assert.match(aggregateJob, /if \[ "\$result" != "success" \]; then/u);
+  assert.doesNotMatch(aggregateJob, /^      - uses:/mu);
 });

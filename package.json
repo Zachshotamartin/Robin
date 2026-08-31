@@ -57,6 +57,8 @@
     "test:gate:a": "npm run test:repository && npm run test:contracts",
     "test:gate:b": "npm run test:repository && npm run test:gate:b:contracts && npm run test:eval:deterministic && npm run test:mutation:gate:b",
     "test:gate:r1": "npm run check && npm run test:gate:b && npm run test:pty && npm run test:package",
+    "test:r2:tools": "npm run test --workspace @guard/tool-workspace --workspace @guard/tool-process --workspace @guard/tool-git --workspace @guard/robin-tools --workspace @guard/robin-session --workspace @guard/robin-application --workspace @guard/robin-terminal",
+    "test:gate:r2": "npm run test:gate:r1 && npm run test:r2:tools",
     "typecheck": "node scripts/run-workspace-script.mjs typecheck"
   },
   "devDependencies": {
