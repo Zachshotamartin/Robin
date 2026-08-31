@@ -116,6 +116,12 @@ export interface R2RobinApplicationMetadata {
     readonly repositoryId: string;
     readonly worktreeId: string;
     readonly objectFormat: "sha1" | "sha256";
+    readonly initialHead: string | null;
+    readonly branch: string | null;
+    readonly branchState: "attached" | "detached" | "unborn" | "unknown";
+    readonly initialStatusEntries: number;
+    readonly initialDirty: boolean;
+    readonly initialStatusHash: string;
     readonly readOperationsOnly: true;
   };
   readonly provider: {
@@ -680,6 +686,12 @@ function createMetadata(input: {
       repositoryId: input.git.identity.repositoryId,
       worktreeId: gitWorkspace.worktreeId,
       objectFormat: input.git.identity.objectFormat,
+      initialHead: input.git.initialStatus.branch.oid,
+      branch: input.git.initialStatus.branch.head,
+      branchState: input.git.initialStatus.branch.state,
+      initialStatusEntries: input.git.initialStatus.entries.length,
+      initialDirty: input.git.initialStatus.entries.length > 0,
+      initialStatusHash: input.git.initialStatus.statusSha256,
       readOperationsOnly: true as const,
     }),
     provider: Object.freeze({

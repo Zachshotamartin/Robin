@@ -87,6 +87,9 @@ test("bootstraps one R2 application from a nested physical Git worktree", async 
   assert.equal(result.metadata.workspace.physicalRoot, fixture.repositoryRoot);
   assert.equal(result.metadata.git.readOperationsOnly, true);
   assert.equal(result.metadata.git.executableSelection, "explicit_host_path");
+  assert.equal(result.metadata.git.branchState, "attached");
+  assert.equal(result.metadata.git.initialDirty, false);
+  assert.equal(result.metadata.git.initialStatusEntries, 0);
   assert.equal(result.metadata.provider.kind, "credential_free_synthetic_fixture");
   assert.equal(result.metadata.provider.hostedApiConfigured, false);
   assert.equal(result.metadata.session.persistence, "ephemeral");
