@@ -114,7 +114,7 @@ const REVIEWED_PACK_INVENTORY_PATH = join(
   REPOSITORY_ROOT,
   "evidence",
   "inventory",
-  "r1-cli-tarball-v1.json",
+  "r2-cli-tarball-v1.json",
 );
 const REVIEWED_PACK_INVENTORY = await loadReviewedPackInventory();
 
