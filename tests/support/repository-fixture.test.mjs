@@ -47,6 +47,76 @@ test("dirty fixture contains staged, unstaged, and untracked state", async (cont
   assert.match(status, /\? untracked\.txt\0/u);
 });
 
+test("coding fixture preserves user changes around a deterministic two-edit repair", async (context) => {
+  const fixture = await createRepositoryFixture({ variant: "coding" });
+  context.after(() => fixture.cleanup());
+
+  const source = await readFile(
+    path.join(fixture.workspaceRoot, "src", "calculate.ts"),
+    "utf8",
+  );
+  assert.match(source, /total - value/u);
+  assert.match(source, /return label\.toLowerCase\(\);/u);
+  const status = Buffer.from(
+    fixture.initialSnapshot.git.porcelainV2ZBase64,
+    "base64",
+  ).toString("utf8");
+  assert.match(status, /notes\/user-notes\.txt/u);
+  assert.match(status, /\? scratch-user\.txt\0/u);
+
+  const firstVerification = await runFixtureNpmTest(fixture.workspaceRoot);
+  assert.notEqual(firstVerification.code, 0);
+  assert.match(
+    `${firstVerification.stdout}\n${firstVerification.stderr}`,
+    /reducer must add each value/u,
+  );
+
+  const afterFirstEdit = source.replace("total - value", "total + value");
+  await writeFile(
+    path.join(fixture.workspaceRoot, "src", "calculate.ts"),
+    afterFirstEdit,
+  );
+  const secondVerification = await runFixtureNpmTest(fixture.workspaceRoot);
+  assert.notEqual(secondVerification.code, 0);
+  assert.match(
+    `${secondVerification.stdout}\n${secondVerification.stderr}`,
+    /labels must be uppercase/u,
+  );
+
+  await writeFile(
+    path.join(fixture.workspaceRoot, "src", "calculate.ts"),
+    afterFirstEdit.replace(
+      "return label.toLowerCase();",
+      "return label.toUpperCase();",
+    ),
+  );
+  const finalVerification = await runFixtureNpmTest(fixture.workspaceRoot);
+  assert.equal(finalVerification.code, 0);
+  assert.equal(
+    await readFile(
+      path.join(fixture.workspaceRoot, "notes", "user-notes.txt"),
+      "utf8",
+    ),
+    "keep this user-authored baseline\npre-existing uncommitted note\n",
+  );
+  assert.equal(
+    await readFile(path.join(fixture.workspaceRoot, "scratch-user.txt"), "utf8"),
+    "pre-existing untracked user content\n",
+  );
+  const finalSnapshot = await fixture.snapshot();
+  assert.doesNotThrow(() =>
+    assertRepositoryDelta(fixture.initialSnapshot, finalSnapshot, {
+      added: [],
+      changed: ["src/calculate.ts"],
+      removed: [],
+      gitChanged: true,
+    }),
+  );
+  assert.doesNotThrow(() =>
+    assertGitStorageUnchanged(fixture.initialSnapshot, finalSnapshot),
+  );
+});
+
 test("unborn, detached, nested, conflict, and hostile-name variants are explicit", async (context) => {
   const fixtures = [];
   context.after(async () => {
@@ -192,3 +262,30 @@ test("outside-root safety snapshot detects a change without following symlinks",
     removed: [],
   });
 });
+
+async function runFixtureNpmTest(cwd) {
+  const { spawn } = await import("node:child_process");
+  const { NODE_TEST_CONTEXT: _nodeTestContext, ...environment } = process.env;
+  return await new Promise((resolve, reject) => {
+    const child = spawn("npm", ["test", "--silent"], {
+      cwd,
+      env: environment,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      resolve({ code, signal, stdout, stderr });
+    });
+  });
+}

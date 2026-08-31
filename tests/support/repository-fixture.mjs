@@ -22,6 +22,7 @@ const MAX_GIT_OUTPUT_BYTES = 16 * 1024 * 1024;
 const VALID_VARIANTS = new Set([
   "bare",
   "clean",
+  "coding",
   "detached",
   "dirty",
   "linked-worktree",
@@ -506,6 +507,68 @@ async function initializeRepository(workspaceRoot) {
   await runGit(workspaceRoot, ["commit", "-m", "fixture baseline"]);
 }
 
+async function addCodingScenario(workspaceRoot) {
+  await Promise.all([
+    mkdir(path.join(workspaceRoot, "notes"), { recursive: true }),
+    mkdir(path.join(workspaceRoot, "test"), { recursive: true }),
+  ]);
+  await writeFile(
+    path.join(workspaceRoot, "src", "calculate.ts"),
+    [
+      "export function calculateTotal(values: readonly number[]): number {",
+      "  return values.reduce((total, value) => total - value, 0);",
+      "}",
+      "",
+      "export function formatLabel(label: string): string {",
+      "  return label.toLowerCase();",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(workspaceRoot, "test", "calculate.test.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { readFile } from "node:fs/promises";',
+      'import test from "node:test";',
+      "",
+      'test("calculation and label regressions are fixed", async () => {',
+      '  const source = await readFile(new URL("../src/calculate.ts", import.meta.url), "utf8");',
+      '  assert.match(source, /total \\+ value/u, "the reducer must add each value");',
+      '  assert.match(source, /return label\\.toUpperCase\\(\\);/u, "labels must be uppercase");',
+      "});",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(workspaceRoot, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "robin-r2-coding-fixture",
+        private: true,
+        scripts: { test: "node --test test/calculate.test.mjs" },
+        type: "module",
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await writeFile(
+    path.join(workspaceRoot, "notes", "user-notes.txt"),
+    "keep this user-authored baseline\n",
+  );
+  await runGit(workspaceRoot, ["add", "--all"]);
+  await runGit(workspaceRoot, ["commit", "-m", "add deterministic coding scenario"]);
+  await writeFile(
+    path.join(workspaceRoot, "notes", "user-notes.txt"),
+    "keep this user-authored baseline\npre-existing uncommitted note\n",
+  );
+  await writeFile(
+    path.join(workspaceRoot, "scratch-user.txt"),
+    "pre-existing untracked user content\n",
+  );
+}
+
 async function applyVariant(fixture) {
   const { tempRoot, variant } = fixture;
   let { workspaceRoot } = fixture;
@@ -563,7 +626,9 @@ async function applyVariant(fixture) {
   await rm(path.join(workspaceRoot, ".git"), { recursive: true, force: true });
   await initializeRepository(workspaceRoot);
 
-  if (variant === "dirty") {
+  if (variant === "coding") {
+    await addCodingScenario(workspaceRoot);
+  } else if (variant === "dirty") {
     await writeFile(path.join(workspaceRoot, "src", "answer.txt"), "42\n");
     await runGit(workspaceRoot, ["add", "--", "src/answer.txt"]);
     await writeFile(
