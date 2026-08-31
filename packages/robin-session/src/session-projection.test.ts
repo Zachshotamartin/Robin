@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { canonicalSha256Hex } from "@guard/contracts";
+
 import { RobinSessionError } from "./application-event.js";
 import {
   MAXIMUM_QUEUED_ROBIN_MESSAGES,
@@ -9,6 +11,15 @@ import {
   replayRobinSession,
   type RobinSessionProjection,
 } from "./session-projection.js";
+
+const ACTION_ID = "act_018f05a0-7b01-7000-8000-000000000081";
+const SECOND_ACTION_ID = "act_018f05a0-7b01-7000-8000-000000000084";
+const APPROVAL_ID = "apr_018f05a0-7b01-7000-8000-000000000082";
+const POLICY_VERSION_ID = "pol_018f05a0-7b01-7000-8000-000000000083";
+const DISPLAYED_SUMMARY = Object.freeze({
+  schemaVersion: 1,
+  operation: "Apply exact patch to src/index.ts",
+});
 
 test("replays one complete ephemeral synthetic session without effects", () => {
   const state = replayRobinSession([
@@ -271,6 +282,161 @@ test("replays tool failure settlement before turn cancellation and close", () =>
   });
 });
 
+test("replay reconstructs the exact immutable pending approval without effects", () => {
+  const events = [
+    event(1, "SessionStarted", startPayload()),
+    event(2, "UserMessageAccepted", {
+      messageId: "message-1",
+      text: "edit",
+      turnId: "turn-1",
+    }),
+    event(3, "TurnStarted", {
+      messageId: "message-1",
+      turnId: "turn-1",
+    }),
+    event(4, "ToolCallStarted", {
+      callId: "call-1",
+      toolName: "robin.edit.apply_patch@1",
+      turnId: "turn-1",
+    }),
+    event(5, "PermissionDecided", permissionDecisionPayload()),
+    event(6, "ApprovalRequested", approvalRequestPayload()),
+  ];
+
+  const first = replayRobinSession(events);
+  const second = replayRobinSession(events.map((value) => ({ ...value })));
+  assert.deepEqual(first, second);
+  assert.deepEqual(first.pendingApproval, {
+    ...approvalRequestPayload(),
+    status: "pending",
+  });
+  assert.equal(Object.isFrozen(first.pendingApproval), true);
+  assert.equal(
+    first.turns[0]?.toolCalls[0]?.approval,
+    first.pendingApproval,
+  );
+
+  const cancelled = reduceRobinSessionProjection(
+    first,
+    event(7, "TurnCancellationRequested", {
+      reason: "user",
+      turnId: "turn-1",
+    }),
+  );
+  assert.equal(cancelled.pendingApproval, null);
+  assert.equal(
+    cancelled.turns[0]?.toolCalls[0]?.approval?.status,
+    "cancelled",
+  );
+});
+
+test("replay preserves a post-grant stale approval and no pending authority", () => {
+  const events = [
+    event(1, "SessionStarted", startPayload()),
+    event(2, "UserMessageAccepted", {
+      messageId: "message-1",
+      text: "edit",
+      turnId: "turn-1",
+    }),
+    event(3, "TurnStarted", {
+      messageId: "message-1",
+      turnId: "turn-1",
+    }),
+    event(4, "ToolCallStarted", {
+      callId: "call-1",
+      toolName: "robin.edit.apply_patch@1",
+      turnId: "turn-1",
+    }),
+    event(5, "PermissionDecided", permissionDecisionPayload()),
+    event(6, "ApprovalRequested", approvalRequestPayload()),
+    event(7, "ApprovalResolved", approvalResolutionPayload()),
+    event(8, "ApprovalInvalidated", approvalInvalidationPayload()),
+  ];
+
+  const first = replayRobinSession(events);
+  const second = replayRobinSession(events.map((value) => ({ ...value })));
+  assert.deepEqual(first, second);
+  assert.equal(first.pendingApproval, null);
+  assert.deepEqual(first.turns[0]?.toolCalls[0]?.approval, {
+    ...approvalRequestPayload(),
+    decision: "allow_once",
+    invalidatedAt: "2026-08-30T12:01:00.000Z",
+    invalidationReason: "preconditions_changed",
+    observedPreconditionHash: "e".repeat(64),
+    outcome: "stale",
+    resolvedAt: "2026-08-30T12:00:30.000Z",
+    status: "stale",
+  });
+});
+
+test("session replay rejects approval identifier reuse across turns", () => {
+  const firstResolution = approvalResolutionPayload({
+    decision: "deny",
+    outcome: "denied",
+  });
+  const state = replayRobinSession([
+    event(1, "SessionStarted", startPayload()),
+    event(2, "UserMessageAccepted", {
+      messageId: "message-1",
+      text: "first",
+      turnId: "turn-1",
+    }),
+    event(3, "TurnStarted", {
+      messageId: "message-1",
+      turnId: "turn-1",
+    }),
+    event(4, "ToolCallStarted", {
+      callId: "call-1",
+      toolName: "robin.edit.apply_patch@1",
+      turnId: "turn-1",
+    }),
+    event(5, "PermissionDecided", permissionDecisionPayload()),
+    event(6, "ApprovalRequested", approvalRequestPayload()),
+    event(7, "ApprovalResolved", firstResolution),
+    event(8, "ToolCallCompleted", {
+      callId: "call-1",
+      observation: { effectOccurred: false, reason: "user_denied" },
+      toolName: "robin.edit.apply_patch@1",
+      turnId: "turn-1",
+    }),
+    event(9, "TurnCompleted", { text: "", turnId: "turn-1" }),
+    event(10, "UserMessageAccepted", {
+      messageId: "message-2",
+      text: "second",
+      turnId: "turn-2",
+    }),
+    event(11, "TurnStarted", {
+      messageId: "message-2",
+      turnId: "turn-2",
+    }),
+    event(12, "ToolCallStarted", {
+      callId: "call-2",
+      toolName: "robin.edit.apply_patch@1",
+      turnId: "turn-2",
+    }),
+    event(13, "PermissionDecided", permissionDecisionPayload({
+      actionHash: "e".repeat(64),
+      actionId: SECOND_ACTION_ID,
+      callId: "call-2",
+      turnId: "turn-2",
+    })),
+  ]);
+
+  assertSessionError(
+    () =>
+      reduceRobinSessionProjection(
+        state,
+        event(14, "ApprovalRequested", approvalRequestPayload({
+          actionHash: "e".repeat(64),
+          actionId: SECOND_ACTION_ID,
+          callId: "call-2",
+          turnId: "turn-2",
+        })),
+      ),
+    "illegal_transition",
+  );
+});
+
 function openWithActiveTurn(): RobinSessionProjection {
   return replayRobinSession([
     event(1, "SessionStarted", startPayload()),
@@ -305,6 +471,72 @@ function event(
     sessionId: "session-1",
     type,
   };
+}
+
+function approvalRequestPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    actionHash: "a".repeat(64),
+    actionId: ACTION_ID,
+    approvalId: APPROVAL_ID,
+    callId: "call-1",
+    displayedSummary: DISPLAYED_SUMMARY,
+    displayedSummaryHash: canonicalSha256Hex(DISPLAYED_SUMMARY),
+    expiresAt: "2026-08-30T12:05:00.000Z",
+    normalizedRequestHash: "b".repeat(64),
+    policySnapshotHash: "d".repeat(64),
+    preconditionHash: "c".repeat(64),
+    requestedAt: "2026-08-30T12:00:00.000Z",
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+    ...overrides,
+  });
+}
+
+function permissionDecisionPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    actionHash: "a".repeat(64),
+    actionId: ACTION_ID,
+    callId: "call-1",
+    effect: "require_approval",
+    policySnapshotHash: "d".repeat(64),
+    policyVersionId: POLICY_VERSION_ID,
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+    winningPolicyName: "r2.default.edit.ask",
+    ...overrides,
+  });
+}
+
+function approvalResolutionPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  const requested = approvalRequestPayload();
+  const { displayedSummary: _displayedSummary, ...binding } = requested;
+  return Object.freeze({
+    ...binding,
+    decision: "allow_once",
+    outcome: "granted",
+    resolvedAt: "2026-08-30T12:00:30.000Z",
+    ...overrides,
+  });
+}
+
+function approvalInvalidationPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  const requested = approvalRequestPayload();
+  const { displayedSummary: _displayedSummary, ...binding } = requested;
+  return Object.freeze({
+    ...binding,
+    invalidatedAt: "2026-08-30T12:01:00.000Z",
+    observedPreconditionHash: "e".repeat(64),
+    reason: "preconditions_changed",
+    ...overrides,
+  });
 }
 
 function assertSessionError(

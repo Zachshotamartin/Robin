@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { canonicalSha256Hex } from "@guard/contracts";
+
 import {
   MAXIMUM_APPLICATION_EVENT_UTF8_BYTES,
   ROBIN_APPLICATION_EVENT_TYPES,
@@ -9,6 +11,14 @@ import {
   parseRobinApplicationEventJson,
   serializeRobinApplicationEvent,
 } from "./application-event.js";
+
+const ACTION_ID = "act_018f05a0-7b01-7000-8000-000000000081";
+const APPROVAL_ID = "apr_018f05a0-7b01-7000-8000-000000000082";
+const POLICY_VERSION_ID = "pol_018f05a0-7b01-7000-8000-000000000083";
+const DISPLAYED_SUMMARY = Object.freeze({
+  schemaVersion: 1,
+  operation: "Apply exact patch to src/index.ts",
+});
 
 const PAYLOADS: Readonly<Record<string, Readonly<Record<string, unknown>>>> =
   Object.freeze({
@@ -36,6 +46,10 @@ const PAYLOADS: Readonly<Record<string, Readonly<Record<string, unknown>>>> =
       toolName: "robin.synthetic.inspect_file@1",
       turnId: "turn-1",
     }),
+    PermissionDecided: permissionDecisionPayload(),
+    ApprovalRequested: approvalRequestPayload(),
+    ApprovalResolved: approvalResolutionPayload(),
+    ApprovalInvalidated: approvalInvalidationPayload(),
     ToolCallCompleted: Object.freeze({
       callId: "call-1",
       observation: Object.freeze({ hash: "abc", lines: Object.freeze(["one"]) }),
@@ -80,8 +94,8 @@ const PAYLOADS: Readonly<Record<string, Readonly<Record<string, unknown>>>> =
     SessionClosed: Object.freeze({ reason: "user" }),
   });
 
-test("parses and deeply freezes every R1 application event type", () => {
-  assert.equal(ROBIN_APPLICATION_EVENT_TYPES.length, 17);
+test("parses and deeply freezes every versioned application event type", () => {
+  assert.equal(ROBIN_APPLICATION_EVENT_TYPES.length, 21);
   for (const [index, type] of ROBIN_APPLICATION_EVENT_TYPES.entries()) {
     const parsed = parseRobinApplicationEvent(rawEvent(index + 1, type, PAYLOADS[type]!));
     assert.equal(parsed.type, type);
@@ -156,6 +170,117 @@ test("bounds UTF-8 JSON, strings, invalid encodings, and numeric fields", () => 
       used: 10,
     }),
   );
+  assertInvalidEvent(
+    rawEvent(1, "ApprovalRequested", approvalRequestPayload({
+      displayedSummary: { detail: "x".repeat(65_537) },
+      displayedSummaryHash: canonicalSha256Hex({ detail: "x".repeat(65_537) }),
+    })),
+  );
+});
+
+test("approval events validate exact IDs, hashes, summaries, times, and decisions", () => {
+  const requested = parseRobinApplicationEvent(
+    rawEvent(1, "ApprovalRequested", approvalRequestPayload()),
+  );
+  assert.equal(requested.type, "ApprovalRequested");
+  if (requested.type === "ApprovalRequested") {
+    assert.deepEqual(requested.payload.displayedSummary, DISPLAYED_SUMMARY);
+    assert.equal(Object.isFrozen(requested.payload.displayedSummary), true);
+    assert.equal(
+      requested.payload.displayedSummaryHash,
+      canonicalSha256Hex(DISPLAYED_SUMMARY),
+    );
+  }
+
+  for (const payload of [
+    approvalRequestPayload({ approvalId: "approval-not-branded" }),
+    approvalRequestPayload({ actionId: "action-not-branded" }),
+    approvalRequestPayload({ actionHash: "A".repeat(64) }),
+    approvalRequestPayload({ normalizedRequestHash: "a".repeat(63) }),
+    approvalRequestPayload({ preconditionHash: "z".repeat(64) }),
+    approvalRequestPayload({ displayedSummaryHash: "f".repeat(64) }),
+    approvalRequestPayload({ expiresAt: "2026-08-30T12:00:00.000Z" }),
+    approvalRequestPayload({ displayedSummary: { operation: "unsafe\u001b]52" } }),
+    approvalRequestPayload({ extra: true }),
+  ]) {
+    assertInvalidEvent(rawEvent(1, "ApprovalRequested", payload));
+  }
+
+  for (const payload of [
+    approvalResolutionPayload({ outcome: "unknown" }),
+    approvalResolutionPayload({ decision: "allow_turn" }),
+    approvalResolutionPayload({
+      decision: "deny",
+      outcome: "granted",
+    }),
+    approvalResolutionPayload({
+      decision: "allow_once",
+      outcome: "denied",
+    }),
+    approvalResolutionPayload({
+      outcome: "granted",
+      resolvedAt: "2026-08-30T12:05:00.000Z",
+    }),
+    approvalResolutionPayload({
+      outcome: "stale",
+      resolvedAt: "2026-08-30T12:00:01.000Z",
+    }),
+    approvalResolutionPayload({ extra: true }),
+  ]) {
+    assertInvalidEvent(rawEvent(1, "ApprovalResolved", payload));
+  }
+
+  const invalidated = parseRobinApplicationEvent(
+    rawEvent(1, "ApprovalInvalidated", approvalInvalidationPayload()),
+  );
+  assert.equal(invalidated.type, "ApprovalInvalidated");
+  if (invalidated.type === "ApprovalInvalidated") {
+    assert.equal(invalidated.payload.reason, "preconditions_changed");
+    assert.equal(invalidated.payload.observedPreconditionHash, "e".repeat(64));
+  }
+
+  for (const payload of [
+    approvalInvalidationPayload({ reason: "unknown" }),
+    approvalInvalidationPayload({ invalidatedAt: "invalid" }),
+    approvalInvalidationPayload({ observedPreconditionHash: null }),
+    approvalInvalidationPayload({ observedPreconditionHash: "c".repeat(64) }),
+    approvalInvalidationPayload({ observedPreconditionHash: "E".repeat(64) }),
+    approvalInvalidationPayload({
+      invalidatedAt: "2026-08-30T12:04:59.999Z",
+      observedPreconditionHash: null,
+      reason: "approval_expired",
+    }),
+    approvalInvalidationPayload({
+      observedPreconditionHash: "e".repeat(64),
+      reason: "approval_expired",
+    }),
+    approvalInvalidationPayload({ extra: true }),
+  ]) {
+    assertInvalidEvent(rawEvent(1, "ApprovalInvalidated", payload));
+  }
+});
+
+test("permission decisions validate exact active-action policy facts", () => {
+  const parsed = parseRobinApplicationEvent(
+    rawEvent(1, "PermissionDecided", permissionDecisionPayload()),
+  );
+  assert.equal(parsed.type, "PermissionDecided");
+  if (parsed.type === "PermissionDecided") {
+    assert.equal(parsed.payload.effect, "require_approval");
+    assert.equal(parsed.payload.winningPolicyName, "r2.default.edit.ask");
+  }
+
+  for (const payload of [
+    permissionDecisionPayload({ actionId: "not-an-action-id" }),
+    permissionDecisionPayload({ actionHash: "a".repeat(63) }),
+    permissionDecisionPayload({ effect: "prompt" }),
+    permissionDecisionPayload({ policySnapshotHash: "D".repeat(64) }),
+    permissionDecisionPayload({ policyVersionId: "not-a-policy-id" }),
+    permissionDecisionPayload({ winningPolicyName: "unsafe\u001b]52" }),
+    permissionDecisionPayload({ winningPolicyName: "" }),
+  ]) {
+    assertInvalidEvent(rawEvent(1, "PermissionDecided", payload));
+  }
 });
 
 test("escapes unsafe terminal controls in text and nested observations", () => {
@@ -260,6 +385,72 @@ function rawEvent(
     sessionId: "session-1",
     type,
   };
+}
+
+function approvalRequestPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    actionHash: "a".repeat(64),
+    actionId: ACTION_ID,
+    approvalId: APPROVAL_ID,
+    callId: "call-1",
+    displayedSummary: DISPLAYED_SUMMARY,
+    displayedSummaryHash: canonicalSha256Hex(DISPLAYED_SUMMARY),
+    expiresAt: "2026-08-30T12:05:00.000Z",
+    normalizedRequestHash: "b".repeat(64),
+    policySnapshotHash: "d".repeat(64),
+    preconditionHash: "c".repeat(64),
+    requestedAt: "2026-08-30T12:00:00.000Z",
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+    ...overrides,
+  });
+}
+
+function permissionDecisionPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    actionHash: "a".repeat(64),
+    actionId: ACTION_ID,
+    callId: "call-1",
+    effect: "require_approval",
+    policySnapshotHash: "d".repeat(64),
+    policyVersionId: POLICY_VERSION_ID,
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+    winningPolicyName: "r2.default.edit.ask",
+    ...overrides,
+  });
+}
+
+function approvalResolutionPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  const requested = approvalRequestPayload();
+  const { displayedSummary: _displayedSummary, ...binding } = requested;
+  return Object.freeze({
+    ...binding,
+    decision: "allow_once",
+    outcome: "granted",
+    resolvedAt: "2026-08-30T12:00:30.000Z",
+    ...overrides,
+  });
+}
+
+function approvalInvalidationPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  const requested = approvalRequestPayload();
+  const { displayedSummary: _displayedSummary, ...binding } = requested;
+  return Object.freeze({
+    ...binding,
+    invalidatedAt: "2026-08-30T12:01:00.000Z",
+    observedPreconditionHash: "e".repeat(64),
+    reason: "preconditions_changed",
+    ...overrides,
+  });
 }
 
 function assertInvalidEvent(value: unknown): void {

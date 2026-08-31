@@ -2,6 +2,7 @@ export {
   MAXIMUM_APPLICATION_EVENT_UTF8_BYTES,
   MAXIMUM_APPLICATION_IDENTIFIER_UTF8_BYTES,
   MAXIMUM_APPLICATION_TEXT_UTF8_BYTES,
+  MAXIMUM_APPROVAL_DISPLAY_SUMMARY_UTF8_BYTES,
   ROBIN_APPLICATION_EVENT_SCHEMA_VERSION,
   ROBIN_APPLICATION_EVENT_TYPES,
   RobinSessionError,
@@ -12,12 +13,21 @@ export {
   serializeRobinApplicationEvent,
 } from "./application-event.js";
 export type {
+  RobinApprovalBinding,
+  RobinApprovalDecision,
+  RobinApprovalInvalidatedPayload,
+  RobinApprovalInvalidationReason,
+  RobinApprovalOutcome,
+  RobinApprovalRequestedPayload,
+  RobinApprovalResolvedPayload,
   RobinApplicationEvent,
   RobinApplicationEventPayloadMap,
   RobinApplicationEventSchemaVersion,
   RobinApplicationEventType,
   RobinBudgetDimension,
   RobinPermissionMode,
+  RobinPermissionDecidedPayload,
+  RobinPermissionEffect,
   RobinSessionErrorCode,
   RobinTurnApplicationEvent,
 } from "./application-event.js";
@@ -42,6 +52,8 @@ export {
 export type {
   RobinBudgetWarningState,
   RobinTerminalTurnStatus,
+  RobinPendingApprovalState,
+  RobinToolApprovalState,
   RobinToolCallFailureState,
   RobinToolCallState,
   RobinTurnState,
