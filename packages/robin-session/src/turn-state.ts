@@ -1,7 +1,12 @@
 import type { ErrorCode, JsonObject } from "@guard/contracts";
 
 import type {
+  RobinApprovalDecision,
+  RobinApprovalInvalidationReason,
+  RobinApprovalRequestedPayload,
   RobinBudgetDimension,
+  RobinPermissionDecidedPayload,
+  RobinToolOutputDeltaPayload,
   RobinTurnApplicationEvent,
 } from "./application-event.js";
 
@@ -35,10 +40,55 @@ export interface RobinToolCallFailureState {
   readonly message: string;
 }
 
+export type RobinToolApprovalState =
+  | (RobinApprovalRequestedPayload & {
+      readonly status: "pending";
+    })
+  | (RobinApprovalRequestedPayload & {
+      readonly decision: "allow_once";
+      readonly outcome: "granted";
+      readonly resolvedAt: string;
+      readonly status: "granted";
+    })
+  | (RobinApprovalRequestedPayload & {
+      readonly decision: "deny";
+      readonly outcome: "denied";
+      readonly resolvedAt: string;
+      readonly status: "denied";
+    })
+  | (RobinApprovalRequestedPayload & {
+      readonly decision: RobinApprovalDecision;
+      readonly outcome: "stale";
+      readonly resolvedAt: string;
+      readonly status: "stale";
+    })
+  | (RobinApprovalRequestedPayload & {
+      readonly decision: "allow_once";
+      readonly invalidatedAt: string;
+      readonly invalidationReason: RobinApprovalInvalidationReason;
+      readonly observedPreconditionHash: string | null;
+      readonly outcome: "stale";
+      readonly resolvedAt: string;
+      readonly status: "stale";
+    })
+  | (RobinApprovalRequestedPayload & {
+      readonly resolvedAt: string;
+      readonly status: "cancelled" | "invalidated";
+    });
+
+export type RobinPendingApprovalState = Extract<
+  RobinToolApprovalState,
+  { readonly status: "pending" }
+>;
+
 export interface RobinToolCallState {
+  readonly approval?: RobinToolApprovalState;
   readonly callId: string;
   readonly failure?: RobinToolCallFailureState;
   readonly observation?: JsonObject;
+  /** Ordered, bounded presentation facts; never execution or approval authority. */
+  readonly outputDeltas: readonly RobinToolOutputDeltaPayload[];
+  readonly permission?: RobinPermissionDecidedPayload;
   readonly status: "active" | "completed" | "failed";
   readonly toolName: string;
 }

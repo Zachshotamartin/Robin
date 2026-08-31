@@ -12,6 +12,10 @@
     { "path": "../capability-gateway" },
     { "path": "../capability-synthetic" },
     { "path": "../robin-agent" },
-    { "path": "../robin-session" }
+    { "path": "../robin-session" },
+    { "path": "../robin-tools" },
+    { "path": "../tool-git" },
+    { "path": "../tool-process" },
+    { "path": "../tool-workspace" }
   ]
 }

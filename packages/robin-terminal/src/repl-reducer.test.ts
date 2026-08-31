@@ -5,12 +5,18 @@ import { inputBufferText } from "./input-buffer.js";
 import {
   MAXIMUM_QUEUED_MESSAGES,
   MAXIMUM_REPL_INPUT_UTF8_BYTES,
+  MAXIMUM_REPL_TOOL_OUTPUT_DELTAS,
+  MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES,
   createReplState,
   reduceRepl,
   type ReplEvent,
   type ReplState,
 } from "./repl-reducer.js";
 import { TerminalKeyDecoder } from "./key-decoder.js";
+import type {
+  TerminalApprovalRequest,
+  TerminalApprovalResolution,
+} from "./approval.js";
 
 const encoder = new TextEncoder();
 
@@ -243,3 +249,358 @@ test("local command results never settle or dequeue an active turn", () => {
     { kind: "error", text: "Unknown local command" },
   ]);
 });
+
+test("approval input is isolated, exact, one-shot, and has no Enter default", () => {
+  let state = apply(
+    createReplState({ columns: 80, rows: 24 }),
+    { type: "turn_started" },
+    { type: "key", key: { type: "text", text: "unrelated queued prompt" } },
+    { type: "approval_requested", request: approvalRequest() },
+  );
+  const preservedComposer = state.input;
+  assert.equal(state.approval?.phase, "presenting");
+
+  state = reduceRepl(state, {
+    type: "approval_presented",
+    approvalId: approvalRequest().approvalId,
+  }).state;
+  const approvalBeforeResize = state.approval;
+  state = reduceRepl(state, {
+    type: "key",
+    key: { type: "resize", columns: 132, rows: 41 },
+  }).state;
+  assert.equal(state.approval, approvalBeforeResize);
+  assert.equal(state.input, preservedComposer);
+
+  let transition = reduceRepl(state, { type: "key", key: { type: "enter" } });
+  assert.deepEqual(transition.effects, []);
+  assert.equal(
+    transition.state.diagnostics.at(-1)?.code,
+    "approval_decision_required",
+  );
+
+  transition = reduceRepl(transition.state, {
+    type: "key",
+    key: { type: "paste", text: "y" },
+  });
+  assert.deepEqual(transition.effects, []);
+  assert.equal(
+    transition.state.diagnostics.at(-1)?.code,
+    "approval_paste_rejected",
+  );
+
+  state = apply(
+    transition.state,
+    { type: "key", key: { type: "text", text: "yes" } },
+  );
+  transition = reduceRepl(state, { type: "key", key: { type: "enter" } });
+  assert.deepEqual(transition.effects, []);
+  assert.equal(inputBufferText(transition.state.approval!.input), "");
+
+  state = apply(
+    transition.state,
+    { type: "key", key: { type: "text", text: "allow-once" } },
+  );
+  transition = reduceRepl(state, { type: "key", key: { type: "enter" } });
+  assert.deepEqual(transition.effects, [
+    {
+      type: "resolve_approval",
+      approvalId: approvalRequest().approvalId,
+      decision: "allow_once",
+    },
+  ]);
+  assert.equal(transition.state.approval?.phase, "response_submitted");
+  assert.equal(transition.state.input, preservedComposer);
+
+  const duplicate = reduceRepl(transition.state, {
+    type: "key",
+    key: { type: "enter" },
+  });
+  assert.deepEqual(duplicate.effects, []);
+});
+
+test("approval denial, invalidation, Ctrl-C, and Ctrl-D remain visibly safe", () => {
+  const request = approvalRequest();
+  let state = apply(
+    createReplState(),
+    { type: "turn_started" },
+    { type: "approval_requested", request },
+    { type: "approval_presented", approvalId: request.approvalId },
+  );
+  const ctrlD = reduceRepl(state, { type: "key", key: { type: "ctrl_d" } });
+  assert.deepEqual(ctrlD.effects, []);
+  assert.equal(ctrlD.state.approval?.approvalId, request.approvalId);
+
+  const cancelled = reduceRepl(ctrlD.state, {
+    type: "key",
+    key: { type: "ctrl_c" },
+  });
+  assert.deepEqual(cancelled.effects, [{ type: "request_cancel" }]);
+  assert.equal(cancelled.state.status, "cancelling");
+  assert.equal(cancelled.state.approval?.phase, "cancelling");
+  const lateY = reduceRepl(cancelled.state, {
+    type: "key",
+    key: { type: "text", text: "y" },
+  });
+  assert.deepEqual(lateY.effects, []);
+
+  state = apply(
+    createReplState(),
+    { type: "turn_started" },
+    { type: "approval_requested", request },
+    { type: "approval_presented", approvalId: request.approvalId },
+  );
+  state = reduceRepl(state, {
+    type: "approval_resolved",
+    resolution: approvalResolution(request, "deny", "denied"),
+  }).state;
+  assert.equal(state.approval, null);
+  assert.match(
+    state.transcript.at(-1)?.text ?? "",
+    /denied.*no execution authority/iu,
+  );
+
+  state = reduceRepl(state, {
+    type: "approval_invalidated",
+    invalidation: {
+      ...approvalBinding(request),
+      invalidatedAt: "2026-08-30T02:00:03.000Z",
+      observedPreconditionHash: "5".repeat(64),
+      reason: "preconditions_changed",
+    },
+  }).state;
+  assert.match(
+    state.transcript.at(-1)?.text ?? "",
+    /invalidated.*no execution authority/iu,
+  );
+});
+
+test("tool output preserves channel order, rejects gaps, and cannot alter approval input", () => {
+  let state = apply(
+    createReplState(),
+    { type: "turn_started" },
+    { type: "tool_started", callId: "call-output", name: "robin.process.run@1" },
+    toolOutputEvent({
+      callId: "call-output",
+      name: "robin.process.run@1",
+      safeText: "stdout line\n",
+    }),
+    toolOutputEvent({
+      callId: "call-output",
+      channel: "stderr",
+      name: "robin.process.run@1",
+      safeText: "stderr line",
+      sequence: 2,
+    }),
+  );
+  assert.deepEqual(
+    state.toolOutput.map((delta) => [delta.channel, delta.sequence]),
+    [["stdout", 1], ["stderr", 2]],
+  );
+  assert.equal(state.tools[0]?.outputSequence, 2);
+
+  const rejected = reduceRepl(
+    state,
+    toolOutputEvent({
+      callId: "call-output",
+      name: "robin.process.run@1",
+      sequence: 4,
+    }),
+  ).state;
+  assert.deepEqual(rejected.toolOutput, state.toolOutput);
+  assert.equal(
+    rejected.diagnostics.at(-1)?.code,
+    "invalid_tool_output_delta",
+  );
+
+  const request = approvalRequest();
+  state = apply(
+    state,
+    { type: "approval_requested", request },
+    { type: "approval_presented", approvalId: request.approvalId },
+    { type: "key", key: { type: "text", text: "deny" } },
+  );
+  const approvalBeforeOutput = state.approval;
+  const approvalInputBeforeOutput = state.approval?.input;
+  state = reduceRepl(
+    state,
+    toolOutputEvent({
+      callId: "call-output",
+      name: "robin.process.run@1",
+      safeText: "settling output",
+      sequence: 3,
+    }),
+  ).state;
+  assert.equal(state.approval, approvalBeforeOutput);
+  assert.equal(state.approval?.input, approvalInputBeforeOutput);
+  assert.equal(inputBufferText(state.approval!.input), "deny");
+});
+
+test("raw live tool output retains a bounded ordered tail", () => {
+  let state = apply(
+    createReplState(),
+    { type: "turn_started" },
+    { type: "tool_started", callId: "call-output", name: "robin.process.run@1" },
+  );
+  for (let sequence = 1; sequence <= MAXIMUM_REPL_TOOL_OUTPUT_DELTAS + 1; sequence += 1) {
+    state = reduceRepl(
+      state,
+      toolOutputEvent({
+        callId: "call-output",
+        name: "robin.process.run@1",
+        safeText: String(sequence % 10),
+        sequence,
+      }),
+    ).state;
+  }
+  assert.equal(state.toolOutput.length, MAXIMUM_REPL_TOOL_OUTPUT_DELTAS);
+  assert.equal(state.toolOutputOmittedDeltas, 1);
+  assert.equal(state.toolOutput[0]?.sequence, 2);
+  assert.equal(
+    state.toolOutput.at(-1)?.sequence,
+    MAXIMUM_REPL_TOOL_OUTPUT_DELTAS + 1,
+  );
+  assert.equal(state.toolOutputUtf8Bytes, MAXIMUM_REPL_TOOL_OUTPUT_DELTAS);
+});
+
+test("tool settlement evicts only that call's live output and bounds its transcript summary", () => {
+  let state = apply(
+    createReplState(),
+    { type: "turn_started" },
+    { type: "tool_started", callId: "call-complete", name: "process-one" },
+    { type: "tool_started", callId: "call-active", name: "process-two" },
+    toolOutputEvent({
+      byteLength: 6,
+      callId: "call-complete",
+      name: "process-one",
+      safeText: "first!",
+    }),
+    toolOutputEvent({
+      byteLength: 7,
+      callId: "call-active",
+      name: "process-two",
+      safeText: "second!",
+    }),
+  );
+  const longSummary = "🦉".repeat(MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES);
+  state = reduceRepl(state, {
+    type: "tool_completed",
+    callId: "call-complete",
+    summary: longSummary,
+  }).state;
+
+  assert.deepEqual(
+    state.toolOutput.map((delta) => delta.callId),
+    ["call-active"],
+  );
+  assert.equal(state.toolOutputUtf8Bytes, 7);
+  assert.equal(state.toolOutputOmittedDeltas, 0);
+  assert.equal(state.tools.find((tool) => tool.callId === "call-complete")?.status, "completed");
+  const summary = state.tools.find(
+    (tool) => tool.callId === "call-complete",
+  )?.summary;
+  assert.ok(summary?.includes("… [truncated]"));
+  assert.ok(summary?.endsWith("[stdout #1] first!"));
+  assert.ok(
+    Buffer.byteLength(summary ?? "", "utf8") <=
+      MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES,
+  );
+  assert.match(state.transcript.at(-1)?.text ?? "", /^process-one: /u);
+
+  state = reduceRepl(state, {
+    type: "tool_failed",
+    callId: "call-active",
+    summary: "failed safely",
+  }).state;
+  assert.deepEqual(state.toolOutput, []);
+  assert.equal(state.toolOutputUtf8Bytes, 0);
+  assert.equal(state.tools.find((tool) => tool.callId === "call-active")?.status, "failed");
+});
+
+test("settled output retains bounded grapheme-safe head and tail diagnostics", () => {
+  const headDiagnostic = "labels must be uppercase";
+  const tailDiagnostic = "process exited with status 1";
+  let state = apply(
+    createReplState(),
+    { type: "turn_started" },
+    { type: "tool_started", callId: "call-edges", name: "robin.process.run@1" },
+    toolOutputEvent({
+      byteLength: 4_096,
+      callId: "call-edges",
+      name: "robin.process.run@1",
+      safeText: `${"h".repeat(640)}\n${headDiagnostic}\n${"🦉".repeat(1_024)}\n${tailDiagnostic}`,
+    }),
+  );
+
+  state = reduceRepl(state, {
+    type: "tool_failed",
+    callId: "call-edges",
+    summary: "verification failed",
+  }).state;
+
+  const summary = state.tools.find(
+    (tool) => tool.callId === "call-edges",
+  )?.summary ?? "";
+  assert.match(summary, /labels must be uppercase/u);
+  assert.match(summary, /… \[middle omitted\] …/u);
+  assert.match(summary, /process exited with status 1/u);
+  assert.ok(
+    Buffer.byteLength(summary, "utf8") <= MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES,
+  );
+  assert.equal(summary.includes("�"), false);
+  assert.deepEqual(state.toolOutput, []);
+});
+
+function approvalRequest(): TerminalApprovalRequest {
+  return Object.freeze({
+    actionHash: "1".repeat(64),
+    actionId: "act_018f05a0-7b01-7000-8000-000000000291",
+    approvalId: "apr_018f05a0-7b01-7000-8000-000000000292",
+    callId: "call-approval-1",
+    displayedSummaryHash: "2".repeat(64),
+    expiresAt: "2026-08-30T02:05:00.000Z",
+    normalizedRequestHash: "3".repeat(64),
+    policySnapshotHash: "4".repeat(64),
+    preconditionHash: "5".repeat(64),
+    requestedAt: "2026-08-30T02:00:01.000Z",
+    toolName: "robin.edit.apply@1",
+    turnId: "turn-approval-1",
+    canonicalSummary:
+      '{"operation":"replace exact text","path":"src/calculate.ts","sandboxed":false}',
+  });
+}
+
+function approvalBinding(request: TerminalApprovalRequest) {
+  const { canonicalSummary: _canonicalSummary, ...binding } = request;
+  return binding;
+}
+
+function approvalResolution(
+  request: TerminalApprovalRequest,
+  decision: "allow_once" | "deny",
+  outcome: "granted" | "denied" | "stale",
+): TerminalApprovalResolution {
+  return Object.freeze({
+    ...approvalBinding(request),
+    decision,
+    outcome,
+    resolvedAt: "2026-08-30T02:00:02.000Z",
+  });
+}
+
+function toolOutputEvent(
+  overrides: Partial<Extract<ReplEvent, { readonly type: "tool_output" }>> = {},
+): Extract<ReplEvent, { readonly type: "tool_output" }> {
+  return {
+    type: "tool_output",
+    byteLength: 5,
+    callId: "call-1",
+    channel: "stdout",
+    limitExceeded: false,
+    name: "tool@1",
+    safeText: "hello",
+    sequence: 1,
+    textTruncated: false,
+    ...overrides,
+  };
+}

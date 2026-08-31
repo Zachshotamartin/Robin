@@ -145,3 +145,36 @@ jobs:
               exit 1
             fi
           done
+
+  r2-tools:
+    name: R2 repository coding boundary gate
+    needs: [static, contracts]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:r2:tools
+
+  r2-candidate:
+    name: R2 candidate aggregate gate
+    if: ${{ always() }}
+    needs: [r1-candidate, r2-tools]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      R1_CANDIDATE_RESULT: ${{ needs['r1-candidate'].result }}
+      R2_TOOLS_RESULT: ${{ needs['r2-tools'].result }}
+    steps:
+      - name: Require the accepted R1 matrix and R2 coding boundaries
+        run: |
+          for result in "$R1_CANDIDATE_RESULT" "$R2_TOOLS_RESULT"; do
+            if [ "$result" != "success" ]; then
+              echo "R2 prerequisite result was $result" >&2
+              exit 1
+            fi
+          done

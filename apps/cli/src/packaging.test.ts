@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmod,
   cp,
   lstat,
   mkdir,
@@ -41,6 +42,25 @@ const PTY_DRIVER = join(
   "robin_pty_driver.py",
 );
 const PYTHON = process.env.ROBIN_TEST_PYTHON ?? "/usr/bin/python3";
+const R2_APPROVAL_TOOLS = Object.freeze([
+  "robin.edit.apply_patch@1",
+  "robin.process.run@1",
+  "robin.edit.apply_patch@1",
+  "robin.process.run@1",
+]);
+const INITIAL_CODING_SOURCE = [
+  "export function calculateTotal(values: readonly number[]): number {",
+  "  return values.reduce((total, value) => total - value, 0);",
+  "}",
+  "",
+  "export function formatLabel(label: string): string {",
+  "  return label.toLowerCase();",
+  "}",
+  "",
+].join("\n");
+const REPAIRED_CODING_SOURCE = INITIAL_CODING_SOURCE
+  .replace("total - value", "total + value")
+  .replace("return label.toLowerCase();", "return label.toUpperCase();");
 
 interface PackResult {
   readonly filename: string;
@@ -94,7 +114,7 @@ const REVIEWED_PACK_INVENTORY_PATH = join(
   REPOSITORY_ROOT,
   "evidence",
   "inventory",
-  "r1-cli-tarball-v1.json",
+  "r2-cli-tarball-v1.json",
 );
 const REVIEWED_PACK_INVENTORY = await loadReviewedPackInventory();
 
@@ -220,6 +240,10 @@ test("the actual tarball installs with its local workspace closure and runs offl
     XDG_STATE_HOME: join(stateCanaryRoot, "state"),
     XDG_CACHE_HOME: join(stateCanaryRoot, "cache"),
     XDG_RUNTIME_DIR: join(stateCanaryRoot, "runtime"),
+    // Node 22.23+ may create its own module compile cache below TMPDIR before
+    // Robin's entry point runs. Disable that runtime-owned cache so this
+    // canary measures only filesystem state created by the installed CLI.
+    NODE_DISABLE_COMPILE_CACHE: "1",
     NODE_OPTIONS: [
       "--no-warnings",
       `--import=${pathToFileURL(installedColdSideEffectSentinel).href}`,
@@ -318,7 +342,12 @@ test("the actual tarball installs with its local workspace closure and runs offl
 
   const previewResult = await execFile(
     installedCommand,
-    ["-p", "Verify the installed Robin preview."],
+    [
+      "-p",
+      "--model",
+      "synthetic-r1-v1",
+      "Verify the installed Robin preview.",
+    ],
     {
       cwd: installRoot,
       encoding: "utf8",
@@ -420,7 +449,9 @@ test("the actual tarball installs with its local workspace closure and runs offl
     directory,
     "installed PTY working directory Ω",
   );
+  const installedPtyGitConfig = join(directory, "installed-pty.gitconfig");
   await mkdir(installedPtyWorkingDirectory);
+  await writeFile(installedPtyGitConfig, "", "utf8");
   const installedPtyEnvironment: NodeJS.ProcessEnv = {
     ...coldEnvironment,
     // The macOS system Python otherwise writes imported-module bytecode under
@@ -428,6 +459,18 @@ test("the actual tarball installs with its local workspace closure and runs offl
     // state, and would invalidate the empty-home canary before it can measure
     // the installed CLI accurately.
     PYTHONDONTWRITEBYTECODE: "1",
+    GIT_AUTHOR_DATE: "2024-01-01T00:00:00Z",
+    GIT_AUTHOR_EMAIL: "robin-fixture@example.invalid",
+    GIT_AUTHOR_NAME: "Robin Fixture",
+    GIT_COMMITTER_DATE: "2024-01-01T00:00:00Z",
+    GIT_COMMITTER_EMAIL: "robin-fixture@example.invalid",
+    GIT_COMMITTER_NAME: "Robin Fixture",
+    GIT_CONFIG_GLOBAL: installedPtyGitConfig,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_TERMINAL_PROMPT: "0",
+    npm_config_cache: join(directory, "installed-pty-npm-cache"),
+    npm_config_update_notifier: "false",
   };
   delete installedPtyEnvironment.NODE_OPTIONS;
   Object.freeze(installedPtyEnvironment);
@@ -491,6 +534,163 @@ test("the actual tarball installs with its local workspace closure and runs offl
     [],
   );
 
+  const installedR2Fixture = join(directory, "installed R2 coding fixture Ω");
+  await createInstalledCodingFixture(
+    installedR2Fixture,
+    installedPtyEnvironment,
+  );
+  const installedR2InitialWorkspace = await snapshotFixtureTree(
+    installedR2Fixture,
+    true,
+  );
+  const installedR2GitDirectory = await gitText(
+    installedR2Fixture,
+    ["rev-parse", "--absolute-git-dir"],
+    installedPtyEnvironment,
+  );
+  const installedR2InitialGitStorage = await snapshotFixtureTree(
+    installedR2GitDirectory,
+    false,
+  );
+  const installedR2InitialHead = await gitText(
+    installedR2Fixture,
+    ["rev-parse", "--verify", "HEAD"],
+    installedPtyEnvironment,
+  );
+  const installedR2InitialIndex = await readFile(
+    join(installedR2GitDirectory, "index"),
+  );
+
+  const installedR2PtyResult = await execFile(
+    PYTHON,
+    [
+      PTY_DRIVER,
+      "--scenario",
+      "r2_approve",
+      "--cwd",
+      installedR2Fixture,
+      "--node",
+      process.execPath,
+      "--binary",
+      installedCommand,
+    ],
+    {
+      cwd: installedR2Fixture,
+      env: installedPtyEnvironment,
+      encoding: "utf8",
+      timeout: 60_000,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  assert.equal(installedR2PtyResult.stderr, "");
+  const installedR2PtyPayload = JSON.parse(installedR2PtyResult.stdout) as {
+    readonly schemaVersion: number;
+    readonly scenario: string;
+    readonly modelId: string;
+    readonly exitCode: number;
+    readonly approvalTools: readonly string[];
+    readonly termiosRestored: boolean;
+    readonly transcriptBase64: string;
+    readonly normalizedTranscript: string;
+  };
+  assert.equal(installedR2PtyPayload.schemaVersion, 1);
+  assert.equal(installedR2PtyPayload.scenario, "r2_approve");
+  assert.equal(installedR2PtyPayload.modelId, "synthetic-r2-v1");
+  assert.equal(installedR2PtyPayload.exitCode, 0);
+  assert.deepEqual(installedR2PtyPayload.approvalTools, R2_APPROVAL_TOOLS);
+  assert.equal(
+    installedR2PtyPayload.termiosRestored,
+    true,
+    installedR2PtyPayload.normalizedTranscript,
+  );
+  assert.match(
+    installedR2PtyPayload.normalizedTranscript,
+    /robin\.edit\.apply_patch@1/u,
+  );
+  assert.match(
+    installedR2PtyPayload.normalizedTranscript,
+    /robin\.process\.run@1/u,
+  );
+  assert.match(
+    installedR2PtyPayload.normalizedTranscript,
+    /robin\.git\.status@1/u,
+  );
+  assert.match(
+    installedR2PtyPayload.normalizedTranscript,
+    /robin\.git\.diff@1/u,
+  );
+  assert.match(
+    installedR2PtyPayload.normalizedTranscript,
+    /direct npm test verification passed after 2 attempts/u,
+  );
+  const installedR2Transcript = Buffer.from(
+    installedR2PtyPayload.transcriptBase64,
+    "base64",
+  ).toString("utf8");
+  assert.match(installedR2Transcript, /\u001b\[\?2004h/u);
+  assert.match(installedR2Transcript, /\u001b\[\?2004l/u);
+  assert.match(installedR2Transcript, /\u001b\[\?25h/u);
+  assert.match(installedR2Transcript, /\u001b\[0m\r+\n/u);
+
+  assert.equal(
+    await readFile(join(installedR2Fixture, "src", "calculate.ts"), "utf8"),
+    REPAIRED_CODING_SOURCE,
+  );
+  assert.equal(
+    await readFile(
+      join(installedR2Fixture, "notes", "user-notes.txt"),
+      "utf8",
+    ),
+    "keep this user-authored baseline\npre-existing uncommitted note\n",
+  );
+  assert.equal(
+    await readFile(join(installedR2Fixture, "scratch-user.txt"), "utf8"),
+    "pre-existing untracked user content\n",
+  );
+  const installedR2FinalWorkspace = await snapshotFixtureTree(
+    installedR2Fixture,
+    true,
+  );
+  assertOnlyFixtureSourceChanged(
+    installedR2InitialWorkspace,
+    installedR2FinalWorkspace,
+  );
+  assert.equal(
+    await gitText(
+      installedR2Fixture,
+      ["rev-parse", "--verify", "HEAD"],
+      installedPtyEnvironment,
+    ),
+    installedR2InitialHead,
+  );
+  assert.deepEqual(
+    await readFile(join(installedR2GitDirectory, "index")),
+    installedR2InitialIndex,
+  );
+  assert.deepEqual(
+    await snapshotFixtureTree(installedR2GitDirectory, false),
+    installedR2InitialGitStorage,
+  );
+  const installedR2Status = await gitBuffer(
+    installedR2Fixture,
+    [
+      "-c",
+      "core.quotepath=false",
+      "-c",
+      "status.renames=false",
+      "status",
+      "--porcelain=v2",
+      "-z",
+      "--untracked-files=all",
+    ],
+    installedPtyEnvironment,
+  );
+  const installedR2StatusText = installedR2Status.toString("utf8");
+  assert.match(installedR2StatusText, /src\/calculate\.ts/u);
+  assert.match(installedR2StatusText, /notes\/user-notes\.txt/u);
+  assert.match(installedR2StatusText, /\? scratch-user\.txt\0/u);
+  assert.deepEqual(await readdir(stateCanaryRoot, { recursive: true }), []);
+
   await execFile(
     "npm",
     [
@@ -516,6 +716,202 @@ test("the actual tarball installs with its local workspace closure and runs offl
   await assertPathMissing(installedPackageRoot);
   await assertPathMissing(installedCommand);
 });
+
+interface FixtureTreeEntry {
+  readonly dev: string;
+  readonly ino: string;
+  readonly kind: "directory" | "file";
+  readonly mode: number;
+  readonly nlink: number;
+  readonly path: string;
+  readonly sha256?: string;
+  readonly size?: number;
+}
+
+async function createInstalledCodingFixture(
+  workspaceRoot: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<void> {
+  await Promise.all([
+    mkdir(join(workspaceRoot, "src"), { recursive: true }),
+    mkdir(join(workspaceRoot, "notes"), { recursive: true }),
+    mkdir(join(workspaceRoot, "test"), { recursive: true }),
+  ]);
+  await gitBuffer(
+    workspaceRoot,
+    ["init", "--initial-branch=main"],
+    environment,
+  );
+  await Promise.all([
+    writeFile(
+      join(workspaceRoot, "README.md"),
+      "# Robin repository fixture\n",
+      "utf8",
+    ),
+    writeFile(join(workspaceRoot, "src", "answer.txt"), "41\n", "utf8"),
+    writeFile(join(workspaceRoot, "conflict.txt"), "shared baseline\n", "utf8"),
+    writeFile(join(workspaceRoot, ".gitignore"), "ignored/\n*.generated\n", "utf8"),
+    writeFile(
+      join(workspaceRoot, ".gitattributes"),
+      "*.txt text\n*.bin binary\n",
+      "utf8",
+    ),
+    writeFile(join(workspaceRoot, "verify-fixture.sh"), "#!/bin/sh\nexit 0\n", "utf8"),
+  ]);
+  await chmod(join(workspaceRoot, "verify-fixture.sh"), 0o755);
+  await gitBuffer(workspaceRoot, ["add", "--all"], environment);
+  await gitBuffer(
+    workspaceRoot,
+    ["commit", "-m", "fixture baseline"],
+    environment,
+  );
+
+  await Promise.all([
+    writeFile(
+      join(workspaceRoot, "src", "calculate.ts"),
+      INITIAL_CODING_SOURCE,
+      "utf8",
+    ),
+    writeFile(
+      join(workspaceRoot, "test", "calculate.test.mjs"),
+      [
+        'import assert from "node:assert/strict";',
+        'import { readFile } from "node:fs/promises";',
+        'import test from "node:test";',
+        "",
+        'test("calculation and label regressions are fixed", async () => {',
+        '  const source = await readFile(new URL("../src/calculate.ts", import.meta.url), "utf8");',
+        '  assert.match(source, /total \\+ value/u, "the reducer must add each value");',
+        '  assert.match(source, /return label\\.toUpperCase\\(\\);/u, "labels must be uppercase");',
+        "});",
+        "",
+      ].join("\n"),
+      "utf8",
+    ),
+    writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          name: "robin-r2-coding-fixture",
+          private: true,
+          scripts: { test: "node --test test/calculate.test.mjs" },
+          type: "module",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    ),
+    writeFile(
+      join(workspaceRoot, "notes", "user-notes.txt"),
+      "keep this user-authored baseline\n",
+      "utf8",
+    ),
+  ]);
+  await gitBuffer(workspaceRoot, ["add", "--all"], environment);
+  await gitBuffer(
+    workspaceRoot,
+    ["commit", "-m", "add deterministic coding scenario"],
+    environment,
+  );
+  await Promise.all([
+    writeFile(
+      join(workspaceRoot, "notes", "user-notes.txt"),
+      "keep this user-authored baseline\npre-existing uncommitted note\n",
+      "utf8",
+    ),
+    writeFile(
+      join(workspaceRoot, "scratch-user.txt"),
+      "pre-existing untracked user content\n",
+      "utf8",
+    ),
+  ]);
+}
+
+async function gitBuffer(
+  cwd: string,
+  args: readonly string[],
+  environment: NodeJS.ProcessEnv,
+): Promise<Buffer> {
+  const result = await execFile("git", [...args], {
+    cwd,
+    env: environment,
+    encoding: null,
+    timeout: 30_000,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  return Buffer.isBuffer(result.stdout)
+    ? result.stdout
+    : Buffer.from(result.stdout, "utf8");
+}
+
+async function gitText(
+  cwd: string,
+  args: readonly string[],
+  environment: NodeJS.ProcessEnv,
+): Promise<string> {
+  return (await gitBuffer(cwd, args, environment)).toString("utf8").trimEnd();
+}
+
+async function snapshotFixtureTree(
+  root: string,
+  excludeGitDirectory: boolean,
+): Promise<readonly FixtureTreeEntry[]> {
+  const entries: FixtureTreeEntry[] = [];
+  const visit = async (directory: string): Promise<void> => {
+    const children = await readdir(directory, { withFileTypes: true });
+    children.sort((left, right) =>
+      Buffer.from(left.name).compare(Buffer.from(right.name)),
+    );
+    for (const child of children) {
+      if (excludeGitDirectory && child.name === ".git") continue;
+      const absolutePath = join(directory, child.name);
+      const metadata = await lstat(absolutePath);
+      const path = relative(root, absolutePath).split(sep).join("/");
+      const common = {
+        dev: String(metadata.dev),
+        ino: String(metadata.ino),
+        mode: metadata.mode & 0o7777,
+        nlink: metadata.nlink,
+        path,
+      };
+      if (metadata.isDirectory() && !metadata.isSymbolicLink()) {
+        entries.push({ ...common, kind: "directory" });
+        await visit(absolutePath);
+      } else if (metadata.isFile() && !metadata.isSymbolicLink()) {
+        const contents = await readFile(absolutePath);
+        entries.push({
+          ...common,
+          kind: "file",
+          sha256: createHash("sha256").update(contents).digest("hex"),
+          size: contents.length,
+        });
+      } else {
+        assert.fail(`unexpected fixture entry type at ${path}`);
+      }
+    }
+  };
+  await visit(root);
+  return Object.freeze(entries.map((entry) => Object.freeze(entry)));
+}
+
+function assertOnlyFixtureSourceChanged(
+  before: readonly FixtureTreeEntry[],
+  after: readonly FixtureTreeEntry[],
+): void {
+  const beforeByPath = new Map(before.map((entry) => [entry.path, entry]));
+  const afterByPath = new Map(after.map((entry) => [entry.path, entry]));
+  assert.deepEqual([...afterByPath.keys()], [...beforeByPath.keys()]);
+  for (const [path, beforeEntry] of beforeByPath) {
+    const afterEntry = afterByPath.get(path);
+    assert.notEqual(afterEntry, undefined, `fixture entry disappeared: ${path}`);
+    if (path === "src/calculate.ts") {
+      assert.notDeepEqual(afterEntry, beforeEntry);
+    } else {
+      assert.deepEqual(afterEntry, beforeEntry, `unexpected fixture change: ${path}`);
+    }
+  }
+}
 
 async function assertPathMissing(filePath: string): Promise<void> {
   await assert.rejects(

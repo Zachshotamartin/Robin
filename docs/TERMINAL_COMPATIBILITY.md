@@ -2,16 +2,16 @@
 
 ## Status and Scope
 
-Robin's current R1 candidate provides a Claude Code-style coding-agent terminal
+Robin's accepted R1 slice provides a Claude Code-style coding-agent terminal
 experience over one ephemeral, in-memory application session. The only coding
 provider is the deterministic `synthetic` provider and the only model is
 `synthetic-r1-v1`.
 
-R1 is **not accepted**. Local macOS real-PTY evidence and the configured hosted
-Linux/macOS PTY, package-smoke, and aggregate jobs passed on stacked candidate
-`dc39937`. R0 is accepted on `main` at `2c042ca`; R1 still requires fresh
-exact-head evidence after its base update and a mainline merge. This page
-describes candidate behavior; it is not a cross-platform support promise.
+R1 is **accepted**. Local macOS real-PTY evidence and the configured hosted
+Linux/macOS PTY, package-smoke, and aggregate jobs passed on reviewed head
+`9907287`; R1 merged on `main` as `fb64cf1`, and all nine merge-triggered jobs
+passed again. This page describes the bounded R1 behavior; it is not a broader
+cross-platform support promise.
 
 ## Mode Selection
 
@@ -75,7 +75,7 @@ process. This exercises the provider-to-application event mapping, serialized
 tool loop, usage events, replay projection, and terminal rendering without a
 physical side effect.
 
-The R1 candidate does **not** read or change the working directory, edit files,
+The accepted R1 slice does **not** read or change the working directory, edit files,
 run commands or child processes, invoke Git, access the network, contact a model
 API, accept API keys, store credentials, save sessions, or support continuation
 or resume. Exiting discards the entire coding session.
@@ -87,12 +87,12 @@ or resume. Exiting discards the entire coding session.
 | Local macOS real PTY, source-built CLI | Verified locally | No-argument and positional-prompt sessions, two fixture-tool turns, usage, FIFO queue promotion after cancellation, resize, inert bracketed paste, one- and two-interrupt paths, provider/tool failures, cleanup bytes, and termios restoration are exercised by the PTY harness. |
 | Local macOS isolated npm-prefix package test | Verified locally | The packed CLI is installed outside the workspace, completes the happy-path PTY fixture, restores terminal state, and uninstalls from the temporary prefix. This is development evidence, not hosted release evidence. |
 | Non-TTY `TERM=dumb` flat path | Deterministically tested locally | Output is append-only and contains no ANSI bytes while retaining synthetic tool and usage events. |
-| Hosted Ubuntu/Linux `pty-linux` job | Candidate verified on `dc39937` | The real-PTY semantic matrix, signals, resize, restoration, headless split, and leak checks passed; a base update requires a fresh exact-head run. |
-| Hosted Tier-1 macOS integration | Candidate verified on `dc39937` | The configured macOS PTY semantics, package execution, and cleanup passed; this is candidate rather than release-support evidence. |
+| Hosted Ubuntu/Linux `pty-linux` job | Accepted at `9907287` and `fb64cf1` | The real-PTY semantic matrix, signals, resize, restoration, headless split, and leak checks passed before and after merge. |
+| Hosted Tier-1 macOS integration | Accepted at `9907287` and `fb64cf1` | The configured macOS PTY semantics, package execution, and cleanup passed before and after merge; this remains R1-scope rather than a general release-support claim. |
 | Windows/ConPTY and other terminals | Not claimed for R1 | No compatibility or release-support statement is made from the current evidence. |
 
-Passing local and hosted candidate tests must not be reported as R1 acceptance
-until the refreshed exact head is merged into `main`.
+R1 acceptance records only the matrix above. It does not claim Windows/ConPTY,
+real workspace tools, hosted providers, persistence, or supported distribution.
 
 Developers can exercise the current deterministic checks from the repository
 root:

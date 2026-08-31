@@ -30,6 +30,21 @@ export {
 export type { InputBuffer, InputSelection } from "./input-buffer.js";
 
 export {
+  MAXIMUM_APPROVAL_INPUT_UTF8_BYTES,
+  parseTerminalApprovalDecision,
+  sameTerminalApprovalBinding,
+} from "./approval.js";
+export type {
+  TerminalApprovalBinding,
+  TerminalApprovalDecision,
+  TerminalApprovalInvalidation,
+  TerminalApprovalInvalidationReason,
+  TerminalApprovalOutcome,
+  TerminalApprovalRequest,
+  TerminalApprovalResolution,
+} from "./approval.js";
+
+export {
   DEFAULT_KEY_DECODER_LIMITS,
   TerminalKeyDecoder,
 } from "./key-decoder.js";
@@ -45,16 +60,22 @@ export {
   MAXIMUM_REPL_DIAGNOSTICS,
   MAXIMUM_REPL_HISTORY,
   MAXIMUM_REPL_INPUT_UTF8_BYTES,
+  MAXIMUM_REPL_TOOL_OUTPUT_DELTA_UTF8_BYTES,
+  MAXIMUM_REPL_TOOL_OUTPUT_DELTAS,
+  MAXIMUM_REPL_TOOL_OUTPUT_UTF8_BYTES,
+  MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES,
   createReplState,
   reduceRepl,
 } from "./repl-reducer.js";
 export type {
   ReplDiagnostic,
+  ReplApprovalState,
   ReplEffect,
   ReplEvent,
   ReplState,
   ReplStatus,
   ReplToolStatus,
+  ReplToolOutputDelta,
   ReplTranscriptEntry,
   ReplTransition,
 } from "./repl-reducer.js";
@@ -63,6 +84,11 @@ export {
   buildTerminalFrame,
   diffTerminalFrames,
   sanitizeTerminalData,
+  renderApprovalInvalidationLine,
+  renderApprovalRequestBlock,
+  renderApprovalRequestLines,
+  renderApprovalResolutionLine,
+  renderToolOutputLines,
   wrapCells,
   writeTerminalFrame,
   StaleTerminalFrameError,

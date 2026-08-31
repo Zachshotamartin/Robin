@@ -26,15 +26,17 @@ normative plan is split across:
 - Local repository: `/Users/zacharymartin/Desktop/portfolio_projects/Robin`
 - GitHub repository: `https://github.com/Zachshotamartin/Robin`
 - Origin: `https://github.com/Zachshotamartin/Robin.git`
-- Accepted default branch: `main` at `2c042ca`
+- Accepted default branch: `main` at `fb64cf1`
 - R0 candidate branch: `codex/robin-cli-pivot` at `23c99a8`
 - R0 pull request #2 merged with merge commit `2c042ca`; the merge-triggered
   Gate A/B workflow passed, so R0 is accepted.
-- R1 candidate branch: `codex/robin-r1-interactive-loop`, stacked on the R0
-  source history and awaiting its accepted-main merge commit.
-- R1 candidate head: `dc39937`; pull request #3 is stacked on pull request #2.
-- The configured Linux PTY, macOS PTY, package-smoke, and R1 aggregate jobs pass
-  on that exact stacked head. A base-changing update requires a fresh run.
+- R1 branch `codex/robin-r1-interactive-loop` passed all nine required checks at
+  reviewed head `9907287` in pull request #3 and merged as `fb64cf1`.
+- The merge-triggered `main` workflow also passed all nine R1 jobs, so R1 is
+  accepted rather than candidate-only evidence.
+- Active R2 branch: `codex/robin-r2-real-tool-loop`, created from accepted R1.
+- The repository is public. GitHub secret scanning and push protection are
+  enabled.
 - Superseded pull request #1 is closed and archival.
 
 The unfinished pre-pivot Milestone C prototype remains preserved on
@@ -51,7 +53,7 @@ and evaluation, bounded context, a capability gateway, virtual repository
 fixtures, deterministic scenarios, mutation checks, and their existing evidence.
 They are not a usable coding-agent release.
 
-## Unaccepted R1 Candidate
+## Accepted R1 Baseline
 
 The R1 branch implements a credential-free, no-network vertical slice of the
 terminal product:
@@ -80,32 +82,71 @@ terminal product:
 - SHA-pinned Linux PTY, macOS PTY, package-smoke, and fail-closed R1 aggregate CI
   jobs plus an R1 evidence-capture descriptor.
 
-This candidate does **not** read or modify the physical repository, execute a
+The accepted R1 slice does **not** read or modify the physical repository, execute a
 process or Git command, call a hosted model, accept an API key, persist or resume
 a session, provide a strict sandbox, publish a supported package, or expose the
 stable automation protocol. Those capabilities remain owned by later gates.
-R1 remains unaccepted until the candidate is refreshed against accepted
-`main`, the exact hosted Linux/macOS/package/aggregate evidence passes again
-on that reviewed head, and the candidate is merged.
+Those limitations are deliberate R1 boundaries, not missing R1 acceptance
+evidence. R2 owns the first physical-workspace and process effects.
+
+## Active R2 Candidate
+
+The unaccepted `codex/robin-r2-real-tool-loop` branch now composes the accepted
+R1 terminal and provider-neutral loop with a real coding workflow:
+
+- startup requires and binds the current physical Git worktree, then exposes
+  canonical root, repository identity, initial HEAD/branch, and initial dirty
+  status as presentation-only facts;
+- `packages/tool-workspace` implements bounded list, explicit-path literal
+  search, classified whole/byte/line reads, exact-preimage structured patches,
+  atomic file creation/replacement, stale checks, and an in-memory edit ledger;
+- `packages/tool-process` implements direct executable-plus-argv requests,
+  reviewed executable resolution, filtered environments, bounded ordered
+  stdout/stderr, timeout/cancellation escalation, and process-group cleanup;
+- `packages/tool-git` implements controlled Git discovery plus bounded,
+  read-only status and working/staged diff operations;
+- `packages/robin-tools` registers exactly eight R2 tools and ensures that the
+  normalized action approved by policy is the action dispatched once;
+- `packages/robin-session` and `packages/robin-application` record exact
+  approval request/resolution/invalidation state and bounded `ToolOutputDelta`
+  events without turning replay or UI state into execution authority;
+- `packages/robin-terminal` and `apps/cli` present complete approval scope,
+  accept only exact typed allow-once/deny decisions, render safe ordered live
+  output, and fail closed on cancellation, EOF, paste, or headless approval;
+- `synthetic-r2-v1` deterministically lists, searches, reads, edits, runs
+  `npm test`, handles one ordinary failure with a re-read and second edit, reruns
+  verification, and reviews final Git status/diff in generated repositories;
+- the accepted immutable R1 path remains selectable with
+  `--model synthetic-r1-v1`.
+
+R2 edits the live checkout immediately after each exact approval. Sessions and
+approvals are ephemeral. Approved processes run directly on the host with **no
+filesystem isolation and no network isolation**; reduced environment, direct
+argv, output bounds, and process ownership are not a sandbox. R2 has no hosted
+or local production provider, API-key input, BYOK onboarding, durable resume,
+shell tool, network tool, file delete/move, Git mutation, or supported package
+release. Provider/model breadth remains R4 and later work.
+
+These are branch-candidate claims backed by current source and focused tests,
+not accepted release claims. R2 becomes accepted only after its complete PTY,
+repository-safety, packaging, hosted matrix, documentation, and aggregate gate
+pass at one reviewed head and the merge-triggered mainline gate also passes.
 
 ## Immediate Next Work
 
-1. Retarget pull request #3 to `main`, merge accepted `main` into the R1
-   branch without rewriting its evidence history, update acceptance status,
-   require `gate-b`, `pty-linux`, `pty-macos`, `package-smoke`, and
-   `r1-candidate` to pass again on the exact head, validate the clean-commit R1
-   evidence manifest, and only then merge and mark R1 accepted.
-2. Build R2 as the first genuinely useful local coding slice: bounded physical
-   repository status/list/search/read, exact-preimage create/edit/apply, direct
-   argv-based process execution, focused verification, and final status/diff in
-   disposable real-Git fixtures. Delete, move, shell strings, network, and Git
-   writes remain registered but denied at that gate.
-3. Build R3 durable local sessions, crash recovery, `continue`, and `resume` on
+1. Finish and freeze the R2 candidate: complete raw/flat PTY approval and
+   live-output acceptance, repository safety/oracle checks, source-package
+   smoke validation, reviewed package-inventory refresh, hosted R2 candidate
+   results, evidence configuration/capture, and truthful live-workspace/no-
+   sandbox documentation at one exact commit. Delete, move, shell strings,
+   network, workspace executables, and Git writes remain absent or denied at
+   this gate.
+2. Build R3 durable local sessions, crash recovery, `continue`, and `resume` on
    the R2 tool path.
-4. Build R4 around the frozen provider-neutral port with one hosted provider,
+3. Build R4 around the frozen provider-neutral port with one hosted provider,
    model discovery, session-scoped bring-your-own-key onboarding, redaction, and
    explicit manual real-provider smokes. CI must remain credential-free.
-5. Continue through R5 permissions and strict sandboxing, R6 daily Git workflow,
+4. Continue through R5 permissions and strict sandboxing, R6 daily Git workflow,
    R7 provider breadth and stable automation, and R8 configuration, trust, and
    instructions before calling Robin a supported first release.
 
@@ -119,9 +160,17 @@ npm run evidence:validate-config:r1
 npm run test:repository
 npm run test:unit
 npm run test:gate:b
+npm test --workspace @guard/tool-workspace
+npm test --workspace @guard/tool-process
+npm test --workspace @guard/tool-git
+npm test --workspace @guard/robin-tools
+npm test --workspace @guard/robin-application
+npm test --workspace @guard/robin-terminal
+npm test --workspace @zachshotamartin/robin
 npm run test:pty
 npm run test:package
 npm run test:gate:r1
+npm run test:gate:r2
 git diff --check
 ```
 

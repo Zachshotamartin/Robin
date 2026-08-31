@@ -3,8 +3,8 @@
 Document status: normative product specification for the Robin pivot.
 
 Implementation status: the repository contains the completed deterministic
-runtime and policy/context substrate from Milestones A and B plus an unaccepted
-R1 candidate. The candidate uses a schema-versioned, append-only in-memory
+runtime and policy/context substrate from Milestones A and B plus accepted
+Robin R0–R1. R1 uses a schema-versioned, append-only in-memory
 application-event journal, pure reducer/replay projection, and replay-then-live
 event stream for one ephemeral provider-neutral application path. Its
 credential-free synthetic provider runs a multi-request structured loop through
@@ -15,11 +15,10 @@ JSON, and streaming-JSON paths are implemented. It currently spells target
 `default` permission as `ask` and uses temporary `--output-format` and
 `--no-save` flags.
 
-Local macOS real-PTY and isolated package install/execute/uninstall tests provide
-candidate evidence only. R0 is accepted on `main` at `2c042ca`, and the
-configured hosted Linux/macOS jobs and aggregate passed on stacked candidate
-`dc39937`. The complete R1 gate remains open until fresh exact-head evidence
-passes after the base update and the candidate merges.
+Local macOS real-PTY and isolated package install/execute/uninstall tests and the
+configured hosted Linux/macOS jobs passed on reviewed head `9907287`. R0 is
+accepted on `main` at `2c042ca`; R1 merged as `fb64cf1`, and all nine
+merge-triggered jobs passed. The complete R1 gate is accepted.
 There is no physical repository, process, Git, credential, network provider,
 API-key, durable-session, or resume capability, and the stable R7 automation
 contract remains planned. Current behavior is summarized in the repository
@@ -369,7 +368,7 @@ type HeadlessOutput = "text" | "json" | "stream-json";
 ```
 
 Headless is the `--print` surface, not a permission value. Its target flags are
-`--output <text|json|stream-json>` and `--no-session`. The unaccepted R1
+`--output <text|json|stream-json>` and `--no-session`. The accepted R1
 candidate currently accepts `ask`, `--output-format`, and `--no-save`; these are
 temporary implementation spellings, not stable aliases. Before the R7 public
 command snapshot, `ask` maps to `default`, `--output-format` becomes `--output`, and
@@ -820,7 +819,7 @@ implemented until their owning gates pass.
 
 ### 7.10 Providers and models
 
-The checked-in unaccepted R1 candidate still uses the temporary
+The accepted R1 implementation still uses the temporary
 `ModelProvider.respond(request, signal)` port. The canonical production R4
 adapter exposes only
 `probe`, `countInput`, `invoke`, `classifyUnknownError`, and
@@ -919,7 +918,7 @@ the reviewed pinned official JavaScript SDK.
 
 The canonical `PermissionMode` enum is exactly `default | plan | accept-edits |
 locked | bypass`. `--print`/headless is a presentation and interaction surface,
-not a permission mode. The unaccepted R1 candidate's experimental `ask`
+not a permission mode. The accepted R1 implementation's experimental `ask`
 spelling must migrate to `default` before the target public permission surface
 is accepted.
 
@@ -1218,22 +1217,21 @@ The existing Milestones A and B remain accepted only for their current,
 documented deterministic contracts, policy engine, context boundary, and
 virtual repository evidence. They do not satisfy a coding-agent product release.
 
-### 12.2 R1 implementation candidate and R1 completion
+### 12.2 Accepted R1 implementation
 
-The checked-in R1 candidate proves a shared provider-neutral ephemeral path
+The accepted R1 implementation proves a shared provider-neutral ephemeral path
 through a versioned in-memory application journal, reducer/replay projection,
 and replay-then-live event stream. Its structured synthetic loop makes multiple
 model requests around two deterministic fixture-tool observations. Raw TTY and
 append-only flat terminal modes, queued input, cancellation, resize, inert
 bracketed paste, PTY restoration, and experimental `--print` output are present.
 Local macOS real-PTY and isolated package install/execute/uninstall tests cover
-those candidate paths. The configured hosted Linux/macOS PTY, package-smoke,
-and R1 aggregate jobs also passed on candidate commit `dc39937`.
+those paths. The configured hosted Linux/macOS PTY, package-smoke, and R1
+aggregate jobs passed on reviewed head `9907287` and after merge as `fb64cf1`.
 
-It is not a release or a complete R1 gate. R0 is accepted on `main` at
-`2c042ca`, but the R1 candidate has not merged and its base-changing update
-requires fresh exact-head hosted evidence. The full named failure/performance
-matrix still controls acceptance. R1 makes no physical repository, hosted
+It is not a general product release. R0 is accepted on `main` at `2c042ca`,
+and R1 is accepted at `fb64cf1`. The full named failure/performance matrix still
+controls later release claims. R1 makes no physical repository, hosted
 provider, API-key/credential, persistence, resume, sandbox, or stable automation
 claim.
 

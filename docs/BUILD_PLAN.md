@@ -64,9 +64,11 @@ R9 even though the historical label is numerically lower:
 | R11 | A stable client protocol and measured editor prototype support an editor-client decision. |
 | R12 | The selected editor client ships without a second engine; a Code-OSS fork remains evidence-gated. |
 
-The checked-in raw/flat-terminal, ephemeral implementation is an **R1
-candidate**, not an accepted R1 gate or a supported release. It uses only a
-deterministic provider and immutable fixture tools. R4 is only the first
+The raw/flat-terminal, ephemeral R1 implementation is **accepted** on `main` at
+merge commit `fb64cf1`. The checked-in physical-workspace implementation on
+`codex/robin-r2-real-tool-loop` is an **R2 candidate**, not an accepted R2 gate
+or supported release. It uses only the deterministic `synthetic-r2-v1` fixture
+model; approved host processes are explicitly unsandboxed. R4 is only the first
 end-to-end hosted-provider alpha. R7 freezes the provider and automation
 contracts, but neither that stable R7 contract nor a supported release exists
 today. The first supported developer release is bundled only after R8; Robin
@@ -168,13 +170,15 @@ R4; it must not be mixed with the first coding-agent vertical slice.
 
 ### 2.4 Current product claim
 
-Until R1 is accepted, the truthful claim is:
+The truthful active-branch claim is:
 
-> Robin contains a tested deterministic runtime, policy, and virtual-context
-> substrate and is being pivoted into a coding-agent CLI. The current mainline
-> is not yet a usable coding agent.
+> Robin has an accepted deterministic terminal-agent foundation and an
+> unaccepted R2 candidate that can inspect, edit, test, and review a physical
+> Git worktree. R2 uses a narrow synthetic fixture model, keeps all state in
+> memory, and runs approved processes on the host without filesystem or network
+> isolation. It is not yet a supported release or a real-provider product.
 
-The stacked R1 branch contains an implementation candidate:
+The accepted R1 baseline contains this implementation:
 `robin` and `robin "prompt"` use one ephemeral application service with a
 raw-mode TTY editor or flat fallback, while `robin --print` uses the same
 provider-neutral, multi-request structured tool loop with experimental text,
@@ -186,28 +190,43 @@ TypeScript fixture. Prompt queueing, first-/second-interrupt behavior, resize,
 bracketed paste, bounded usage/budgets, terminal cleanup, and PTY error paths
 have local automated coverage.
 
-The candidate still has no physical repository, process, Git, credential,
-network, durable-session, or resume capability. R0 is accepted on `main` at
-`2c042ca`; the R1 package inventory/evidence record is captured for source
-commit `2e1eb8a`, and the configured hosted Linux/macOS PTY, package-smoke, and
-aggregate jobs passed on stacked candidate `dc39937`. R1 is not accepted until
-the branch is refreshed against accepted `main`, those exact-head gates pass
-again, and the candidate merges.
+R1 itself still has no physical repository, process, Git, credential, network,
+durable-session, or resume capability. R0 is accepted on `main` at `2c042ca`;
+reviewed R1 head `9907287` passed all nine required hosted jobs, merged as
+`fb64cf1`, and all nine merge-triggered `main` jobs passed again.
+
+The active R2 candidate composes R1 with one bound physical Git worktree;
+bounded list, explicit-path literal-search and classified read operations;
+exact-preimage atomic patch/create operations; direct trusted executable-plus-
+argv process runs; controlled read-only Git status/diff; initial dirty-state and
+edit attribution; one-use approval events; and bounded ordered live tool-output
+events. `ask` permits reads and asks separately for every edit/process action;
+`plan` is read-only. The only R2 provider/model is the credential-free
+`synthetic-r2-v1` fixture workflow, and accepted R1 remains available through
+`--model synthetic-r1-v1`.
+
+R2 sessions and grants are ephemeral. A reduced process environment, trusted
+executable root, direct argv and output/process-group bounds do not constitute
+a sandbox: approved processes have no filesystem isolation and no network
+isolation. Hosted/local production providers, arbitrary model compatibility,
+BYOK, durable continuation, persistent rules, shell/network tools, Git writes,
+and supported distribution remain assigned to later gates.
 
 The preview currently spells the ordinary ask-first permission label `ask` and
 uses `--output-format` and `--no-save`. Those spellings are experimental. They
 must migrate to target `default`, `--output`, and `--no-session` respectively.
-The R1 acceptance gate remains open despite the local implementation and test
-results. The stable R7 automation contract is entirely planned. Candidate code
-does not change the accepted-mainline claim above.
+The R1 acceptance gate is closed. The R2 acceptance gate remains open. The
+stable R7 automation contract remains entirely planned, so accepting R1 does
+not promote its experimental spellings.
 
 `robin auth`, `robin models`, `robin doctor`, and `robin support` are currently
 reserved/unimplemented preview commands. Their target names are fixed here so
 prompt classification remains safe; R4 implements `robin auth`/`robin models`,
 and R10 completes doctor plus `robin support bundle --dry-run`.
 
-No README, package description, demo, release tag, or portfolio bullet may imply
-otherwise.
+No README, package description, demo, release tag, or portfolio bullet may
+promote the R2 branch candidate to an accepted release or describe its process
+controls as filesystem/network isolation.
 
 ## 3. Target Product and Architecture
 
@@ -776,7 +795,7 @@ after a reserved command, and ambiguous piped input are parse errors.
 10. **R0.10 — Rewrite normative product docs.** Make
     `PRODUCT_REQUIREMENTS.md`, this plan, ADR-0007, and README agree on the
     coding-agent-first scope, the implemented ephemeral preview, and every
-    still-unaccepted R1/R7/release claim.
+    still-unaccepted R7/release claim.
 11. **R0.11 — Re-run accepted gates.** Run typecheck, package unit tests, Gate A,
     Gate B, mutation tests, CLI subprocess tests, and repository checks after the
     rename. A golden update requires semantic review rather than blanket rewrite.
@@ -858,8 +877,9 @@ says R0 is the terminal owning gate.
 
 ## 6. R1 — Interactive Synthetic Coding-Agent Loop
 
-**Status:** implementation candidate under local verification; the R1 phase
-gate is not accepted.
+**Status:** accepted on `main` at merge commit `fb64cf1`; reviewed head
+`9907287` and the merge-triggered mainline workflow each passed all nine
+required jobs.
 
 **Effort range:** 2–4 part-time weeks.
 
@@ -880,7 +900,7 @@ loop defects cannot hide behind network or model variance.
 
 ### 6.3 Packages, files, interfaces, and data
 
-The current stacked branch contains the bounded R1 candidate:
+The accepted baseline contains the bounded R1 implementation:
 
 - `packages/model-provider` exposes the temporary
   `ModelProvider.respond(SemanticModelRequest, AbortSignal)` port plus scripted,
@@ -902,11 +922,11 @@ The current stacked branch contains the bounded R1 candidate:
   two turns, tool visibility, queueing, resize, paste, single/double interrupt,
   provider/tool failure, and exact terminal-mode restoration.
 
-These implemented pieces remain candidate evidence only. R1 still requires the
-clean package inventory, installed-tarball PTY/uninstall smoke, documented
-terminal matrix, clean-commit evidence manifest, hosted Linux/macOS jobs, an
-accepted R0 predecessor, and the complete section 6.9 review. R7, not R1, owns
-the stable public automation schemas and target flag compatibility contract.
+These pieces passed the clean package inventory, installed-tarball PTY/uninstall
+smoke, documented terminal matrix, hosted Linux/macOS jobs, accepted R0
+predecessor, exact-head review, and post-merge checks required by section 6.9.
+R7, not R1, owns the stable public automation schemas and target flag
+compatibility contract.
 
 Create `packages/robin-application` with:
 
@@ -1154,11 +1174,10 @@ R1 is accepted only when a recorded PTY run proves all of the following:
 - no real repository, provider, API key, durable resume, or sandbox claim appears
   in release notes.
 
-Current candidate evidence is intentionally weaker than acceptance: the local
-unit, adversarial application, CLI subprocess, and PTY suites pass on the
-development host, but a local pass cannot substitute for the clean package
-artifact, hosted operating-system matrix, prerequisite merge, and reviewed
-manifest required above.
+Acceptance evidence is recorded at reviewed head `9907287` and merge commit
+`fb64cf1`: local gates, the clean package artifact, hosted Linux/macOS matrix,
+prerequisite merge, aggregate, and post-merge workflow all passed. These facts
+do not widen R1 beyond its synthetic, credential-free scope.
 
 ### 6.10 Explicit deferrals
 
@@ -1177,9 +1196,20 @@ these requirements remain open through R3.
 
 ## 7. R2 — Real Repository, Editing, Process, Verification, and Git Review
 
-**Status:** planned.
+**Status:** implementation in progress on `codex/robin-r2-real-tool-loop`.
 
 **Effort range:** 5–8 part-time weeks.
+
+**Candidate snapshot:** The branch currently implements and unit/integration
+tests the physical workspace, path containment, list/search/read, structured
+patch/create, atomic-write, edit-ledger, direct-process, controlled-Git,
+eight-tool composition, one-use approval, deterministic two-step repair, and
+bounded live-output layers. The CLI defaults to that composition, discovers the
+launch worktree, shows root/branch/dirty/no-sandbox facts, and retains R1 through
+`--model synthetic-r1-v1`. Complete raw-PTY acceptance, repository-safety
+aggregation, reviewed package-inventory refresh, clean execution of the newly
+configured package/hosted R2 gates, evidence capture, and reviewed-head/merge
+acceptance remain open. Presence on this branch is not R2 acceptance.
 
 ### 7.1 Why R2 exists
 
@@ -1225,8 +1255,9 @@ create `packages/tool-workspace` with:
   binary, generated, secret-likely, size, and media classification;
 - physical-path, race, symlink, ignore, Unicode, encoding, and resource-limit
   test corpora;
-- `src/edit-schema.ts`: strict schemas for `apply_patch@1`, `create_file@1`,
-  `delete_file@1`, and `move_file@1` while R2 enables apply/create only;
+- `src/edit-schema.ts`: strict schemas for `apply_patch@1` and `create_file@1`;
+  delete/move schema and registration remain later-gate work and are absent
+  from the exact R2 tool catalog;
 - `src/structured-patch.ts`: bounded parser and canonical representation;
 - `src/patch-application.ts`: exact-preimage patch algorithm;
 - `src/atomic-file.ts`: same-directory temporary file, metadata handling, fsync,
@@ -1254,14 +1285,14 @@ interface ExactReplacementHunk {
 ```
 
 Hunks apply in declaration order to an in-memory candidate. Each `oldText` must
-occur exactly once in the current candidate; `expectedStartLine` is a diagnostic
-hint and a mismatch fails rather than enabling fuzzy application. The complete
-source preimage hash and byte length are checked immediately before computation
-and again before rename. Empty `oldText`, overlapping hunks, unpaired surrogate
+occur exactly once in the current candidate; `expectedStartLine` is a bound
+precondition and a mismatch fails rather than enabling fuzzy application. The
+complete source preimage hash and byte length are checked immediately before
+computation and again before rename. Empty `oldText`, overlapping hunks, unpaired surrogate
 input, forbidden control bytes, excessive hunk count, excessive aggregate bytes,
 and a result above the file limit are rejected. New files use a distinct
 `create_file@1` request with an expected-absent precondition. Deletes and moves
-remain registered but denied in R2.
+are not registered in the R2 tool catalog.
 
 Create `packages/tool-process` with:
 
@@ -1286,8 +1317,10 @@ Create `packages/tool-git` with:
   and worktree identity;
 - `src/status-porcelain-v2.ts`: NUL-delimited porcelain v2 parser;
 - `src/git-diff.ts`: no-external-diff, no-textconv bounded diff;
-- `src/git-read-tools.ts`: `git_status@1`, `git_diff@1`, `git_log@1`, and
-  `git_branch_current@1`;
+- `src/git-read-tools.ts`: controlled status/diff primitives plus bounded log
+  support for internal conformance; the public R2 catalog exposes only
+  `robin.git.status@1` and `robin.git.diff@1`, while branch facts come from
+  bound startup/status metadata;
 - byte fixtures for spaces, tabs, newlines, Unicode, invalid bytes, rename/copy,
   unmerged state, unborn branch, detached HEAD, submodule, and bare repository.
 
@@ -1323,8 +1356,9 @@ R2 keeps this state in memory. R3 defines its durable records.
 1. Resolve the requested start directory with `realpath` and require a directory.
 2. Invoke `git rev-parse --path-format=absolute --show-toplevel` and
    `git rev-parse --path-format=absolute --git-common-dir` with a bounded timeout.
-3. If the directory is not a Git worktree, allow read-only mode only when the
-   user explicitly passes `--workspace`; mutation stays disabled in R2.
+3. If the directory is not a Git worktree, fail with a bounded configuration
+   error before starting the agent. An explicit non-Git/read-only workspace mode
+   is not part of the R2 CLI surface.
 4. Resolve the physical root and common directory, record filesystem device and
    inode when the platform exposes stable values, record HEAD/branch/status, and
    assign a workspace identity hash over canonical facts.
@@ -1456,16 +1490,18 @@ using the initial snapshot and edit ledger. The UI does not claim authorship fro
    clean, dirty, untracked, detached, unborn, nested, symlink, Unicode, newline,
    merge-conflict, and malicious-name repositories under unique temp roots.
 2. **R2.02 — Bind workspace identity.** Implement discovery, canonical root and
-   common-dir facts, initial status, non-repository behavior, and drift snapshots.
+   common-dir facts, initial status, bounded non-repository failure, and drift
+   snapshots.
 3. **R2.03 — Close path containment.** Port the Gate B corpus to physical paths;
    add open-time parent/target checks, no-follow reads, symlink denial, platform
    path cases, and rename-race injection.
 4. **R2.04 — Implement physical listing.** Add ignore reasons, deterministic
    ordering, entry/depth/path/time budgets, devices/sockets exclusion, and
    omission counts.
-5. **R2.05 — Implement literal search.** Build the streaming matcher and optional
-   ripgrep conformance adapter; test boundary-spanning matches, Unicode, long
-   lines, cancellation, binary skip, and result limits.
+5. **R2.05 — Implement literal search.** Build the streaming matcher; test
+   boundary-spanning matches, Unicode, long lines, cancellation, binary skip,
+   and result limits. An optional ripgrep adapter is not required or claimed in
+   R2.
 6. **R2.06 — Implement bounded read.** Add encoding/binary/secret classification,
    windows, complete hash, before/after `fstat`, provenance, and withheld output.
 7. **R2.07 — Define edit schemas and parser.** Add strict Ajv schemas and semantic
@@ -1483,11 +1519,12 @@ using the initial snapshot and edit ledger. The UI does not claim authorship fro
     with byte limits, show suggestions, and test malicious scripts as untrusted
     argv rather than automatic execution.
 12. **R2.12 — Implement Git read tools.** Add controlled runner, porcelain parser,
-    bounded diff/log/branch tools, initial/current comparison, and malicious Git
-    metadata fixtures.
+    bounded public status/diff, startup branch facts, initial/current comparison,
+    and malicious Git metadata fixtures.
 13. **R2.13 — Register tools and manual permissions.** Route every operation
-    through the gateway; allow bounded reads, ask for edit/process, deny delete,
-    move, shell, network, and Git mutations; render exact request scope.
+    through the gateway; register exactly the eight documented tools, allow
+    bounded reads, ask for edit/process, omit delete/move/shell/network/Git
+    mutations, and render exact request scope.
 14. **R2.14 — Extend the synthetic scenario.** Require list, search, read, patch,
     test, a follow-up read or edit when the first test fails, final passing test,
     status, and diff before the final answer.
@@ -1501,6 +1538,29 @@ using the initial snapshot and edit ledger. The UI does not claim authorship fro
 17. **R2.17 — Document real-workspace preview.** Explain live-workspace edits,
     permission defaults, unsupported symlinks/shell/Git writes, output limits,
     attribution labels, and a disposable-repository demo command.
+
+#### 7.9.1 Candidate progress ledger
+
+These statuses describe implementation on the active branch, not R2 acceptance.
+“Implemented and focused-tested” means the named package/source boundary has
+automated evidence; it does not waive the aggregate and hosted acceptance work
+in section 7.13.
+
+| Ticket | Candidate status | Current evidence boundary |
+| --- | --- | --- |
+| R2.01 | implemented and focused-tested | Generated real-Git fixtures cover clean, dirty, untracked, nested, symlink, odd-name, branch, and repository-safety cases under unique temporary roots. |
+| R2.02 | implemented and focused-tested | Physical root, Git repository/worktree identity, HEAD/branch and initial status bind at bootstrap; startup metadata is presentation-only. |
+| R2.03 | implemented and focused-tested | Lexical and physical containment, no-follow/symlink policy, parent/target identity, race and hostile-path tests exist in `tool-workspace`. |
+| R2.04–R2.06 | implemented and focused-tested | Bounded deterministic list, explicit-path literal search, and classified whole/byte/line reads enforce resource and withholding limits. |
+| R2.07–R2.09 | implemented and focused-tested | Strict patch/create schemas, exact-preimage application, atomic publication/reverification, bounded diffs, stale rejection and edit-ledger attribution are covered. |
+| R2.10 | implemented and focused-tested | Direct spawn without shell, trusted executable revalidation, filtered environment, ordered bounded output, timeout/cancel escalation and process-tree reconciliation are covered. |
+| R2.11 | implemented and focused-tested as a package boundary | Manifest-based verification suggestions exist; the current synthetic workflow deliberately requests only direct `npm test`. No arbitrary model workflow is claimed. |
+| R2.12 | implemented and focused-tested | Controlled Git discovery, porcelain status and bounded diff are present; the public agent catalog remains read-only status/diff. |
+| R2.13 | implemented and focused-tested | Exactly eight R2 tools use the capability gateway; reads allow, edits/process ask once, `plan` denies effects, and grants bind immutable action/request/precondition/policy facts. |
+| R2.14 | implemented and application-tested | The synthetic provider performs list/search/read/edit/test, failure/re-read/second-edit/retest, status and diff against a generated physical repository. |
+| R2.15 | in progress | Raw/flat approval and ordered live-output unit/integration coverage exists; the complete generated-repository PTY matrix and hosted evidence must still close. |
+| R2.16 | in progress | Fixture safety oracles and application tests preserve pre-existing dirty/untracked content and assert unchanged HEAD/index; complete effect/failure aggregation remains open. |
+| R2.17 | in progress | Current docs explain the live-workspace/manual-approval/ephemeral/unsandboxed fixture and provide a disposable demo; final package/evidence references wait for the frozen candidate. |
 
 ### 7.10 Test-driven evidence matrix
 
@@ -1550,15 +1610,16 @@ incident note.
 
 R2 adds no durable user-data migration, but its tool schemas are versioned from
 their first commit. The README gains a disposable sample repository flow and a
-prominent warning that sessions are still ephemeral and commands are not yet
-sandboxed. `robin doctor` remains partial and reports Git, platform, terminal,
-filesystem atomic-write support, process-group support, optional ripgrep, and
-unsupported sandbox status without fixing anything.
+prominent warning that sessions are still ephemeral and commands are not
+sandboxed. `robin doctor` remains unimplemented and reserved for a later gate;
+R2 startup itself reports only the bound worktree/branch/dirty state and explicit
+ephemeral/no-filesystem-isolation/no-network-isolation facts.
 
 Contributor docs define fixture creation, temp-root safety, how to run the PTY
-suite, and how to inspect a failed safety oracle. The source install test verifies
-Git absence produces a read-only/non-repository message, not a crash. Packaging
-continues to be development-only.
+suite, and how to inspect a failed safety oracle. The source install test must
+verify that Git absence or a non-worktree launch produces a bounded configuration
+failure rather than a crash or an invented fallback. Packaging continues to be
+development-only.
 
 ### 7.13 Acceptance evidence
 
@@ -5504,8 +5565,8 @@ The phase sections define 230 implementation tickets:
 | Phase | Ticket range | Count | Current status |
 | --- | --- | ---: | --- |
 | R0 | R0.01–R0.12 | 12 | accepted on `main` at `2c042ca` |
-| R1 | R1.01–R1.13 | 13 | implementation candidate; hosted candidate checks green, prerequisite/mainline acceptance pending |
-| R2 | R2.01–R2.17 | 17 | planned |
+| R1 | R1.01–R1.13 | 13 | accepted on `main` at `fb64cf1`; reviewed and merge-triggered nine-job gates green |
+| R2 | R2.01–R2.17 | 17 | implementation in progress; R2.01–R2.14 focused-tested, R2.15–R2.17 and aggregate acceptance open |
 | R3 | R3.01–R3.18 | 18 | planned |
 | R4 | R4.01–R4.17 | 17 | planned |
 | R5 | R5.01–R5.17 | 17 | planned |
@@ -5979,7 +6040,7 @@ asserts the user-visible failure path.
 
 | Requirement | Terminal gate and tickets | Owning boundary | Required evidence |
 | --- | --- | --- | --- |
-| `FR-EDIT-001` | R2.07–R2.09 | `tool-workspace` structured patch | Exact preimage/hunks/parser/application and provider-tool E2E. |
+| `FR-EDIT-001` | R2.07/R2.08/R2.09 | `tool-workspace` structured patch | Exact preimage/hunks/parser/application and provider-tool E2E. |
 | `FR-EDIT-002` | R6.01–R6.04 | workspace edit schemas | Distinct bounded full/create/batch operation with higher risk and limits. |
 | `FR-EDIT-003` | R6.03–R6.04 | batch edit | Create/update/move/delete exact preconditions and journal recovery. |
 | `FR-EDIT-004` | R2.07, R6.01 | patch/batch parser | Malformed/path disagreement/overlap/duplicate/collision/size rejection. |
@@ -6499,26 +6560,23 @@ At the end of any accepted phase:
 - threat model and residual risks are updated;
 - a clean-commit gate evidence manifest records exact results and limitations.
 
-## 23. Immediate Execution Order from the Current Pivot Branch
+## 23. Immediate Execution Order from the Accepted R1 Baseline
 
-The branch currently contains the line-oriented, ephemeral initial-R1 preview,
-including experimental `--print` formats, but neither the complete R1 gate nor
-the stable R7 `--output`/`--no-session` automation contract is accepted. The
-safe next sequence is:
+R0 and R1 are accepted. Experimental R1 `--print` formats remain narrower than
+the stable R7 `--output`/`--no-session` automation contract. The current safe
+sequence is:
 
-1. finish R0.08–R0.12 identity/package/docs/gate evidence without changing
-   Milestone A/B serialized internals;
-2. inventory the current preview against R1.01–R1.13 and mark each ticket with
-   actual test evidence rather than assuming existing CLI files satisfy it;
-3. complete the canonical `robin-session`, `robin-agent`,
-   `robin-application`, and `robin-terminal` boundaries before adding a real
-   provider;
-4. make the two-turn synthetic tool-loop PTY scenario pass, including cancellation
-   and terminal restoration;
-5. update the R1 evidence manifest and only then mark R1 accepted;
-6. begin R2 with the disposable repository fixture factory and physical workspace
-   safety oracle, never by pointing unfinished tools at the Robin checkout;
-7. keep the archived Milestone C work as test/audit input and cherry-pick no
+1. implement R2 from disposable repository fixtures and an exact physical
+   workspace safety oracle, never by pointing unfinished tools at the Robin
+   checkout;
+2. close path, read, edit, process, Git-read, and approval invariants before
+   exposing their tools through the application;
+3. require the complete synthetic diagnose/edit/verify/status/diff scenario and
+   PTY approval matrix before accepting R2;
+4. proceed to R3 durability only after R2 effects and attribution are accepted;
+5. add the first hosted provider in R4 without moving tool authority into a
+   provider adapter;
+6. keep the archived Milestone C work as test/audit input and cherry-pick no
    component without fresh R2/R3/R9 review.
 
 This ordering produces a Claude Code-style coding-agent experience as early as

@@ -3,9 +3,11 @@ import test from "node:test";
 
 import {
   ActionIdKind,
+  ApprovalIdKind,
   DEFAULT_JSON_BOUNDARY_LIMITS,
   PolicyVersionIdKind,
   canonicalBytes,
+  canonicalSha256Hex,
   canonicalize,
   createDomainError,
   isDomainError,
@@ -43,6 +45,9 @@ const POLICY_VERSION_ID = PolicyVersionIdKind.parse(
 );
 const DENY_POLICY_VERSION_ID = PolicyVersionIdKind.parse(
   "pol_018f05a0-7b01-7000-8000-000000000075",
+);
+const APPROVAL_ID = ApprovalIdKind.parse(
+  "apr_018f05a0-7b01-7000-8000-000000000076",
 );
 
 const REFERENCE: CapabilityOperationReference = {
@@ -110,6 +115,15 @@ function policyDecision(
     reason: overrides.reason ?? `Fixture policy returned ${resolvedEffect}.`,
     matchedPolicyNames: Object.freeze([...matchedPolicyNames]),
     trace: Object.freeze(trace),
+  });
+}
+
+function expectedPolicySnapshotHash(decision: PolicyDecision): string {
+  return canonicalSha256Hex({
+    schemaVersion: 1,
+    policyVersionId: decision.policyVersionId,
+    policyContentHash: decision.trace["policyContentHash"],
+    decision,
   });
 }
 
@@ -1265,6 +1279,10 @@ test("an allowed evaluated receipt dispatches the exact normalized action once",
   );
   assert.equal(evaluated.prepared, prepared);
   assert.equal(evaluated.decision.effect, "allow");
+  assert.equal(
+    evaluated.policySnapshotHash,
+    expectedPolicySnapshotHash(evaluated.decision),
+  );
   assert.equal(Object.isFrozen(evaluated), true);
   assert.equal(Object.isFrozen(evaluated.decision), true);
   assert.equal(Object.isFrozen(evaluated.decision.trace), true);
@@ -1590,10 +1608,712 @@ test("deny and approval decisions cannot reach handler or release", async () => 
     assert.equal(calls.releaseCalls, 0, `${effect} cannot reach release`);
     await assert.rejects(
       gateway.execute(evaluated, { signal: new AbortController().signal }),
+      (error: unknown) =>
+        isDomainCode(
+          error,
+          effect === "deny" ? "invariant_violated" : "approval_required",
+        ),
+    );
+  }
+});
+
+test("evaluated receipts expose one exact immutable policy snapshot hash for every effect", async () => {
+  const observedHashes = new Set<string>();
+  for (const effect of ["allow", "deny", "require_approval"] as const) {
+    const calls = spies();
+    const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
+    const gateway = new CapabilityGateway(
+      registry,
+      policyEvaluator({ effect }),
+      {
+        approvalClock: { now: () => "2026-08-30T12:00:00.000Z" },
+        approvalIdSource: { nextApprovalId: () => APPROVAL_ID },
+      },
+    );
+    const evaluated = gateway.evaluate(
+      await gateway.normalize(
+        proposal(),
+        normalizationContext(),
+        registry.createAdvertisement([REFERENCE]),
+      ),
+    );
+    const expected = expectedPolicySnapshotHash(evaluated.decision);
+
+    assert.equal(evaluated.policySnapshotHash, expected);
+    assert.match(evaluated.policySnapshotHash, /^[a-f0-9]{64}$/u);
+    assert.equal(Object.isFrozen(evaluated), true);
+    assert.throws(() => {
+      (evaluated as { policySnapshotHash: string }).policySnapshotHash =
+        "0".repeat(64);
+    }, TypeError);
+    assert.equal(evaluated.policySnapshotHash, expected);
+    observedHashes.add(evaluated.policySnapshotHash);
+
+    if (effect === "require_approval") {
+      const challenge = gateway.createApprovalChallenge(evaluated, {
+        displayedSummary: { operation: "increment alpha" },
+      });
+      assert.equal(challenge.policySnapshotHash, evaluated.policySnapshotHash);
+    }
+  }
+  assert.equal(observedHashes.size, 3);
+});
+
+test("approval challenge binds the displayed summary and exact authorization facts", async () => {
+  const calls = spies();
+  const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
+  let now = "2026-08-30T12:00:00.000Z";
+  const gateway = new CapabilityGateway(
+    registry,
+    policyEvaluator({ effect: "require_approval" }),
+    {
+      approvalClock: { now: () => now },
+      approvalIdSource: { nextApprovalId: () => APPROVAL_ID },
+      defaultApprovalLifetimeMs: 60_000,
+      maximumApprovalLifetimeMs: 300_000,
+    },
+  );
+  const prepared = await gateway.normalize(
+    proposal(),
+    normalizationContext(),
+    registry.createAdvertisement([REFERENCE]),
+  );
+  const evaluated = gateway.evaluate(prepared);
+  const authorization = gateway.authorize(evaluated);
+  assert.deepEqual(authorization, { status: "approval_required" });
+
+  const sourceSummary = {
+    schemaVersion: 1,
+    operation: "fixture.counter.increment@1",
+    effect: "Increment counter alpha from 4 to 5.",
+  };
+  const challenge = gateway.createApprovalChallenge(evaluated, {
+    displayedSummary: sourceSummary,
+    lifetimeMs: 120_000,
+  });
+  sourceSummary.effect = "mutated after challenge";
+
+  assert.equal(challenge.approvalId, APPROVAL_ID);
+  assert.equal(challenge.actionId, ACTION_ID);
+  assert.equal(challenge.requestedAt, "2026-08-30T12:00:00.000Z");
+  assert.equal(challenge.expiresAt, "2026-08-30T12:02:00.000Z");
+  assert.equal(challenge.displayedSummary["effect"], "Increment counter alpha from 4 to 5.");
+  assert.match(challenge.actionHash, /^[a-f0-9]{64}$/u);
+  assert.match(challenge.normalizedRequestHash, /^[a-f0-9]{64}$/u);
+  assert.match(challenge.preconditionHash, /^[a-f0-9]{64}$/u);
+  assert.match(challenge.policySnapshotHash, /^[a-f0-9]{64}$/u);
+  assert.equal(challenge.policySnapshotHash, evaluated.policySnapshotHash);
+  assert.match(challenge.displayedSummaryHash, /^[a-f0-9]{64}$/u);
+  assert.equal(Object.isFrozen(challenge), true);
+  assert.equal(Object.isFrozen(challenge.displayedSummary), true);
+
+  now = "2026-08-30T12:00:30.000Z";
+  const resolution = gateway.resolveApproval(
+    challenge,
+    approvalResponse(challenge, "allow_once"),
+  );
+  assert.equal(resolution.status, "granted");
+  if (resolution.status !== "granted") throw new Error("expected approval grant");
+  const approved = gateway.authorize(resolution.grant);
+  assert.equal(approved.status, "authorized");
+  if (approved.status !== "authorized") throw new Error("expected authorization");
+
+  let revalidationCalls = 0;
+  const execution = await gateway.executeAuthorized(approved.authorization, {
+    signal: new AbortController().signal,
+    async revalidate(action) {
+      revalidationCalls += 1;
+      assert.equal(action, prepared.action);
+      return action.preconditions;
+    },
+  });
+  assert.equal(execution.status, "executed");
+  if (execution.status !== "executed") throw new Error("expected execution");
+  assert.equal(execution.result.agent["next"], 5);
+  assert.equal(revalidationCalls, 1);
+  assert.equal(calls.executeCalls, 1);
+  assert.equal(calls.releaseCalls, 1);
+});
+
+test("approval challenge rejects an explicit null lifetime without consuming the action", async () => {
+  const calls = spies();
+  const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
+  const gateway = approvalGateway(registry);
+  const evaluated = gateway.evaluate(
+    await gateway.normalize(
+      proposal(),
+      normalizationContext(),
+      registry.createAdvertisement([REFERENCE]),
+    ),
+  );
+
+  assert.throws(
+    () => gateway.createApprovalChallenge(evaluated, {
+      displayedSummary: { operation: "increment alpha" },
+      lifetimeMs: null as never,
+    }),
+    (error: unknown) => isDomainCode(error, "invalid_input"),
+  );
+  const challenge = gateway.createApprovalChallenge(evaluated, {
+    displayedSummary: { operation: "increment alpha" },
+  });
+  assert.equal(challenge.approvalId, APPROVAL_ID);
+  assert.equal(calls.executeCalls, 0);
+  assert.equal(calls.releaseCalls, 0);
+});
+
+test("approval response hash, identity, and policy bindings fail closed", async () => {
+  const mutations = [
+    (response: ReturnType<typeof approvalResponse>) => ({
+      ...response,
+      approvalId: ApprovalIdKind.parse(
+        "apr_018f05a0-7b01-7000-8000-000000000077",
+      ),
+    }),
+    (response: ReturnType<typeof approvalResponse>) => ({
+      ...response,
+      normalizedRequestHash: "1".repeat(64),
+    }),
+    (response: ReturnType<typeof approvalResponse>) => ({
+      ...response,
+      preconditionHash: "2".repeat(64),
+    }),
+    (response: ReturnType<typeof approvalResponse>) => ({
+      ...response,
+      policySnapshotHash: "3".repeat(64),
+    }),
+    (response: ReturnType<typeof approvalResponse>) => ({
+      ...response,
+      displayedSummaryHash: "4".repeat(64),
+    }),
+  ] as const;
+
+  for (const mutate of mutations) {
+    const calls = spies();
+    const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
+    const gateway = approvalGateway(registry);
+    const evaluated = gateway.evaluate(
+      await gateway.normalize(
+        proposal(),
+        normalizationContext(),
+        registry.createAdvertisement([REFERENCE]),
+      ),
+    );
+    const challenge = gateway.createApprovalChallenge(evaluated, {
+      displayedSummary: { operation: "increment alpha" },
+    });
+    assert.throws(
+      () => gateway.resolveApproval(
+        challenge,
+        mutate(approvalResponse(challenge, "allow_once")),
+      ),
+      (error: unknown) => isDomainCode(error, "approval_invalid"),
+    );
+    assert.throws(
+      () => gateway.resolveApproval(
+        challenge,
+        approvalResponse(challenge, "allow_once"),
+      ),
+      (error: unknown) => isDomainCode(error, "invariant_violated"),
+    );
+    assert.equal(calls.executeCalls, 0);
+    assert.equal(calls.releaseCalls, 0);
+  }
+});
+
+test("malformed approval responses consume the challenge and map to approval invalid", async () => {
+  const calls = spies();
+  const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
+  const gateway = approvalGateway(registry);
+  const evaluated = gateway.evaluate(
+    await gateway.normalize(
+      proposal(),
+      normalizationContext(),
+      registry.createAdvertisement([REFERENCE]),
+    ),
+  );
+  const challenge = gateway.createApprovalChallenge(evaluated, {
+    displayedSummary: { operation: "increment alpha" },
+  });
+
+  assert.throws(
+    () => gateway.resolveApproval(challenge, null as never),
+    (error: unknown) => isDomainCode(error, "approval_invalid"),
+  );
+  assert.throws(
+    () => gateway.resolveApproval(
+      challenge,
+      approvalResponse(challenge, "allow_once"),
+    ),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  assert.equal(calls.executeCalls, 0);
+  assert.equal(calls.releaseCalls, 0);
+});
+
+test("approval grants and authorized executions are gateway-owned and one-use", async () => {
+  const calls = spies();
+  const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
+  const first = approvalGateway(registry);
+  const second = approvalGateway(registry);
+  const evaluated = first.evaluate(
+    await first.normalize(
+      proposal(),
+      normalizationContext(),
+      registry.createAdvertisement([REFERENCE]),
+    ),
+  );
+  const challenge = first.createApprovalChallenge(evaluated, {
+    displayedSummary: { operation: "increment alpha" },
+  });
+  assert.throws(
+    () => second.resolveApproval(
+      challenge,
+      approvalResponse(challenge, "allow_once"),
+    ),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  assert.throws(
+    () => first.createApprovalChallenge(evaluated, {
+      displayedSummary: { operation: "increment alpha" },
+    }),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  const resolution = first.resolveApproval(
+    challenge,
+    approvalResponse(challenge, "allow_once"),
+  );
+  assert.equal(resolution.status, "granted");
+  if (resolution.status !== "granted") throw new Error("expected approval grant");
+  assert.throws(
+    () => second.authorize(resolution.grant),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  const authorization = first.authorize(resolution.grant);
+  assert.equal(authorization.status, "authorized");
+  if (authorization.status !== "authorized") throw new Error("expected authorization");
+  assert.throws(
+    () => first.authorize(resolution.grant),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+
+  const context = {
+    signal: new AbortController().signal,
+    revalidate: async (action: NormalizedAction) => action.preconditions,
+  };
+  const executed = await first.executeAuthorized(
+    authorization.authorization,
+    context,
+  );
+  assert.equal(executed.status, "executed");
+  await assert.rejects(
+    first.executeAuthorized(authorization.authorization, context),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  await assert.rejects(
+    second.executeAuthorized(authorization.authorization, context),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  assert.equal(calls.executeCalls, 1);
+});
+
+test("approval expiry and changed preconditions return bounded no-effect observations", async () => {
+  const expiryCalls = spies();
+  const expiryRegistry = new CapabilityPackRegistry([
+    pack(counterOperation(expiryCalls)),
+  ]);
+  let expiryNow = "2026-08-30T12:00:00.000Z";
+  const expiryGateway = approvalGateway(expiryRegistry, () => expiryNow);
+  const expiryEvaluated = expiryGateway.evaluate(
+    await expiryGateway.normalize(
+      proposal(),
+      normalizationContext(),
+      expiryRegistry.createAdvertisement([REFERENCE]),
+    ),
+  );
+  const expiryChallenge = expiryGateway.createApprovalChallenge(
+    expiryEvaluated,
+    {
+      displayedSummary: { operation: "increment alpha" },
+      lifetimeMs: 1_000,
+    },
+  );
+  expiryNow = "2026-08-30T12:00:01.000Z";
+  const expired = expiryGateway.resolveApproval(
+    expiryChallenge,
+    approvalResponse(expiryChallenge, "allow_once"),
+  );
+  assert.deepEqual(expired, {
+    status: "stale",
+    observation: {
+      schemaVersion: 1,
+      status: "stale",
+      code: "approval_invalid",
+      reason: "approval_expired",
+      effectOccurred: false,
+      actionId: ACTION_ID,
+      capabilityPackId: REFERENCE.packId,
+      capabilityPackVersion: REFERENCE.packVersion,
+      operationId: REFERENCE.operationId,
+      operationVersion: REFERENCE.operationVersion,
+      nextAction: "request_fresh_approval",
+    },
+  });
+  assert.equal(expiryCalls.executeCalls, 0);
+
+  const staleCalls = spies();
+  const staleRegistry = new CapabilityPackRegistry([
+    pack(counterOperation(staleCalls)),
+  ]);
+  const staleGateway = approvalGateway(staleRegistry);
+  const stalePrepared = await staleGateway.normalize(
+    proposal(),
+    normalizationContext(),
+    staleRegistry.createAdvertisement([REFERENCE]),
+  );
+  const staleEvaluated = staleGateway.evaluate(stalePrepared);
+  const staleChallenge = staleGateway.createApprovalChallenge(staleEvaluated, {
+    displayedSummary: { operation: "increment alpha" },
+  });
+  const staleResolution = staleGateway.resolveApproval(
+    staleChallenge,
+    approvalResponse(staleChallenge, "allow_once"),
+  );
+  assert.equal(staleResolution.status, "granted");
+  if (staleResolution.status !== "granted") throw new Error("expected grant");
+  const staleAuthorization = staleGateway.authorize(staleResolution.grant);
+  assert.equal(staleAuthorization.status, "authorized");
+  if (staleAuthorization.status !== "authorized") {
+    throw new Error("expected authorization");
+  }
+  const staleExecution = await staleGateway.executeAuthorized(
+    staleAuthorization.authorization,
+    {
+      signal: new AbortController().signal,
+      async revalidate() {
+        return [{
+          preconditionType: "fixture.counter.value",
+          preconditionVersion: 1,
+          attributes: { value: 9 },
+        }];
+      },
+    },
+  );
+  assert.equal(staleExecution.status, "stale");
+  if (staleExecution.status !== "stale") throw new Error("expected stale result");
+  assert.equal(staleExecution.observation["reason"], "preconditions_changed");
+  assert.equal(staleExecution.observation["effectOccurred"], false);
+  assert.equal(staleExecution.observation["nextAction"], "reobserve_and_retry");
+  assert.match(String(staleExecution.observation["expectedPreconditionHash"]), /^[a-f0-9]{64}$/u);
+  assert.match(String(staleExecution.observation["observedPreconditionHash"]), /^[a-f0-9]{64}$/u);
+  assert.equal(staleCalls.executeCalls, 0);
+  assert.equal(staleCalls.releaseCalls, 0);
+});
+
+test("approval expiry before or during revalidation prevents execution", async () => {
+  for (const expiryPoint of ["before_revalidation", "after_revalidation"] as const) {
+    const calls = spies();
+    const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
+    let now = "2026-08-30T12:00:00.000Z";
+    const gateway = approvalGateway(registry, () => now);
+    const prepared = await gateway.normalize(
+      proposal(),
+      normalizationContext(),
+      registry.createAdvertisement([REFERENCE]),
+    );
+    const challenge = gateway.createApprovalChallenge(
+      gateway.evaluate(prepared),
+      {
+        displayedSummary: { operation: "increment alpha" },
+        lifetimeMs: 1_000,
+      },
+    );
+    const resolution = gateway.resolveApproval(
+      challenge,
+      approvalResponse(challenge, "allow_once"),
+    );
+    assert.equal(resolution.status, "granted");
+    if (resolution.status !== "granted") throw new Error("expected grant");
+    const authorization = gateway.authorize(resolution.grant);
+    assert.equal(authorization.status, "authorized");
+    if (authorization.status !== "authorized") {
+      throw new Error("expected authorization");
+    }
+
+    let revalidationCalls = 0;
+    if (expiryPoint === "before_revalidation") {
+      now = "2026-08-30T12:00:01.000Z";
+    }
+    const result = await gateway.executeAuthorized(
+      authorization.authorization,
+      {
+        signal: new AbortController().signal,
+        async revalidate(action) {
+          revalidationCalls += 1;
+          if (expiryPoint === "after_revalidation") {
+            now = "2026-08-30T12:00:01.000Z";
+          }
+          return action.preconditions;
+        },
+      },
+    );
+    assert.equal(result.status, "stale");
+    if (result.status !== "stale") throw new Error("expected stale result");
+    assert.equal(result.observation["reason"], "approval_expired");
+    assert.equal(result.observation["effectOccurred"], false);
+    assert.equal(
+      revalidationCalls,
+      expiryPoint === "before_revalidation" ? 0 : 1,
+    );
+    assert.equal(calls.executeCalls, 0);
+    assert.equal(calls.releaseCalls, 0);
+    await assert.rejects(
+      gateway.executeAuthorized(authorization.authorization, {
+        signal: new AbortController().signal,
+        revalidate: async (action) => action.preconditions,
+      }),
       (error: unknown) => isDomainCode(error, "invariant_violated"),
     );
   }
 });
+
+test("an approval grant that expires before authorization is stale and one-use", async () => {
+  const calls = spies();
+  const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
+  let now = "2026-08-30T12:00:00.000Z";
+  const gateway = approvalGateway(registry, () => now);
+  const challenge = gateway.createApprovalChallenge(
+    gateway.evaluate(
+      await gateway.normalize(
+        proposal(),
+        normalizationContext(),
+        registry.createAdvertisement([REFERENCE]),
+      ),
+    ),
+    {
+      displayedSummary: { operation: "increment alpha" },
+      lifetimeMs: 1_000,
+    },
+  );
+  const resolution = gateway.resolveApproval(
+    challenge,
+    approvalResponse(challenge, "allow_once"),
+  );
+  assert.equal(resolution.status, "granted");
+  if (resolution.status !== "granted") throw new Error("expected grant");
+  now = "2026-08-30T12:00:01.000Z";
+
+  const stale = gateway.authorize(resolution.grant);
+  assert.equal(stale.status, "stale");
+  if (stale.status !== "stale") throw new Error("expected stale authorization");
+  assert.equal(stale.observation["reason"], "approval_expired");
+  assert.equal(stale.observation["effectOccurred"], false);
+  assert.throws(
+    () => gateway.authorize(resolution.grant),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  assert.equal(calls.executeCalls, 0);
+  assert.equal(calls.releaseCalls, 0);
+});
+
+test("policy authorization revalidates without consulting the approval clock", async () => {
+  const calls = spies();
+  const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
+  const gateway = new CapabilityGateway(
+    registry,
+    policyEvaluator({ effect: "allow" }),
+    {
+      approvalClock: {
+        now(): string {
+          throw new Error("approval clock must be inactive for policy allow");
+        },
+      },
+    },
+  );
+  const prepared = await gateway.normalize(
+    proposal(),
+    normalizationContext(),
+    registry.createAdvertisement([REFERENCE]),
+  );
+  const authorized = gateway.authorize(gateway.evaluate(prepared));
+  assert.equal(authorized.status, "authorized");
+  if (authorized.status !== "authorized") throw new Error("expected authorization");
+
+  const result = await gateway.executeAuthorized(authorized.authorization, {
+    signal: new AbortController().signal,
+    revalidate: async (action) => action.preconditions,
+  });
+  assert.equal(result.status, "executed");
+  assert.equal(calls.executeCalls, 1);
+  assert.equal(calls.releaseCalls, 1);
+});
+
+test("a revalidation failure consumes authorization without executing", async () => {
+  const calls = spies();
+  const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
+  const gateway = new CapabilityGateway(
+    registry,
+    policyEvaluator({ effect: "allow" }),
+  );
+  const authorized = gateway.authorize(
+    gateway.evaluate(
+      await gateway.normalize(
+        proposal(),
+        normalizationContext(),
+        registry.createAdvertisement([REFERENCE]),
+      ),
+    ),
+  );
+  assert.equal(authorized.status, "authorized");
+  if (authorized.status !== "authorized") throw new Error("expected authorization");
+
+  const context = {
+    signal: new AbortController().signal,
+    async revalidate(): Promise<never> {
+      throw new Error("fixture observer failed");
+    },
+  };
+  await assert.rejects(
+    gateway.executeAuthorized(authorized.authorization, context),
+    (error: unknown) => isDomainCode(error, "action_failed"),
+  );
+  await assert.rejects(
+    gateway.executeAuthorized(authorized.authorization, context),
+    (error: unknown) => isDomainCode(error, "invariant_violated"),
+  );
+  assert.equal(calls.executeCalls, 0);
+  assert.equal(calls.releaseCalls, 0);
+});
+
+test("cancellation during revalidation wins over observer failure and prevents execution", async () => {
+  const calls = spies();
+  const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
+  const gateway = new CapabilityGateway(
+    registry,
+    policyEvaluator({ effect: "allow" }),
+  );
+  const authorized = gateway.authorize(
+    gateway.evaluate(
+      await gateway.normalize(
+        proposal(),
+        normalizationContext(),
+        registry.createAdvertisement([REFERENCE]),
+      ),
+    ),
+  );
+  assert.equal(authorized.status, "authorized");
+  if (authorized.status !== "authorized") throw new Error("expected authorization");
+  const controller = new AbortController();
+
+  await assert.rejects(
+    gateway.executeAuthorized(authorized.authorization, {
+      signal: controller.signal,
+      async revalidate(): Promise<never> {
+        controller.abort();
+        throw new Error("observer noticed cancellation");
+      },
+    }),
+    (error: unknown) => isDomainCode(error, "cancelled"),
+  );
+  assert.equal(calls.executeCalls, 0);
+  assert.equal(calls.releaseCalls, 0);
+});
+
+test("policy and user denials are safe model observations and never execute", async () => {
+  const policyCalls = spies();
+  const policyRegistry = new CapabilityPackRegistry([
+    pack(counterOperation(policyCalls)),
+  ]);
+  const deniedGateway = new CapabilityGateway(
+    policyRegistry,
+    policyEvaluator({ effect: "deny" }),
+  );
+  const denied = deniedGateway.authorize(
+    deniedGateway.evaluate(
+      await deniedGateway.normalize(
+        proposal(),
+        normalizationContext(),
+        policyRegistry.createAdvertisement([REFERENCE]),
+      ),
+    ),
+  );
+  assert.equal(denied.status, "denied");
+  if (denied.status !== "denied") throw new Error("expected denial");
+  assert.deepEqual(denied.observation, {
+    schemaVersion: 1,
+    status: "denied",
+    code: "policy_denied",
+    reason: "policy_denied",
+    effectOccurred: false,
+    actionId: ACTION_ID,
+    capabilityPackId: REFERENCE.packId,
+    capabilityPackVersion: REFERENCE.packVersion,
+    operationId: REFERENCE.operationId,
+    operationVersion: REFERENCE.operationVersion,
+    nextAction: "choose_alternative",
+  });
+  assert.equal(policyCalls.executeCalls, 0);
+
+  const userCalls = spies();
+  const userRegistry = new CapabilityPackRegistry([pack(counterOperation(userCalls))]);
+  const userGateway = approvalGateway(userRegistry);
+  const userEvaluated = userGateway.evaluate(
+    await userGateway.normalize(
+      proposal(),
+      normalizationContext(),
+      userRegistry.createAdvertisement([REFERENCE]),
+    ),
+  );
+  const userChallenge = userGateway.createApprovalChallenge(userEvaluated, {
+    displayedSummary: { operation: "increment alpha" },
+  });
+  const userDenied = userGateway.resolveApproval(
+    userChallenge,
+    approvalResponse(userChallenge, "deny"),
+  );
+  assert.equal(userDenied.status, "denied");
+  if (userDenied.status !== "denied") throw new Error("expected user denial");
+  assert.equal(userDenied.observation["reason"], "user_denied");
+  assert.equal(userDenied.observation["effectOccurred"], false);
+  assert.equal(userCalls.executeCalls, 0);
+});
+
+function approvalGateway(
+  registry: CapabilityPackRegistry,
+  now: () => string = () => "2026-08-30T12:00:00.000Z",
+): CapabilityGateway {
+  return new CapabilityGateway(
+    registry,
+    policyEvaluator({ effect: "require_approval" }),
+    {
+      approvalClock: { now },
+      approvalIdSource: { nextApprovalId: () => APPROVAL_ID },
+      defaultApprovalLifetimeMs: 60_000,
+      maximumApprovalLifetimeMs: 300_000,
+    },
+  );
+}
+
+function approvalResponse(
+  challenge: {
+    readonly approvalId: ReturnType<typeof ApprovalIdKind.parse>;
+    readonly normalizedRequestHash: string;
+    readonly preconditionHash: string;
+    readonly policySnapshotHash: string;
+    readonly displayedSummaryHash: string;
+  },
+  decision: "allow_once" | "deny",
+) {
+  return Object.freeze({
+    schemaVersion: 1 as const,
+    approvalId: challenge.approvalId,
+    decision,
+    normalizedRequestHash: challenge.normalizedRequestHash,
+    preconditionHash: challenge.preconditionHash,
+    policySnapshotHash: challenge.policySnapshotHash,
+    displayedSummaryHash: challenge.displayedSummaryHash,
+  });
+}
 
 test("policy evaluator failure is sanitized, terminal, and side-effect free", async () => {
   const calls = spies();
@@ -1700,6 +2420,7 @@ test("prepared and evaluated ownership defeats identity, hash, and foreign-gatew
   const reconstructedReceipt = {
     prepared: firstEvaluated.prepared,
     decision: firstEvaluated.decision,
+    policySnapshotHash: firstEvaluated.policySnapshotHash,
   } as unknown as ReturnType<CapabilityGateway["evaluate"]>;
   await assert.rejects(
     first.execute(reconstructedReceipt, { signal: new AbortController().signal }),
@@ -1811,6 +2532,7 @@ test("malformed policy decisions fail closed before handler and release", async 
     { ...valid, trace: { ...valid.trace, defaultEffect: "deny" } },
     { ...valid, trace: { ...valid.trace, result: "deny" } },
     { ...valid, trace: { ...valid.trace, policyContentHash: "short" } },
+    { ...valid, policySnapshotHash: "0".repeat(64) },
     { ...valid, extra: true },
     accessorDecision,
     proxyDecision,

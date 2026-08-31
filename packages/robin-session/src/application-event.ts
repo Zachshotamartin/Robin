@@ -1,16 +1,33 @@
 import {
+  ActionIdKind,
+  ApprovalIdKind,
   ERROR_CODES,
+  PolicyVersionIdKind,
+  canonicalBytes,
+  canonicalSha256Hex,
   canonicalize,
   snapshotBoundaryJsonObject,
+  type ActionId,
+  type ApprovalId,
   type ErrorCode,
   type JsonObject,
   type JsonValue,
+  type PolicyVersionId,
 } from "@guard/contracts";
 
 export const ROBIN_APPLICATION_EVENT_SCHEMA_VERSION = 1 as const;
 export const MAXIMUM_APPLICATION_EVENT_UTF8_BYTES = 524_288;
 export const MAXIMUM_APPLICATION_TEXT_UTF8_BYTES = 262_144;
 export const MAXIMUM_APPLICATION_IDENTIFIER_UTF8_BYTES = 256;
+export const MAXIMUM_APPROVAL_DISPLAY_SUMMARY_UTF8_BYTES = 65_536;
+/** Mirrors the installed R2 lifecycle sink's maximum released text per chunk. */
+export const MAXIMUM_TOOL_OUTPUT_DELTA_TEXT_UTF8_BYTES = 32 * 1_024;
+/** One process multiplexer sequence is bounded independently of event sequence. */
+export const MAXIMUM_TOOL_OUTPUT_DELTAS_PER_CALL = 4_096;
+/** Matches the hard process-output ceiling; this is observed bytes, not text. */
+export const MAXIMUM_TOOL_OUTPUT_SOURCE_BYTES_PER_CALL = 64 * 1_024 * 1_024;
+/** Bounds escaped text retained by the ephemeral replay projection. */
+export const MAXIMUM_TOOL_OUTPUT_TEXT_UTF8_BYTES_PER_CALL = 8 * 1_024 * 1_024;
 export const UNSAFE_TERMINAL_TEXT_POLICY = "escape" as const;
 
 export type RobinApplicationEventType =
@@ -21,6 +38,11 @@ export type RobinApplicationEventType =
   | "TurnStarted"
   | "AssistantTextDelta"
   | "ToolCallStarted"
+  | "ToolOutputDelta"
+  | "PermissionDecided"
+  | "ApprovalRequested"
+  | "ApprovalResolved"
+  | "ApprovalInvalidated"
   | "ToolCallCompleted"
   | "ToolCallFailed"
   | "UsageReported"
@@ -40,6 +62,11 @@ export const ROBIN_APPLICATION_EVENT_TYPES: readonly RobinApplicationEventType[]
   "TurnStarted",
   "AssistantTextDelta",
   "ToolCallStarted",
+  "ToolOutputDelta",
+  "PermissionDecided",
+  "ApprovalRequested",
+  "ApprovalResolved",
+  "ApprovalInvalidated",
   "ToolCallCompleted",
   "ToolCallFailed",
   "UsageReported",
@@ -54,6 +81,13 @@ export const ROBIN_APPLICATION_EVENT_TYPES: readonly RobinApplicationEventType[]
 export type RobinApplicationEventSchemaVersion =
   typeof ROBIN_APPLICATION_EVENT_SCHEMA_VERSION;
 export type RobinPermissionMode = "ask" | "plan";
+export type RobinToolOutputChannel = "stdout" | "stderr";
+export type RobinPermissionEffect = "allow" | "deny" | "require_approval";
+export type RobinApprovalDecision = "allow_once" | "deny";
+export type RobinApprovalOutcome = "granted" | "denied" | "stale";
+export type RobinApprovalInvalidationReason =
+  | "approval_expired"
+  | "preconditions_changed";
 export type RobinBudgetDimension =
   | "turns"
   | "model_requests"
@@ -62,6 +96,65 @@ export type RobinBudgetDimension =
   | "output_tokens"
   | "output_bytes"
   | "wall_time_ms";
+
+export interface RobinApprovalBinding {
+  readonly actionHash: string;
+  readonly actionId: ActionId;
+  readonly approvalId: ApprovalId;
+  readonly callId: string;
+  readonly displayedSummaryHash: string;
+  readonly expiresAt: string;
+  readonly normalizedRequestHash: string;
+  readonly policySnapshotHash: string;
+  readonly preconditionHash: string;
+  readonly requestedAt: string;
+  readonly toolName: string;
+  readonly turnId: string;
+}
+
+export interface RobinApprovalRequestedPayload extends RobinApprovalBinding {
+  readonly displayedSummary: JsonObject;
+}
+
+export interface RobinApprovalResolvedPayload extends RobinApprovalBinding {
+  readonly decision: RobinApprovalDecision;
+  readonly outcome: RobinApprovalOutcome;
+  readonly resolvedAt: string;
+}
+
+export interface RobinApprovalInvalidatedPayload extends RobinApprovalBinding {
+  readonly invalidatedAt: string;
+  readonly observedPreconditionHash: string | null;
+  readonly reason: RobinApprovalInvalidationReason;
+}
+
+export interface RobinPermissionDecidedPayload {
+  readonly actionHash: string;
+  readonly actionId: ActionId;
+  readonly callId: string;
+  readonly effect: RobinPermissionEffect;
+  readonly policySnapshotHash: string;
+  readonly policyVersionId: PolicyVersionId;
+  readonly toolName: string;
+  readonly turnId: string;
+  readonly winningPolicyName: string | null;
+}
+
+/**
+ * Presentation-only process output. It never contains raw bytes, handles,
+ * approval facts, normalized actions, or any other execution authority.
+ */
+export interface RobinToolOutputDeltaPayload {
+  readonly byteLength: number;
+  readonly callId: string;
+  readonly channel: RobinToolOutputChannel;
+  readonly limitExceeded: boolean;
+  readonly safeText: string;
+  readonly sequence: number;
+  readonly textTruncated: boolean;
+  readonly toolName: string;
+  readonly turnId: string;
+}
 
 export interface RobinApplicationEventPayloadMap {
   readonly SessionStarted: {
@@ -96,6 +189,11 @@ export interface RobinApplicationEventPayloadMap {
     readonly toolName: string;
     readonly turnId: string;
   };
+  readonly ToolOutputDelta: RobinToolOutputDeltaPayload;
+  readonly PermissionDecided: RobinPermissionDecidedPayload;
+  readonly ApprovalRequested: RobinApprovalRequestedPayload;
+  readonly ApprovalResolved: RobinApprovalResolvedPayload;
+  readonly ApprovalInvalidated: RobinApprovalInvalidatedPayload;
   readonly ToolCallCompleted: {
     readonly callId: string;
     readonly observation: JsonObject;
@@ -166,6 +264,11 @@ export type RobinApplicationEvent =
   | RobinApplicationEventBase<"TurnStarted">
   | RobinApplicationEventBase<"AssistantTextDelta">
   | RobinApplicationEventBase<"ToolCallStarted">
+  | RobinApplicationEventBase<"ToolOutputDelta">
+  | RobinApplicationEventBase<"PermissionDecided">
+  | RobinApplicationEventBase<"ApprovalRequested">
+  | RobinApplicationEventBase<"ApprovalResolved">
+  | RobinApplicationEventBase<"ApprovalInvalidated">
   | RobinApplicationEventBase<"ToolCallCompleted">
   | RobinApplicationEventBase<"ToolCallFailed">
   | RobinApplicationEventBase<"UsageReported">
@@ -183,6 +286,11 @@ export type RobinTurnApplicationEvent =
   | RobinApplicationEventBase<"TurnStarted">
   | RobinApplicationEventBase<"AssistantTextDelta">
   | RobinApplicationEventBase<"ToolCallStarted">
+  | RobinApplicationEventBase<"ToolOutputDelta">
+  | RobinApplicationEventBase<"PermissionDecided">
+  | RobinApplicationEventBase<"ApprovalRequested">
+  | RobinApplicationEventBase<"ApprovalResolved">
+  | RobinApplicationEventBase<"ApprovalInvalidated">
   | RobinApplicationEventBase<"ToolCallCompleted">
   | RobinApplicationEventBase<"ToolCallFailed">
   | RobinApplicationEventBase<"UsageReported">
@@ -197,7 +305,29 @@ const EVENT_TYPE_SET: ReadonlySet<string> = new Set(
   ROBIN_APPLICATION_EVENT_TYPES,
 );
 const ERROR_CODE_SET: ReadonlySet<string> = new Set(ERROR_CODES);
+const APPROVAL_DECISION_SET: ReadonlySet<string> = new Set([
+  "allow_once",
+  "deny",
+]);
+const APPROVAL_OUTCOME_SET: ReadonlySet<string> = new Set([
+  "granted",
+  "denied",
+  "stale",
+]);
+const APPROVAL_INVALIDATION_REASON_SET: ReadonlySet<string> = new Set([
+  "approval_expired",
+  "preconditions_changed",
+]);
+const PERMISSION_EFFECT_SET: ReadonlySet<string> = new Set([
+  "allow",
+  "deny",
+  "require_approval",
+]);
 const PERMISSION_MODE_SET: ReadonlySet<string> = new Set(["ask", "plan"]);
+const TOOL_OUTPUT_CHANNEL_SET: ReadonlySet<string> = new Set([
+  "stdout",
+  "stderr",
+]);
 const BUDGET_DIMENSION_SET: ReadonlySet<string> = new Set([
   "turns",
   "model_requests",
@@ -393,6 +523,196 @@ function parsePayload(
         toolName: requiredIdentifier(payload, "toolName"),
         turnId: requiredIdentifier(payload, "turnId"),
       });
+    case "ToolOutputDelta": {
+      requireExactKeys(
+        payload,
+        new Set([
+          "byteLength",
+          "callId",
+          "channel",
+          "limitExceeded",
+          "safeText",
+          "sequence",
+          "textTruncated",
+          "toolName",
+          "turnId",
+        ]),
+      );
+      const channel = requiredString(payload, "channel", 8, false);
+      if (!TOOL_OUTPUT_CHANNEL_SET.has(channel)) invalidEvent();
+      return Object.freeze({
+        byteLength: requiredPositiveIntegerAtMost(
+          payload,
+          "byteLength",
+          MAXIMUM_TOOL_OUTPUT_SOURCE_BYTES_PER_CALL,
+        ),
+        callId: requiredIdentifier(payload, "callId"),
+        channel: channel as RobinToolOutputChannel,
+        limitExceeded: requiredBoolean(payload, "limitExceeded"),
+        safeText: requiredSafeText(
+          payload,
+          "safeText",
+          MAXIMUM_TOOL_OUTPUT_DELTA_TEXT_UTF8_BYTES,
+        ),
+        sequence: requiredPositiveIntegerAtMost(
+          payload,
+          "sequence",
+          MAXIMUM_TOOL_OUTPUT_DELTAS_PER_CALL,
+        ),
+        textTruncated: requiredBoolean(payload, "textTruncated"),
+        toolName: requiredIdentifier(payload, "toolName"),
+        turnId: requiredIdentifier(payload, "turnId"),
+      });
+    }
+    case "PermissionDecided":
+      requireExactKeys(
+        payload,
+        new Set([
+          "actionHash",
+          "actionId",
+          "callId",
+          "effect",
+          "policySnapshotHash",
+          "policyVersionId",
+          "toolName",
+          "turnId",
+          "winningPolicyName",
+        ]),
+      );
+      return Object.freeze({
+        actionHash: requiredSha256(payload, "actionHash"),
+        actionId: requiredActionId(payload, "actionId"),
+        callId: requiredIdentifier(payload, "callId"),
+        effect: requiredPermissionEffect(payload, "effect"),
+        policySnapshotHash: requiredSha256(payload, "policySnapshotHash"),
+        policyVersionId: requiredPolicyVersionId(payload, "policyVersionId"),
+        toolName: requiredIdentifier(payload, "toolName"),
+        turnId: requiredIdentifier(payload, "turnId"),
+        winningPolicyName: requiredNullableSafeIdentity(
+          payload,
+          "winningPolicyName",
+        ),
+      });
+    case "ApprovalRequested": {
+      requireExactKeys(
+        payload,
+        new Set([
+          "actionHash",
+          "actionId",
+          "approvalId",
+          "callId",
+          "displayedSummary",
+          "displayedSummaryHash",
+          "expiresAt",
+          "normalizedRequestHash",
+          "policySnapshotHash",
+          "preconditionHash",
+          "requestedAt",
+          "toolName",
+          "turnId",
+        ]),
+      );
+      const binding = parseApprovalBinding(payload);
+      const displayedSummary = requiredApprovalDisplaySummary(
+        payload,
+        "displayedSummary",
+      );
+      if (
+        canonicalSha256Hex(displayedSummary) !== binding.displayedSummaryHash
+      ) {
+        invalidEvent();
+      }
+      return Object.freeze({ ...binding, displayedSummary });
+    }
+    case "ApprovalResolved": {
+      requireExactKeys(
+        payload,
+        new Set([
+          "actionHash",
+          "actionId",
+          "approvalId",
+          "callId",
+          "decision",
+          "displayedSummaryHash",
+          "expiresAt",
+          "normalizedRequestHash",
+          "outcome",
+          "policySnapshotHash",
+          "preconditionHash",
+          "requestedAt",
+          "resolvedAt",
+          "toolName",
+          "turnId",
+        ]),
+      );
+      const binding = parseApprovalBinding(payload);
+      const decision = requiredApprovalDecision(payload, "decision");
+      const outcome = requiredApprovalOutcome(payload, "outcome");
+      const resolvedAt = requiredTimestamp(payload, "resolvedAt");
+      const resolvedAtMs = Date.parse(resolvedAt);
+      const expiresAtMs = Date.parse(binding.expiresAt);
+      if (
+        (decision === "deny" && outcome === "granted") ||
+        (decision === "allow_once" && outcome === "denied") ||
+        resolvedAtMs < Date.parse(binding.requestedAt) ||
+        (outcome === "stale" && resolvedAtMs < expiresAtMs) ||
+        (outcome !== "stale" && resolvedAtMs >= expiresAtMs)
+      ) {
+        invalidEvent();
+      }
+      return Object.freeze({
+        ...binding,
+        decision,
+        outcome,
+        resolvedAt,
+      });
+    }
+    case "ApprovalInvalidated": {
+      requireExactKeys(
+        payload,
+        new Set([
+          "actionHash",
+          "actionId",
+          "approvalId",
+          "callId",
+          "displayedSummaryHash",
+          "expiresAt",
+          "invalidatedAt",
+          "normalizedRequestHash",
+          "observedPreconditionHash",
+          "policySnapshotHash",
+          "preconditionHash",
+          "reason",
+          "requestedAt",
+          "toolName",
+          "turnId",
+        ]),
+      );
+      const binding = parseApprovalBinding(payload);
+      const invalidatedAt = requiredTimestamp(payload, "invalidatedAt");
+      const observedPreconditionHash = requiredNullableSha256(
+        payload,
+        "observedPreconditionHash",
+      );
+      const reason = requiredApprovalInvalidationReason(payload, "reason");
+      if (
+        Date.parse(invalidatedAt) < Date.parse(binding.requestedAt) ||
+        (reason === "approval_expired" &&
+          (Date.parse(invalidatedAt) < Date.parse(binding.expiresAt) ||
+            observedPreconditionHash !== null)) ||
+        (reason === "preconditions_changed" &&
+          (observedPreconditionHash === null ||
+            observedPreconditionHash === binding.preconditionHash))
+      ) {
+        invalidEvent();
+      }
+      return Object.freeze({
+        ...binding,
+        invalidatedAt,
+        observedPreconditionHash,
+        reason,
+      });
+    }
     case "ToolCallCompleted":
       requireExactKeys(
         payload,
@@ -488,6 +808,154 @@ function parsePayload(
   }
 }
 
+function parseApprovalBinding(payload: JsonObject): RobinApprovalBinding {
+  const requestedAt = requiredTimestamp(payload, "requestedAt");
+  const expiresAt = requiredTimestamp(payload, "expiresAt");
+  if (Date.parse(expiresAt) <= Date.parse(requestedAt)) invalidEvent();
+  return Object.freeze({
+    actionHash: requiredSha256(payload, "actionHash"),
+    actionId: requiredActionId(payload, "actionId"),
+    approvalId: requiredApprovalId(payload, "approvalId"),
+    callId: requiredIdentifier(payload, "callId"),
+    displayedSummaryHash: requiredSha256(
+      payload,
+      "displayedSummaryHash",
+    ),
+    expiresAt,
+    normalizedRequestHash: requiredSha256(
+      payload,
+      "normalizedRequestHash",
+    ),
+    policySnapshotHash: requiredSha256(payload, "policySnapshotHash"),
+    preconditionHash: requiredSha256(payload, "preconditionHash"),
+    requestedAt,
+    toolName: requiredIdentifier(payload, "toolName"),
+    turnId: requiredIdentifier(payload, "turnId"),
+  });
+}
+
+function requiredApprovalDisplaySummary(
+  value: JsonObject,
+  key: string,
+): JsonObject {
+  const summary = requiredObject(value, key);
+  if (
+    Object.keys(summary).length === 0 ||
+    canonicalBytes(summary).byteLength >
+      MAXIMUM_APPROVAL_DISPLAY_SUMMARY_UTF8_BYTES
+  ) {
+    invalidEvent();
+  }
+  assertDisplaySafeJsonValue(summary);
+  return summary;
+}
+
+function assertDisplaySafeJsonValue(value: JsonValue): void {
+  if (typeof value === "string") {
+    if (containsUnsafeTerminalCodePoint(value)) invalidEvent();
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const item of value) assertDisplaySafeJsonValue(item);
+    return;
+  }
+  for (const [key, item] of Object.entries(value)) {
+    if (containsIdentifierControlCodePoint(key)) invalidEvent();
+    assertDisplaySafeJsonValue(item);
+  }
+}
+
+function requiredSha256(value: JsonObject, key: string): string {
+  const hash = requiredString(value, key, 64, false);
+  if (!/^[a-f0-9]{64}$/u.test(hash)) invalidEvent();
+  return hash;
+}
+
+function requiredNullableSha256(
+  value: JsonObject,
+  key: string,
+): string | null {
+  return value[key] === null ? null : requiredSha256(value, key);
+}
+
+function requiredActionId(value: JsonObject, key: string): ActionId {
+  const actionId = requiredIdentifier(value, key);
+  if (!ActionIdKind.is(actionId)) invalidEvent();
+  return actionId;
+}
+
+function requiredApprovalId(value: JsonObject, key: string): ApprovalId {
+  const approvalId = requiredIdentifier(value, key);
+  if (!ApprovalIdKind.is(approvalId)) invalidEvent();
+  return approvalId;
+}
+
+function requiredPolicyVersionId(
+  value: JsonObject,
+  key: string,
+): PolicyVersionId {
+  const policyVersionId = requiredIdentifier(value, key);
+  if (!PolicyVersionIdKind.is(policyVersionId)) invalidEvent();
+  return policyVersionId;
+}
+
+function requiredPermissionEffect(
+  value: JsonObject,
+  key: string,
+): RobinPermissionEffect {
+  const effect = requiredString(value, key, 32, false);
+  if (!PERMISSION_EFFECT_SET.has(effect)) invalidEvent();
+  return effect as RobinPermissionEffect;
+}
+
+function requiredNullableSafeIdentity(
+  value: JsonObject,
+  key: string,
+): string | null {
+  if (value[key] === null) return null;
+  const identity = requiredString(
+    value,
+    key,
+    MAXIMUM_APPLICATION_IDENTIFIER_UTF8_BYTES,
+    false,
+  );
+  if (
+    identity.trim() !== identity ||
+    containsIdentifierControlCodePoint(identity)
+  ) {
+    invalidEvent();
+  }
+  return identity;
+}
+
+function requiredApprovalDecision(
+  value: JsonObject,
+  key: string,
+): RobinApprovalDecision {
+  const decision = requiredString(value, key, 16, false);
+  if (!APPROVAL_DECISION_SET.has(decision)) invalidEvent();
+  return decision as RobinApprovalDecision;
+}
+
+function requiredApprovalOutcome(
+  value: JsonObject,
+  key: string,
+): RobinApprovalOutcome {
+  const outcome = requiredString(value, key, 16, false);
+  if (!APPROVAL_OUTCOME_SET.has(outcome)) invalidEvent();
+  return outcome as RobinApprovalOutcome;
+}
+
+function requiredApprovalInvalidationReason(
+  value: JsonObject,
+  key: string,
+): RobinApprovalInvalidationReason {
+  const reason = requiredString(value, key, 32, false);
+  if (!APPROVAL_INVALIDATION_REASON_SET.has(reason)) invalidEvent();
+  return reason as RobinApprovalInvalidationReason;
+}
+
 function escapeJsonObject(value: JsonObject): JsonObject {
   return escapeJsonValue(value) as JsonObject;
 }
@@ -581,6 +1049,22 @@ function requiredPositiveInteger(value: JsonObject, key: string): number {
   if (!Number.isSafeInteger(member) || typeof member !== "number" || member <= 0) {
     invalidEvent();
   }
+  return member;
+}
+
+function requiredPositiveIntegerAtMost(
+  value: JsonObject,
+  key: string,
+  maximum: number,
+): number {
+  const member = requiredPositiveInteger(value, key);
+  if (member > maximum) invalidEvent();
+  return member;
+}
+
+function requiredBoolean(value: JsonObject, key: string): boolean {
+  const member = value[key];
+  if (typeof member !== "boolean") invalidEvent();
   return member;
 }
 

@@ -153,11 +153,11 @@ Coding session modes:
 
 Session options:
   -p, --print                 Use non-interactive print mode
-  --provider <id>             Model provider; synthetic is available in this preview
-  --model <id>                Provider model identifier
-  --permission-mode <mode>    ask (preview label for future default) or plan
+  --provider <id>             Model provider; synthetic is available in R2
+  --model <id>                Provider model identifier (default: synthetic-r2-v1)
+  --permission-mode <mode>    ask (manual approval) or plan (read-only)
   --output-format <format>    text, json, or stream-json; print mode only
-  --maximum-turns <1..256>    Future agent-turn ceiling recorded in preview output
+  --maximum-turns <1..256>    Agent-turn ceiling for print mode
   --no-save                   Explicitly keep print mode ephemeral
   --continue                  Reserved for durable continuation; unavailable now
   --resume [selector]         Reserved for durable resume; unavailable now
@@ -170,9 +170,11 @@ Global options:
   --help    Show this help
   --version Show the CLI version
 
-The current coding-session loop is credential-free, synthetic, and ephemeral.
-It demonstrates two policy-gated in-memory fixture tools; it does not access a
-physical repository, run commands, use the network, or persist a session.
+The default coding session binds to the current physical Git worktree. It can
+read bounded repository data and, in ask mode, request one-use approval before
+each file edit or trusted process run. Sessions are ephemeral. R2 has no
+filesystem or network sandbox, and its deterministic synthetic coding model
+uses no API key. Use --model synthetic-r1-v1 for the in-memory R1 fixture.
 
 Run 'robin run --help' or 'robin policy --help' for compatibility command options.
 `;

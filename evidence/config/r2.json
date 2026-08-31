@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 1,
+  "gate": "R2",
+  "versionManifest": "package.json",
+  "cliVersionManifest": "apps/cli/package.json",
+  "dependencyLock": "package-lock.json",
+  "traceability": {
+    "buildPlan": "docs/BUILD_PLAN.md",
+    "operationsTestPlan": "docs/OPERATIONS_TEST_PLAN.md"
+  },
+  "commands": [
+    {
+      "id": "dependency-install",
+      "executable": "npm",
+      "args": ["ci", "--ignore-scripts", "--silent", "--no-audit", "--no-fund"],
+      "timeoutMs": 900000
+    },
+    {
+      "id": "dependency-tree",
+      "executable": "npm",
+      "args": ["ls", "--all", "--json"],
+      "timeoutMs": 300000
+    },
+    {
+      "id": "static",
+      "executable": "npm",
+      "args": ["run", "static"],
+      "timeoutMs": 900000
+    },
+    {
+      "id": "repository-tools",
+      "executable": "npm",
+      "args": ["run", "test:r2:tools"],
+      "timeoutMs": 1200000
+    },
+    {
+      "id": "pty-local",
+      "executable": "npm",
+      "args": ["run", "test:pty"],
+      "timeoutMs": 900000
+    },
+    {
+      "id": "package-smoke",
+      "executable": "npm",
+      "args": ["run", "test:package"],
+      "timeoutMs": 1200000
+    },
+    {
+      "id": "gate-b",
+      "executable": "npm",
+      "args": ["run", "test:gate:b"],
+      "timeoutMs": 3600000
+    }
+  ],
+  "requirements": [
+    {
+      "requirementId": "FR-REP-001",
+      "terminalGate": "R2",
+      "status": "partial",
+      "ticketIds": ["R2.02"],
+      "testIds": ["FS-001", "GIT-001"],
+      "commandIds": ["repository-tools"],
+      "note": "The R2 candidate binds generated physical Git worktrees and tests identity drift; hosted matrix and merge acceptance remain external to this local descriptor."
+    },
+    {
+      "requirementId": "FR-EDIT-001",
+      "terminalGate": "R2",
+      "status": "partial",
+      "ticketIds": ["R2.07", "R2.08", "R2.09"],
+      "testIds": ["UNIT-008", "EDIT-001", "EDIT-002"],
+      "commandIds": ["repository-tools"],
+      "note": "Exact-preimage structural replacement and exclusive creation are locally exercised; this candidate does not claim later delete, move, checkpoint, or durable-recovery behavior."
+    },
+    {
+      "requirementId": "FR-PROC-001",
+      "terminalGate": "R2",
+      "status": "partial",
+      "ticketIds": ["R2.10"],
+      "testIds": ["UNIT-009", "PROC-001", "PROC-003", "PROC-014"],
+      "commandIds": ["repository-tools"],
+      "note": "Direct executable-plus-argv verification is bounded and approval-gated locally; no filesystem or network sandbox is claimed."
+    },
+    {
+      "requirementId": "FR-PROC-005",
+      "terminalGate": "R2",
+      "status": "partial",
+      "ticketIds": ["R2.10"],
+      "testIds": ["PROC-005", "PROC-006"],
+      "commandIds": ["repository-tools"],
+      "note": "The R2 event and terminal paths preserve bounded stdout/stderr channel and sequence facts; durable output artifacts remain a later gate."
+    },
+    {
+      "requirementId": "FR-GIT-001",
+      "terminalGate": "R2",
+      "status": "partial",
+      "ticketIds": ["R2.02", "R2.12"],
+      "testIds": ["GIT-001", "GIT-003"],
+      "commandIds": ["repository-tools"],
+      "note": "Initial HEAD, branch, status and index facts are captured before approved edits, and the safety oracle proves Robin performs no Git mutation."
+    },
+    {
+      "requirementId": "FR-UI-003",
+      "terminalGate": "R2",
+      "status": "partial",
+      "ticketIds": ["R2.15"],
+      "testIds": ["TERM-005", "TERM-006", "E2E-002"],
+      "commandIds": ["repository-tools"],
+      "note": "Raw and flat candidate views expose ordered assistant, approval, tool and process activity; the stable R7 automation and supported terminal matrix are not implied."
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "r2-repository-fixture-factory",
+      "path": "tests/support/repository-fixture.mjs",
+      "schemaVersion": 1
+    },
+    {
+      "id": "r2-pty-driver",
+      "path": "tests/pty/robin_pty_driver.py",
+      "schemaVersion": 1
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "cli-package-manifest",
+      "path": "apps/cli/package.json",
+      "mediaType": "application/json"
+    },
+    {
+      "id": "cli-tarball-inventory",
+      "path": "evidence/inventory/r2-cli-tarball-v1.json",
+      "mediaType": "application/json"
+    },
+    {
+      "id": "r2-tool-catalog",
+      "path": "packages/robin-tools/src/tool-definitions.ts",
+      "mediaType": "text/typescript"
+    },
+    {
+      "id": "r2-application-bootstrap",
+      "path": "packages/robin-application/src/r2-application.ts",
+      "mediaType": "text/typescript"
+    },
+    {
+      "id": "r2-permission-policy",
+      "path": "packages/robin-application/src/r2-policy.ts",
+      "mediaType": "text/typescript"
+    },
+    {
+      "id": "terminal-approval-and-output-reducer",
+      "path": "packages/robin-terminal/src/repl-reducer.ts",
+      "mediaType": "text/typescript"
+    }
+  ],
+  "supportedClaims": [
+    "This manifest records local deterministic R2 candidate commands at the tested commit; it does not by itself establish R2 acceptance.",
+    "Generated temporary Git repository package tests exercise bounded physical list, literal search, classified read, exact-preimage replacement, exclusive creation, direct process execution, and read-only status/diff; the deterministic provider-neutral application loop invokes list/search/read, two exact-preimage replacements, two direct verifications, and final status/diff, but does not invoke create_file.",
+    "Every R2 edit and process effect requires a separately displayed one-use approval; headless mode denies approval requests because it has no trusted human response channel.",
+    "The candidate explicitly reports that approved processes are unsandboxed and have no filesystem or network isolation.",
+    "The reviewed development tarball passes isolated install, installed R1 compatibility PTY, installed R2 approval workflow, exact repository safety, terminal restoration, and uninstall checks."
+  ],
+  "deferredClaims": [
+    "R2 acceptance, hosted Linux/macOS results, branch protection, reviewed-head linkage, merge identity, and merge-triggered mainline results are external records not established by this local manifest.",
+    "A production model provider, arbitrary provider or agent compatibility, API-key onboarding, credential storage, local model endpoint, or network transport is not established by R2.",
+    "Durable sessions, continuation, resume, crash recovery, persistent approvals, background supervision, and editor clients are not established by R2.",
+    "Strict process isolation, shell command text, network tools, workspace executables, file delete/move, Git stage/commit/branch/push/PR, and isolated worktrees are not established by R2.",
+    "A public npm publication, supported installer, upgrade, rollback, migration, signed release artifact, or production uninstall guarantee is not established by R2."
+  ],
+  "knownLimitations": [
+    {
+      "id": "tested-commit-semantics",
+      "summary": "The commit field identifies the clean source commit tested before the generated manifest file is written.",
+      "impact": "A later manifest commit intentionally points to its tested source parent and never claims to hash itself."
+    },
+    {
+      "id": "single-host-capture",
+      "summary": "The generated local manifest records one host environment only.",
+      "impact": "It does not replace separately required hosted Linux and macOS PTY, repository, and package evidence."
+    },
+    {
+      "id": "synthetic-fixture-workflow",
+      "summary": "The R2 model recognizes one exact deterministic two-defect TypeScript fixture and derives each next action from provider-neutral observations.",
+      "impact": "R2 proves the coding architecture and effect boundaries, not arbitrary natural-language coding competence or provider compatibility."
+    },
+    {
+      "id": "visible-workspace-unsandboxed-process",
+      "summary": "Approved edits target the live bound worktree and approved processes run directly on the host with no filesystem or network isolation.",
+      "impact": "Users must review exact approvals and use a disposable or otherwise reviewed repository; strict isolation remains R5."
+    },
+    {
+      "id": "ephemeral-authority-and-session",
+      "summary": "Conversation state, edit attribution and approval grants exist only for the running process.",
+      "impact": "A restart cannot resume or reconstruct authority; durable state and recovery remain R3."
+    },
+    {
+      "id": "experimental-machine-contract",
+      "summary": "JSON and streaming-JSON envelopes explicitly declare experimental stability.",
+      "impact": "R7, not R2, owns stable automation schemas and multi-provider conformance."
+    },
+    {
+      "id": "python-pty-harness",
+      "summary": "The process-level PTY harness uses the operating-system Python 3 standard library.",
+      "impact": "Python is a contributor and CI test dependency, not a runtime dependency of the packed Robin CLI."
+    },
+    {
+      "id": "measured-development-archive",
+      "summary": "The R2 package inventory pins measured macOS-arm64 npm 10/11 and Linux-x64 npm 10 gzip profiles plus the platform-independent canonical tar contents.",
+      "impact": "The archive is temporary, unsigned and unpublished; immutable release provenance remains R10."
+    },
+    {
+      "id": "partial-requirement-evidence",
+      "summary": "Evidence schema v1 records partial requirement progress only.",
+      "impact": "No requirement is marked complete solely because the R2 candidate or this manifest exists."
+    }
+  ]
+}

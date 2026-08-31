@@ -1,8 +1,8 @@
 # Robin gate evidence
 
 This directory contains the versioned input, schema, and capture workflow for
-Robin local gate-command evidence. It does not contain a placeholder R0
-or R1 acceptance record. A candidate manifest is created only after every
+Robin local gate-command evidence. It does not contain a placeholder R0, R1,
+or R2 acceptance record. A candidate manifest is created only after every
 configured command passes from a clean, committed source tree; GitHub settings,
 hosted CI, pull-request review, prerequisite status, and mainline merge remain
 separate gate-acceptance records.
@@ -66,10 +66,41 @@ npm run evidence:capture:r1
 npm run evidence:validate -- --manifest evidence/manifests/r1.json
 ```
 
-The resulting manifest is deliberately local candidate evidence. It cannot
-accept R1 while R0 is unaccepted, does not contain GitHub-hosted Linux/macOS job
-identity, and does not exercise a physical repository, real model API, API key,
-process/Git effect, durable session, or public distribution channel.
+The resulting manifest was deliberately local candidate evidence. It did not
+itself accept R1, contain GitHub-hosted Linux/macOS job identity, or exercise a
+physical repository, real model API, API key, process/Git effect, durable
+session, or public distribution channel. The tracked R1 manifest remains a
+historical record for the exact commit named inside it after the separate R1
+acceptance process completed.
+
+## R2 candidate capture
+
+The tracked [R2 capture config](config/r2.json) preserves the accepted R1 and
+Gate B regressions, then adds the complete R2 workspace/process/Git/tool/session/
+application/terminal package boundary, generated-repository real-PTY matrix,
+and installed-package R1 compatibility plus R2 approval workflow. It hashes the
+generated repository fixture factory, shared PTY driver, exact eight-tool
+catalog, physical-application bootstrap, permission policy, terminal approval/
+output reducer, and reviewed 59-file R2 package inventory.
+
+From a clean R2 candidate commit:
+
+```console
+npm run evidence:validate-config:r2
+npm run evidence:capture:r2
+npm run evidence:validate -- --manifest evidence/manifests/r2.json
+```
+
+The local R2 manifest records the exact clean commit and deterministic command
+proofs only. It cannot establish hosted Linux/macOS jobs, protected-branch or
+pull-request identity, review, merge, or merge-triggered mainline results. The
+candidate uses one credential-free synthetic two-defect TypeScript workflow:
+it proves the physical coding architecture, manual one-use edit/process
+approvals, bounded output, and repository safety, but not arbitrary coding
+competence, provider/API-key compatibility, durable sessions, strict process
+isolation, or a supported public installation channel. Package tests exercise
+exclusive file creation; the deterministic application loop itself uses two
+exact-preimage replacements and does not invoke `create_file`.
 
 Control/configuration inputs are limited to 4 MiB, generated and loaded
 manifests to 8 MiB, tracked audit or hashed evidence files to 64 MiB each, and
@@ -171,6 +202,9 @@ acceptance.
 - `config/r1.json` is the reviewed local R1 candidate command, trace, claim,
   deferral, fixture, and artifact input. It never substitutes for hosted jobs or
   the accepted R0 predecessor.
+- `config/r2.json` is the reviewed local R2 candidate command, partial trace,
+  claim, deferral, fixture, and artifact input. It never substitutes for hosted
+  jobs, pull-request review, merge identity, or mainline acceptance.
 - `inventory/r0-cli-tarball-v1.json` pins the exact cross-platform uncompressed
   tar SHA-256/size, reviewed platform/architecture/npm-version gzip SHA-256/sizes, and the
   47-file path/type/mode/size/SHA-256 inventory consumed by both dry-run and
@@ -185,6 +219,12 @@ acceptance.
   macOS arm64/npm 10.9.8, macOS arm64/npm 11.19.0, and a pinned, network-disabled
   Linux x64/Node 22/npm 10.9.8 container; unlike the canonical tar, the Linux
   gzip bytes differ from macOS and are recorded separately.
+- `inventory/r2-cli-tarball-v1.json` pins the R2 candidate's cross-platform
+  canonical tar plus 59 exact files. Its gzip profiles were measured under
+  macOS arm64/npm 10.9.8, macOS arm64/npm 11.19.0, and a pinned,
+  network-disabled Linux x64/Node 22/npm 10.9.8 container; the Linux gzip bytes
+  differ from the identical macOS npm 10/11 streams and remain a separate
+  reviewed profile.
 - `schema/gate-evidence-capture-config-v1.schema.json` documents capture input.
 - `schema/gate-evidence-manifest-v1.schema.json` documents generated output.
 - `manifests/` contains only genuinely captured records and its policy note.

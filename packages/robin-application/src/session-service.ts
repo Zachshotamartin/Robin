@@ -13,6 +13,7 @@ import {
 import {
   MAXIMUM_QUEUED_ROBIN_MESSAGES,
   type RobinApplicationEvent,
+  type RobinApprovalDecision,
   type RobinBudgetDimension,
   type RobinPermissionMode,
 } from "@guard/robin-session";
@@ -29,6 +30,16 @@ import {
   r1ToolDisplayName,
 } from "./gateway-tool-dispatcher.js";
 import { R1SyntheticCodingProvider } from "./r1-synthetic-provider.js";
+import {
+  captureApprovalDecision,
+  type RobinApplicationToolDispatcherFactory,
+  type RobinApplicationToolLifecycle,
+  type RobinToolApprovalInvalidation,
+  type RobinToolApprovalRequest,
+  type RobinToolApprovalResolution,
+  type RobinToolOutputDelta,
+  type RobinToolPermissionDecision,
+} from "./tool-lifecycle.js";
 
 export interface R1RobinApplicationSnapshot {
   readonly sessionId: string;
@@ -65,6 +76,8 @@ export interface R1RobinApplicationOptions {
     TurnCoordinatorOptions,
     "sessionId" | "provider" | "modelId" | "toolDispatcher" | "clock"
   >;
+  /** Creates the trusted dispatcher after the application lifecycle port exists. */
+  readonly toolDispatcherFactory?: RobinApplicationToolDispatcherFactory;
 }
 
 export interface R1ShutdownDeadlineLease {
@@ -94,6 +107,14 @@ interface PendingTurn {
   assistantText: string;
   activeTool: { readonly callId: string; readonly toolName: string } | null;
   terminalCommitted: boolean;
+}
+
+interface PendingApprovalResponse {
+  readonly approvalId: string;
+  readonly callId: string;
+  readonly signal: AbortSignal;
+  readonly onAbort: () => void;
+  readonly resolve: (decision: RobinApprovalDecision) => void;
 }
 
 interface RequestUsage {
@@ -155,6 +176,7 @@ export class R1RobinApplication {
   #fatalFailureSet = false;
   #fatalFailure: unknown;
   #terminalPublicationGuard = false;
+  #pendingApproval: PendingApprovalResponse | null = null;
 
   public constructor(options: R1RobinApplicationOptions) {
     this.#sessionId = options.sessionId;
@@ -177,11 +199,15 @@ export class R1RobinApplication {
         ? {}
         : { limits: options.journalLimits }),
     });
+    const lifecycle = this.#captureToolLifecycle();
+    const toolDispatcher =
+      options.toolDispatcherFactory?.(lifecycle) ??
+      new R1GatewayToolDispatcher(undefined, lifecycle);
     this.#coordinator = new TurnCoordinator({
       sessionId: this.#sessionId,
       provider: this.#provider,
       modelId: this.#modelId,
-      toolDispatcher: new R1GatewayToolDispatcher(),
+      toolDispatcher,
       clock: {
         now: options.monotonicNow ?? (() => Math.floor(performance.now())),
       },
@@ -305,6 +331,23 @@ export class R1RobinApplication {
       this.#failApplication(error);
       throw error;
     }
+    return true;
+  }
+
+  /**
+   * Answers only the currently displayed approval. The gateway still decides
+   * whether this response is current and can mint one-use execution authority.
+   */
+  public resolveApproval(
+    approvalId: string,
+    decision: RobinApprovalDecision,
+  ): boolean {
+    const capturedDecision = captureApprovalDecision(decision);
+    const pending = this.#pendingApproval;
+    if (pending === null || pending.approvalId !== approvalId) return false;
+    this.#pendingApproval = null;
+    pending.signal.removeEventListener("abort", pending.onAbort);
+    pending.resolve(capturedDecision);
     return true;
   }
 
@@ -717,6 +760,116 @@ export class R1RobinApplication {
     this.#resolveIdleWaiters();
   }
 
+  #captureToolLifecycle(): RobinApplicationToolLifecycle {
+    return Object.freeze({
+      currentPermissionMode: () => this.#permissionMode,
+      permissionDecided: (decision: RobinToolPermissionDecision) => {
+        this.#appendToolLifecycle("PermissionDecided", decision);
+      },
+      requestApproval: (
+        request: RobinToolApprovalRequest,
+        signal: AbortSignal,
+      ) => this.#requestToolApproval(request, signal),
+      approvalResolved: (resolution: RobinToolApprovalResolution) => {
+        this.#appendToolLifecycle("ApprovalResolved", resolution);
+      },
+      approvalInvalidated: (invalidation: RobinToolApprovalInvalidation) => {
+        this.#appendToolLifecycle("ApprovalInvalidated", invalidation);
+      },
+      toolOutput: (delta: RobinToolOutputDelta) => {
+        this.#appendToolLifecycle("ToolOutputDelta", delta);
+      },
+    });
+  }
+
+  #appendToolLifecycle<TType extends
+    | "PermissionDecided"
+    | "ApprovalResolved"
+    | "ApprovalInvalidated"
+    | "ToolOutputDelta">(
+    type: TType,
+    payload: Omit<RobinApplicationEventPayloadMap[TType], "turnId">,
+  ): Extract<RobinApplicationEvent, { readonly type: TType }> {
+    const pending = this.#requireActiveLifecycleCall(
+      payload.callId,
+      payload.toolName,
+    );
+    try {
+      const record = this.#journal.append(type, {
+        ...payload,
+        turnId: pending.turnId,
+      } as RobinApplicationEventPayloadMap[TType]);
+      pending.stream.push(record);
+      return record;
+    } catch (error) {
+      this.#failApplication(error);
+      throw error;
+    }
+  }
+
+  #requestToolApproval(
+    request: RobinToolApprovalRequest,
+    signal: AbortSignal,
+  ): Promise<RobinApprovalDecision> {
+    const pending = this.#requireActiveLifecycleCall(
+      request.callId,
+      request.toolName,
+    );
+    if (this.#pendingApproval !== null) {
+      throw createDomainError({
+        code: "invariant_violated",
+        message: "Robin can wait for only one serialized approval response.",
+      });
+    }
+    if (signal.aborted) return Promise.reject(cancelledApproval());
+    try {
+      const record = this.#journal.append("ApprovalRequested", {
+        ...request,
+        turnId: pending.turnId,
+      });
+      pending.stream.push(record);
+    } catch (error) {
+      this.#failApplication(error);
+      return Promise.reject(error);
+    }
+    return new Promise<RobinApprovalDecision>((resolve, reject) => {
+      const onAbort = (): void => {
+        const current = this.#pendingApproval;
+        if (current?.approvalId !== request.approvalId) return;
+        this.#pendingApproval = null;
+        signal.removeEventListener("abort", onAbort);
+        reject(cancelledApproval());
+      };
+      this.#pendingApproval = Object.freeze({
+        approvalId: request.approvalId,
+        callId: request.callId,
+        signal,
+        onAbort,
+        resolve,
+      });
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) onAbort();
+    });
+  }
+
+  #requireActiveLifecycleCall(callId: string, toolName: string): PendingTurn {
+    const pending = this.#active;
+    const activeTool = pending?.activeTool ?? null;
+    if (
+      pending === null ||
+      pending.terminalCommitted ||
+      activeTool === null ||
+      activeTool.callId !== callId ||
+      activeTool.toolName !== toolName
+    ) {
+      throw createDomainError({
+        code: "invariant_violated",
+        message: "A tool lifecycle fact did not match the active serialized call.",
+      });
+    }
+    return pending;
+  }
+
   #appendTerminalDecision(
     pending: PendingTurn,
     decision: TerminalDecision,
@@ -942,6 +1095,13 @@ function capturePrompt(value: string): string {
     });
   }
   return value;
+}
+
+function cancelledApproval() {
+  return createDomainError({
+    code: "cancelled",
+    message: "The pending Robin approval was cancelled.",
+  });
 }
 
 function boundedMaximumTurns(value: number): number {

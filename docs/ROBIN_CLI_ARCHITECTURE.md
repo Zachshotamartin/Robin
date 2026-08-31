@@ -4,7 +4,7 @@ Document status: normative target architecture for the Robin product pivot.
 
 Implementation status: target design, not an implementation-complete claim. The
 repository contains the accepted deterministic event/policy/context substrate
-from Milestones A and B and an unaccepted R1 candidate. The R1 composition uses
+from Milestones A and B and accepted Robin R0–R1. The R1 composition uses
 a versioned in-memory application journal, pure reducer/replay projection, and
 replay-then-live subscriber stream over a provider-neutral, multi-request
 structured loop. Its credential-free synthetic provider invokes two pinned
@@ -12,11 +12,10 @@ fixture tools. The CLI has raw TTY and append-only flat modes, queued input,
 cancellation, resize, inert bracketed paste, terminal restoration, and
 experimental headless formats.
 
-Local macOS PTY and isolated package install/execute/uninstall runs are candidate
-evidence only. The configured hosted Linux/macOS PTY, package-smoke, and
-aggregate jobs passed on candidate commit `dc39937`. R0 is accepted on
-`main` at `2c042ca`; R1 has not merged, so it remains unaccepted and its
-base-changing update requires fresh exact-head evidence. Real provider adapters,
+Local macOS PTY and isolated package install/execute/uninstall runs, the
+configured hosted Linux/macOS PTY, package-smoke, and aggregate jobs passed on
+reviewed head `9907287`. R0 is accepted on `main` at `2c042ca`; R1 merged as
+`fb64cf1`, and all nine merge-triggered jobs passed. Real provider adapters,
 physical workspace tools, API-key/credential handling, a resumable local session
 store, and the extension system remain planned until their named acceptance
 tests pass.

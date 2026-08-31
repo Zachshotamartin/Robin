@@ -1,76 +1,203 @@
 # `robin` CLI
 
-The current R1 candidate is an ephemeral, Claude Code-style coding-agent CLI
-backed by deterministic synthetic fixtures. It uses the same in-memory
-application/session path for interactive and headless execution. This is a gate
-candidate, not an accepted R1 release.
+The active R2 candidate is an ephemeral, Claude Code-style coding-agent CLI
+that operates on the current physical Git worktree. It owns the agent loop,
+tool dispatch, terminal approval flow, and repository review path. R2 is not a
+general coding model release: its only model is the credential-free,
+deterministic `synthetic-r2-v1` workflow used to prove the real tool loop. The
+candidate remains unaccepted until its complete branch gate passes and merges.
 
-Start the coding-agent experience with:
+## Start a session
+
+Build Robin from the repository, change into a Git worktree, and invoke the
+compiled entry point:
 
 ```text
 robin
-robin "initial prompt"
-robin --provider synthetic --model synthetic-r1-v1 "initial prompt"
-robin -p "one headless prompt"
-robin --print --output-format json "one headless prompt"
-robin --print --output-format stream-json "one headless prompt"
+robin "find and fix the deterministic fixture bug"
+robin --provider synthetic --model synthetic-r2-v1 "fix the fixture"
+robin --permission-mode plan "inspect without changing anything"
+robin -p "one headless inspection"
+robin --print --output-format json "one headless inspection"
+robin --print --output-format stream-json "one headless inspection"
 ```
+
+The default R2 composition requires the launch directory to be inside a
+physical Git worktree. Startup discovers and binds its canonical root, captures
+initial HEAD/branch/status facts, and prints the root, branch state, and whether
+the worktree was initially dirty. It does not silently substitute the Robin
+source checkout or an in-memory repository.
 
 With interactive stdin and stdout, a capable terminal enters raw mode and uses
 a grapheme-aware editor plus a cursor-addressed, diff-based renderer. A
 non-TTY, `TERM=dumb`, or screen-reader session selects the append-only flat
-renderer instead. Both renderers show streamed assistant text, tool boundaries,
-usage, queue state, cancellation, and the `ephemeral` session status.
+renderer. Both show streamed assistant text, tool boundaries, bounded live
+stdout/stderr with channel order, usage, queue state, cancellation, approvals,
+and the `ephemeral` session status.
 
 Press Enter to submit. While a turn is active, submitted prompts enter a
 bounded FIFO queue of at most eight messages. Raw mode responds to terminal
-resize events and treats bracketed paste as one inert text insertion: pasted
-newlines and command-looking text do not submit until a separate Enter. The
-first Ctrl-C during work requests cancellation; a second Ctrl-C inside the
-bounded escalation window forces exit with the cancellation exit code. Ctrl-D
-closes an idle session. `/help`, `/exit`, and `/quit` are available as local
-commands. Robin restores the terminal's original input mode and
-bracketed-paste state, cursor visibility, and terminal style on its tested exit
-and error paths.
+resize events and treats bracketed paste as inert text: pasted newlines and
+command-looking content do not submit until a separate Enter. The first Ctrl-C
+during work requests cancellation; a second Ctrl-C inside the bounded
+escalation window forces exit with the cancellation exit code. Ctrl-D closes an
+idle session. `/help`, `/exit`, and `/quit` are available as local commands.
+Robin restores terminal input mode, bracketed-paste state, cursor visibility,
+and style on its tested exit and error paths.
 
-The only available coding-session provider is `synthetic`, with model
-`synthetic-r1-v1`. Its deterministic first-turn fixture streams text, calls
-`robin.synthetic.workspace_summary@1` and
-`robin.synthetic.inspect_file@1` through the application tool loop, then
-answers a fixture debugging question. A follow-up answer depends on observations
-retained earlier in the same process. The tools inspect an in-memory fixture;
-they do not read or modify the current directory.
+## What the R2 fixture agent does
+
+`synthetic-r2-v1` derives each next action from the provider-neutral transcript
+and exact tool observations. It is deliberately narrow and deterministic:
+
+1. list eligible files in the bound worktree;
+2. search those explicit paths for the exact literal `total - value`;
+3. read the single matched file and bind its complete hash and size;
+4. request approval to replace that exact occurrence with `total + value`;
+5. request approval to run direct `npm test`;
+6. if the test exits nonzero, re-read the same file, recognize the exact
+   follow-up `return label.toLowerCase();` defect, request a second edit, and
+   request a second `npm test` run;
+7. after a passing test, inspect bounded Git status and the working-tree diff;
+8. report the verified edit count and explicit no-sandbox facts.
+
+An arbitrary prompt does not turn this fixture into an arbitrary model. Hosted
+providers, local model endpoints, BYOK, model discovery, provider switching,
+and external-agent adapters remain R4 or later work.
+
+The exact installed R2 tools are:
+
+| Tool | Current effect and permission |
+| --- | --- |
+| `robin.repo.list_files@1` | Bounded physical metadata listing; allowed in the bound worktree. |
+| `robin.repo.search_text@1` | Bounded literal search over an explicit released path list; allowed. |
+| `robin.repo.read_file@1` | Bounded whole/byte/line text read with classification and preimage facts; allowed. |
+| `robin.edit.apply_patch@1` | One-file exact-preimage atomic replacement; asks for one-use approval. |
+| `robin.edit.create_file@1` | Atomic creation of one absent bounded text file; asks for one-use approval. |
+| `robin.process.run@1` | Direct trusted executable plus argv with bounded output; asks for one-use approval. |
+| `robin.git.status@1` | Controlled, bounded, read-only status and attribution; allowed. |
+| `robin.git.diff@1` | Controlled, bounded working or staged diff; allowed. |
+
+No R2 tool deletes or moves a file, invokes shell command text, enables a
+workspace executable, contacts a model API, or mutates Git state. Robin does
+not stage, commit, reset, checkout, branch, merge, push, or open a pull request.
+
+## Permission modes and approval input
+
+`ask` is the default. Bounded repository and Git reads are allowed; every edit
+and process run requires a fresh approval bound to the normalized request,
+workspace and tool preconditions, and policy snapshot. The terminal displays
+the complete canonical summary and binding hashes before accepting a response.
+
+- Type exactly `y` or `allow-once`, then Enter, to grant that one action.
+- Type exactly `n` or `deny`, then Enter, to refuse it.
+- Empty Enter and unrelated text grant nothing.
+- Pasted text cannot answer an approval.
+- Ctrl-C cancels; Ctrl-D during approval never grants authority.
+- A changed request or precondition invalidates the pending authority rather
+  than executing a stale action.
+
+An allow-once grant is consumed by one exact dispatch and cannot be replayed.
+Approval and session state exist only in memory. `plan` keeps the same physical
+read tools available but policy-denies edit and process effects. Persistent
+project/user approval rules arrive in a later gate.
+
+Print mode has no trusted interactive approval channel. If its turn requests an
+edit or process run, Robin automatically denies that action instead of hanging
+or treating headless execution as consent. Consequently the current
+deterministic R2 workflow can inspect in print mode but cannot complete its
+mutable repair there.
+
+## Explicit isolation warning
+
+R2 is **not sandboxed**. Approved processes execute directly on the host with
+no filesystem isolation and no network isolation. Robin uses a reviewed system
+executable path, passes a structured argv without a shell, disables workspace
+executables, closes stdin for the fixture test, filters the inherited
+environment, bounds stdout/stderr, and owns process-group cancellation. Those
+controls reduce accidental ambiguity; they do not constrain what an approved
+host executable or its descendants can access.
+
+Run R2 only in a disposable or reviewed repository and inspect every approval.
+The session banner, approval summary, tool result, final fixture answer, JSON
+metadata, and startup facts all retain the no-sandbox claim. Strict command
+sandbox enforcement is R5 work.
+
+## Disposable two-step demonstration
+
+The deterministic provider expects both recognized defects in one source file.
+This creates a disposable Git repository whose first test still fails after the
+arithmetic fix and passes after the follow-up normalization fix:
+
+```bash
+ROBIN_SOURCE=/absolute/path/to/Robin
+ROBIN_DEMO_ROOT="$(mktemp -d)"
+cd "$ROBIN_DEMO_ROOT"
+git init -b main
+git config user.name "Robin Fixture"
+git config user.email "robin-fixture@example.invalid"
+mkdir -p src test
+npm init -y
+npm pkg set type=module scripts.test="node --test"
+printf '%s\n' \
+  'export function sum(values) {' \
+  '  return values.reduce((total, value) => total - value, 0);' \
+  '}' \
+  '' \
+  'export function normalize(label) {' \
+  '  return label.toLowerCase();' \
+  '}' > src/calculate.js
+printf '%s\n' \
+  'import test from "node:test";' \
+  'import assert from "node:assert/strict";' \
+  'import { normalize, sum } from "../src/calculate.js";' \
+  'test("fixture", () => {' \
+  '  assert.equal(sum([2, 3]), 5);' \
+  '  assert.equal(normalize("Robin"), "ROBIN");' \
+  '});' > test/calculate.test.js
+git add package.json src/calculate.js test/calculate.test.js
+git commit -m "fixture baseline"
+node "$ROBIN_SOURCE/apps/cli/dist/bin.js" "repair and verify the fixture"
+```
+
+Review four prompts: the first exact edit, first `npm test`, follow-up exact
+edit, and second `npm test`. Approving all four leaves two working-tree changes
+in `src/calculate.js`; Robin reviews them but does not stage or commit them.
+Remove the directory named by `ROBIN_DEMO_ROOT` after inspection to discard the
+disposable repository.
+
+## Headless and R1 compatibility behavior
 
 Print mode requires exactly one prompt and never enters raw mode. `text` emits
 the final answer, `json` emits one versioned result envelope containing the
-application events, and `stream-json` emits one JSON object per versioned
-application event with a monotonic sequence. Both machine formats declare
-`stability: "experimental"`; their stable automation contract remains assigned
-to a later release gate.
-`--maximum-turns` is bounded from 1 through 256; the current one-prompt
-invocation consumes only one turn. `--no-save` is an explicit statement of the
-current ephemeral behavior. Raw API keys are never accepted in arguments.
+application events, and `stream-json` emits one JSON object per versioned event
+with a monotonic sequence. R2 machine output includes bound workspace, branch,
+initial-dirty, and explicit isolation facts. Both machine formats declare
+`stability: "experimental"`; their stable automation contract remains R7 work.
+`--maximum-turns` is bounded from 1 through 256. `--no-save` explicitly states
+the current ephemeral behavior. Raw API keys are never accepted in argv.
 
-Provider text is sanitized before terminal rendering so ESC, BEL, carriage
-return, C1 control bytes, and other unsafe controls are displayed as escaped
-text. Machine modes preserve the parsed semantic string while serializing
-terminal controls and Unicode line separators as standard JSON escapes, and
-contain no ANSI presentation bytes.
+Provider, repository, filename, tool, and process text is sanitized before
+terminal rendering so ESC, BEL, carriage return, C1 controls, and other unsafe
+controls appear escaped. Machine modes preserve semantic strings through JSON
+escaping and contain no ANSI presentation bytes.
 
-Every coding session is in-memory and disappears at exit. The R1 candidate has
-no physical repository access, file editing, command/process execution, Git
-integration, network access, provider API calls, credentials/API keys, durable
-save, continuation, or resume. `ask` remains the preview spelling for the
-future `default` permission mode; `plan` is also accepted. The two pinned,
-non-consequential synthetic fixture tools are the only tool effects.
+The accepted immutable R1 fixture remains available explicitly:
 
-The raw-terminal scenarios are verified locally under a real macOS PTY,
-including two turns, the two fixture tools, queue promotion, resize, paste,
-single/double interrupt behavior, failure paths, and terminal restoration.
-Required hosted Linux and hosted macOS evidence is still pending, so this
-documentation does not claim that R1 is accepted. See
-[Terminal Compatibility](../../docs/TERMINAL_COMPATIBILITY.md) for the exact
-matrix and fallback behavior.
+```text
+robin --model synthetic-r1-v1 "inspect the in-memory fixture"
+```
+
+That model uses the two R1 synthetic read-only tools and does not inspect or
+modify the launch directory. It is retained for compatibility and R1 evidence;
+`synthetic-r2-v1` is the default on the active R2 branch.
+
+Every R2 coding session and approval disappears at exit. There is no durable
+save, continuation, resume, crash recovery, credential record, provider API
+call, or supported global release channel. See
+[Terminal Compatibility](../../docs/TERMINAL_COMPATIBILITY.md) for the accepted
+R1 matrix; R2 adds candidate approval and live-output PTY coverage without
+retroactively widening R1.
 
 Retained compatibility commands are:
 

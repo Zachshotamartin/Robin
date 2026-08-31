@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { canonicalSha256Hex } from "@guard/contracts";
+
 import {
+  MAXIMUM_TOOL_OUTPUT_DELTA_TEXT_UTF8_BYTES,
+  MAXIMUM_TOOL_OUTPUT_SOURCE_BYTES_PER_CALL,
+  MAXIMUM_TOOL_OUTPUT_TEXT_UTF8_BYTES_PER_CALL,
   RobinSessionError,
   parseRobinApplicationEvent,
   type RobinTurnApplicationEvent,
@@ -9,6 +14,16 @@ import {
 import { classifyRobinBudget } from "./budgets.js";
 import { reduceRobinTurn } from "./turn-reducer.js";
 import type { RobinTurnState } from "./turn-state.js";
+
+const ACTION_ID = "act_018f05a0-7b01-7000-8000-000000000081";
+const APPROVAL_ID = "apr_018f05a0-7b01-7000-8000-000000000082";
+const POLICY_VERSION_ID = "pol_018f05a0-7b01-7000-8000-000000000083";
+const OTHER_ACTION_ID = "act_018f05a0-7b01-7000-8000-000000000084";
+const OTHER_APPROVAL_ID = "apr_018f05a0-7b01-7000-8000-000000000085";
+const DISPLAYED_SUMMARY = Object.freeze({
+  schemaVersion: 1,
+  operation: "Apply exact patch to src/index.ts",
+});
 
 test("reduces the complete legal synthetic-tool turn and seals terminal state", () => {
   let state = apply(undefined, "UserMessageAccepted", {
@@ -29,6 +44,12 @@ test("reduces the complete legal synthetic-tool turn and seals terminal state", 
     toolName: "robin.synthetic.inspect_file@1",
     turnId: "turn-1",
   });
+  state = apply(state, "PermissionDecided", permissionDecisionPayload({
+    callId: "call-1",
+    effect: "allow",
+    toolName: "robin.synthetic.inspect_file@1",
+    winningPolicyName: null,
+  }));
   state = apply(state, "ToolCallCompleted", {
     callId: "call-1",
     observation: { hash: "abc" },
@@ -178,12 +199,260 @@ test("tool calls are unique, paired, and serialized", () => {
   assert.equal(withNextTool.toolCalls[1]?.status, "active");
 });
 
+test("approval request and allow-once resolution bind the exact active tool", () => {
+  let state = apply(activeTurn(), "ToolCallStarted", {
+    callId: "call-1",
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+  });
+  state = apply(state, "PermissionDecided", permissionDecisionPayload());
+  state = apply(state, "ApprovalRequested", approvalRequestPayload());
+  assert.deepEqual(state.toolCalls[0]?.approval, {
+    ...approvalRequestPayload(),
+    status: "pending",
+  });
+  assert.equal(Object.isFrozen(state.toolCalls[0]?.approval), true);
+
+  state = apply(state, "ApprovalResolved", approvalResolutionPayload());
+  assert.deepEqual(state.toolCalls[0]?.approval, {
+    ...approvalRequestPayload(),
+    decision: "allow_once",
+    outcome: "granted",
+    resolvedAt: "2026-08-30T12:00:30.000Z",
+    status: "granted",
+  });
+  state = apply(state, "ToolCallCompleted", {
+    callId: "call-1",
+    observation: { changed: true },
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+  });
+  assert.equal(state.toolCalls[0]?.status, "completed");
+  assert.equal(state.toolCalls[0]?.approval?.status, "granted");
+});
+
+test("approval denial and staleness are terminal one-use decisions", () => {
+  for (const resolution of [
+    { decision: "deny", outcome: "denied", resolvedAt: "2026-08-30T12:00:30.000Z" },
+    { decision: "allow_once", outcome: "stale", resolvedAt: "2026-08-30T12:05:00.000Z" },
+  ] as const) {
+    let state = apply(activeTurn(), "ToolCallStarted", {
+      callId: "call-1",
+      toolName: "robin.edit.apply_patch@1",
+      turnId: "turn-1",
+    });
+    state = apply(state, "PermissionDecided", permissionDecisionPayload());
+    state = apply(state, "ApprovalRequested", approvalRequestPayload());
+    state = apply(
+      state,
+      "ApprovalResolved",
+      approvalResolutionPayload(resolution),
+    );
+    assert.equal(state.toolCalls[0]?.approval?.status, resolution.outcome);
+    assertIllegal(() =>
+      apply(
+        state,
+        "ApprovalResolved",
+        approvalResolutionPayload(resolution),
+      ),
+    );
+    assertIllegal(() =>
+      apply(state, "ApprovalRequested", approvalRequestPayload()),
+    );
+    state = apply(state, "ToolCallCompleted", {
+      callId: "call-1",
+      observation: {
+        effectOccurred: false,
+        reason: resolution.outcome,
+      },
+      toolName: "robin.edit.apply_patch@1",
+      turnId: "turn-1",
+    });
+    assert.equal(state.toolCalls[0]?.status, "completed");
+  }
+});
+
+test("a granted approval can be invalidated exactly once before execution", () => {
+  let state = apply(activeTurn(), "ToolCallStarted", {
+    callId: "call-1",
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+  });
+  assertIllegal(() =>
+    apply(state, "ApprovalInvalidated", approvalInvalidationPayload()),
+  );
+  state = apply(state, "PermissionDecided", permissionDecisionPayload());
+  state = apply(state, "ApprovalRequested", approvalRequestPayload());
+  assertIllegal(() =>
+    apply(state, "ApprovalInvalidated", approvalInvalidationPayload()),
+  );
+  state = apply(state, "ApprovalResolved", approvalResolutionPayload());
+  for (const mutation of approvalBindingMutations()) {
+    assertIllegal(() =>
+      apply(
+        state,
+        "ApprovalInvalidated",
+        approvalInvalidationPayload(mutation),
+      ),
+    );
+  }
+  state = apply(state, "ApprovalInvalidated", approvalInvalidationPayload());
+  assert.deepEqual(state.toolCalls[0]?.approval, {
+    ...approvalRequestPayload(),
+    decision: "allow_once",
+    invalidatedAt: "2026-08-30T12:01:00.000Z",
+    invalidationReason: "preconditions_changed",
+    observedPreconditionHash: "e".repeat(64),
+    outcome: "stale",
+    resolvedAt: "2026-08-30T12:00:30.000Z",
+    status: "stale",
+  });
+  assertIllegal(() =>
+    apply(state, "ApprovalInvalidated", approvalInvalidationPayload()),
+  );
+  assertIllegal(() =>
+    apply(state, "ToolCallCompleted", {
+      callId: "call-1",
+      observation: { effectOccurred: true },
+      toolName: "robin.edit.apply_patch@1",
+      turnId: "turn-1",
+    }),
+  );
+  state = apply(state, "ToolCallCompleted", {
+    callId: "call-1",
+    observation: {
+      effectOccurred: false,
+      reason: "preconditions_changed",
+    },
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+  });
+  assert.equal(state.toolCalls[0]?.status, "completed");
+  assert.equal(state.toolCalls[0]?.approval?.status, "stale");
+});
+
+test("approval sequencing rejects unmatched, duplicate, and rebound decisions", () => {
+  const active = activeTurn();
+  assertIllegal(() =>
+    apply(active, "ApprovalRequested", approvalRequestPayload()),
+  );
+  let state = apply(active, "ToolCallStarted", {
+    callId: "call-1",
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+  });
+  assertIllegal(() =>
+    apply(state, "ApprovalRequested", approvalRequestPayload()),
+  );
+  state = apply(state, "PermissionDecided", permissionDecisionPayload());
+  assertIllegal(() =>
+    apply(state, "PermissionDecided", permissionDecisionPayload()),
+  );
+  assertIllegal(() =>
+    apply(
+      state,
+      "ApprovalRequested",
+      approvalRequestPayload({ callId: "call-other" }),
+    ),
+  );
+  assertIllegal(() =>
+    apply(state, "ApprovalResolved", approvalResolutionPayload()),
+  );
+  state = apply(state, "ApprovalRequested", approvalRequestPayload());
+  assertIllegal(() =>
+    apply(state, "ApprovalRequested", approvalRequestPayload()),
+  );
+  for (const mutation of approvalBindingMutations()) {
+    assertIllegal(() =>
+      apply(
+        state,
+        "ApprovalResolved",
+        approvalResolutionPayload(mutation),
+      ),
+    );
+  }
+  assertIllegal(() =>
+    apply(state, "ToolCallCompleted", {
+      callId: "call-1",
+      observation: {},
+      toolName: "robin.edit.apply_patch@1",
+      turnId: "turn-1",
+    }),
+  );
+});
+
+test("cancellation and terminal failure deterministically invalidate pending approval", () => {
+  let cancelling = apply(activeTurn(), "ToolCallStarted", {
+    callId: "call-1",
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+  });
+  cancelling = apply(
+    cancelling,
+    "PermissionDecided",
+    permissionDecisionPayload(),
+  );
+  cancelling = apply(
+    cancelling,
+    "ApprovalRequested",
+    approvalRequestPayload(),
+  );
+  cancelling = apply(cancelling, "TurnCancellationRequested", {
+    reason: "user",
+    turnId: "turn-1",
+  });
+  assert.equal(cancelling.toolCalls[0]?.approval?.status, "cancelled");
+  assert.equal(
+    cancelling.toolCalls[0]?.approval?.resolvedAt,
+    "2026-08-30T00:00:00.000Z",
+  );
+  assertIllegal(() =>
+    apply(
+      cancelling,
+      "ApprovalResolved",
+      approvalResolutionPayload(),
+    ),
+  );
+  cancelling = apply(cancelling, "ToolCallFailed", {
+    callId: "call-1",
+    code: "cancelled",
+    message: "approval wait cancelled",
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+  });
+  cancelling = apply(cancelling, "TurnCancelled", {
+    reason: "settled",
+    turnId: "turn-1",
+  });
+  assert.equal(cancelling.status, "cancelled");
+
+  let failed = apply(activeTurn(), "ToolCallStarted", {
+    callId: "call-1",
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+  });
+  failed = apply(failed, "PermissionDecided", permissionDecisionPayload());
+  failed = apply(failed, "ApprovalRequested", approvalRequestPayload());
+  failed = apply(failed, "TurnFailed", {
+    code: "infrastructure_failed",
+    message: "approval broker failed",
+    turnId: "turn-1",
+  });
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.toolCalls[0]?.approval?.status, "invalidated");
+});
+
 test("cancellation waits for an active tool to settle", () => {
   let state = apply(activeTurn(), "ToolCallStarted", {
     callId: "call-1",
     toolName: "tool@1",
     turnId: "turn-1",
   });
+  state = apply(state, "PermissionDecided", permissionDecisionPayload({
+    effect: "allow",
+    toolName: "tool@1",
+    winningPolicyName: null,
+  }));
   state = apply(state, "TurnCancellationRequested", {
     reason: "user",
     turnId: "turn-1",
@@ -207,6 +476,58 @@ test("cancellation waits for an active tool to settle", () => {
     turnId: "turn-1",
   });
   assert.equal(state.status, "cancelled");
+});
+
+test("permission is exactly once and controls direct completion semantics", () => {
+  for (const effect of ["allow", "deny"] as const) {
+    let state = apply(activeTurn(), "ToolCallStarted", {
+      callId: "call-1",
+      toolName: "tool@1",
+      turnId: "turn-1",
+    });
+    assertIllegal(() =>
+      apply(state, "ToolCallCompleted", {
+        callId: "call-1",
+        observation: {},
+        toolName: "tool@1",
+        turnId: "turn-1",
+      }),
+    );
+    state = apply(state, "PermissionDecided", permissionDecisionPayload({
+      effect,
+      toolName: "tool@1",
+      winningPolicyName: effect === "allow" ? null : "r2.plan.deny",
+    }));
+    assert.equal(state.toolCalls[0]?.permission?.effect, effect);
+    assertIllegal(() =>
+      apply(state, "PermissionDecided", permissionDecisionPayload({
+        effect,
+        toolName: "tool@1",
+      })),
+    );
+    assertIllegal(() =>
+      apply(state, "ApprovalRequested", approvalRequestPayload({
+        toolName: "tool@1",
+      })),
+    );
+    if (effect === "deny") {
+      assertIllegal(() =>
+        apply(state, "ToolCallCompleted", {
+          callId: "call-1",
+          observation: { effectOccurred: true },
+          toolName: "tool@1",
+          turnId: "turn-1",
+        }),
+      );
+    }
+    state = apply(state, "ToolCallCompleted", {
+      callId: "call-1",
+      observation: effect === "deny" ? { effectOccurred: false } : { ok: true },
+      toolName: "tool@1",
+      turnId: "turn-1",
+    });
+    assert.equal(state.toolCalls[0]?.status, "completed");
+  }
 });
 
 test("a classified tool failure settles cancellation truthfully", () => {
@@ -241,6 +562,7 @@ test("a classified tool failure settles cancellation truthfully", () => {
       code: "cancelled",
       message: "tool cancellation confirmed",
     },
+    outputDeltas: [],
     status: "failed",
     toolName: "tool@1",
   });
@@ -259,6 +581,207 @@ test("a classified tool failure settles cancellation truthfully", () => {
     turnId: "turn-1",
   });
   assert.equal(state.status, "cancelled");
+});
+
+test("tool output binds to the exact active call without granting execution authority", () => {
+  let state = apply(activeTurn(), "ToolCallStarted", {
+    callId: "call-1",
+    toolName: "robin.process.run@1",
+    turnId: "turn-1",
+  });
+  assertIllegal(() =>
+    apply(state, "ToolOutputDelta", toolOutputPayload()),
+  );
+  state = apply(state, "PermissionDecided", permissionDecisionPayload({
+    effect: "allow",
+    toolName: "robin.process.run@1",
+    winningPolicyName: null,
+  }));
+  const permissionBefore = state.toolCalls[0]?.permission;
+  state = apply(state, "ToolOutputDelta", toolOutputPayload({
+    safeText: "first\u001b[31m",
+  }));
+  assert.equal(state.toolCalls[0]?.permission, permissionBefore);
+  assert.equal(state.toolCalls[0]?.permission?.effect, "allow");
+  assert.deepEqual(state.toolCalls[0]?.outputDeltas, [
+    {
+      byteLength: 5,
+      callId: "call-1",
+      channel: "stdout",
+      limitExceeded: false,
+      safeText: "first\\u{1b}[31m",
+      sequence: 1,
+      textTruncated: false,
+      toolName: "robin.process.run@1",
+      turnId: "turn-1",
+    },
+  ]);
+  assert.equal(Object.isFrozen(state.toolCalls[0]?.outputDeltas), true);
+  assert.equal(Object.isFrozen(state.toolCalls[0]?.outputDeltas[0]), true);
+  assertIllegal(() =>
+    apply(state, "ToolOutputDelta", toolOutputPayload({
+      callId: "call-other",
+      sequence: 2,
+    })),
+  );
+  assertIllegal(() =>
+    apply(state, "ToolOutputDelta", toolOutputPayload({
+      sequence: 3,
+    })),
+  );
+  assertIllegal(() =>
+    apply(state, "ToolOutputDelta", toolOutputPayload({
+      sequence: 2,
+      toolName: "robin.process.other@1",
+    })),
+  );
+
+  const permission = state.toolCalls[0]!.permission;
+  state = apply(state, "ToolOutputDelta", toolOutputPayload({
+    byteLength: 3,
+    channel: "stderr",
+    safeText: "two",
+    sequence: 2,
+  }));
+  assert.equal(state.toolCalls[0]?.permission, permission);
+  state = apply(state, "ToolCallCompleted", {
+    callId: "call-1",
+    observation: { classification: "success" },
+    toolName: "robin.process.run@1",
+    turnId: "turn-1",
+  });
+  assert.equal(state.toolCalls[0]?.status, "completed");
+  assert.equal(state.toolCalls[0]?.outputDeltas.length, 2);
+  assertIllegal(() =>
+    apply(state, "ToolOutputDelta", toolOutputPayload({ sequence: 3 })),
+  );
+
+  let approvalGated = apply(activeTurn(), "ToolCallStarted", {
+    callId: "call-1",
+    toolName: "robin.process.run@1",
+    turnId: "turn-1",
+  });
+  approvalGated = apply(
+    approvalGated,
+    "PermissionDecided",
+    permissionDecisionPayload({ toolName: "robin.process.run@1" }),
+  );
+  approvalGated = apply(
+    approvalGated,
+    "ApprovalRequested",
+    approvalRequestPayload({ toolName: "robin.process.run@1" }),
+  );
+  assertIllegal(() =>
+    apply(approvalGated, "ToolOutputDelta", toolOutputPayload()),
+  );
+  approvalGated = apply(
+    approvalGated,
+    "ApprovalResolved",
+    approvalResolutionPayload({ toolName: "robin.process.run@1" }),
+  );
+  approvalGated = apply(
+    approvalGated,
+    "ToolOutputDelta",
+    toolOutputPayload(),
+  );
+  assert.equal(approvalGated.toolCalls[0]?.approval?.status, "granted");
+  assert.equal(approvalGated.toolCalls[0]?.outputDeltas.length, 1);
+});
+
+test("tool output remains ordered during cancellation and enforces aggregate bounds", () => {
+  let cancelling = apply(activeTurn(), "ToolCallStarted", {
+    callId: "call-1",
+    toolName: "robin.process.run@1",
+    turnId: "turn-1",
+  });
+  cancelling = apply(cancelling, "PermissionDecided", permissionDecisionPayload({
+    effect: "allow",
+    toolName: "robin.process.run@1",
+    winningPolicyName: null,
+  }));
+  cancelling = apply(cancelling, "TurnCancellationRequested", {
+    reason: "user",
+    turnId: "turn-1",
+  });
+  cancelling = apply(cancelling, "ToolOutputDelta", toolOutputPayload({
+    limitExceeded: true,
+  }));
+  assertIllegal(() =>
+    apply(cancelling, "ToolOutputDelta", toolOutputPayload({
+      limitExceeded: false,
+      sequence: 2,
+    })),
+  );
+  cancelling = apply(cancelling, "ToolOutputDelta", toolOutputPayload({
+    channel: "stderr",
+    limitExceeded: true,
+    safeText: "settling",
+    sequence: 2,
+  }));
+  cancelling = apply(cancelling, "ToolCallFailed", {
+    callId: "call-1",
+    code: "cancelled",
+    message: "process group settled",
+    toolName: "robin.process.run@1",
+    turnId: "turn-1",
+  });
+  assert.equal(cancelling.toolCalls[0]?.outputDeltas.length, 2);
+
+  let sourceBound = apply(activeTurn(), "ToolCallStarted", {
+    callId: "call-1",
+    toolName: "robin.process.run@1",
+    turnId: "turn-1",
+  });
+  sourceBound = apply(sourceBound, "PermissionDecided", permissionDecisionPayload({
+    effect: "allow",
+    toolName: "robin.process.run@1",
+    winningPolicyName: null,
+  }));
+  sourceBound = apply(sourceBound, "ToolOutputDelta", toolOutputPayload({
+    byteLength: MAXIMUM_TOOL_OUTPUT_SOURCE_BYTES_PER_CALL,
+    safeText: "",
+  }));
+  assertIllegal(() =>
+    apply(sourceBound, "ToolOutputDelta", toolOutputPayload({
+      byteLength: 1,
+      safeText: "",
+      sequence: 2,
+    })),
+  );
+
+  let textBound = apply(activeTurn(), "ToolCallStarted", {
+    callId: "call-1",
+    toolName: "robin.process.run@1",
+    turnId: "turn-1",
+  });
+  textBound = apply(textBound, "PermissionDecided", permissionDecisionPayload({
+    effect: "allow",
+    toolName: "robin.process.run@1",
+    winningPolicyName: null,
+  }));
+  const fullChunk = "x".repeat(MAXIMUM_TOOL_OUTPUT_DELTA_TEXT_UTF8_BYTES);
+  const fullChunks = Math.floor(
+    MAXIMUM_TOOL_OUTPUT_TEXT_UTF8_BYTES_PER_CALL /
+      MAXIMUM_TOOL_OUTPUT_DELTA_TEXT_UTF8_BYTES,
+  );
+  for (let sequence = 1; sequence <= fullChunks; sequence += 1) {
+    textBound = apply(textBound, "ToolOutputDelta", toolOutputPayload({
+      byteLength: 1,
+      safeText: fullChunk,
+      sequence,
+    }));
+  }
+  assert.equal(
+    textBound.toolCalls[0]?.outputDeltas.length,
+    fullChunks,
+  );
+  assertIllegal(() =>
+    apply(textBound, "ToolOutputDelta", toolOutputPayload({
+      byteLength: 1,
+      safeText: "x",
+      sequence: fullChunks + 1,
+    })),
+  );
 });
 
 test("completion text must equal accumulated deltas and active turns may fail", () => {
@@ -331,6 +854,11 @@ test("rejects every event that cannot create a turn and wrong-turn events", () =
     ["TurnStarted", { messageId: "message-1", turnId: "turn-1" }],
     ["AssistantTextDelta", { text: "x", turnId: "turn-1" }],
     ["ToolCallStarted", { callId: "call-1", toolName: "tool@1", turnId: "turn-1" }],
+    ["ToolOutputDelta", toolOutputPayload()],
+    ["PermissionDecided", permissionDecisionPayload()],
+    ["ApprovalRequested", approvalRequestPayload()],
+    ["ApprovalResolved", approvalResolutionPayload()],
+    ["ApprovalInvalidated", approvalInvalidationPayload()],
     ["ToolCallCompleted", { callId: "call-1", observation: {}, toolName: "tool@1", turnId: "turn-1" }],
     ["ToolCallFailed", { callId: "call-1", code: "action_failed", message: "failed", toolName: "tool@1", turnId: "turn-1" }],
     ["UsageReported", { inputTokens: 1, outputTokens: 1, turnId: "turn-1" }],
@@ -378,6 +906,11 @@ test("all terminal turn states reject every later turn event", () => {
     ["TurnStarted", { messageId: "message-1", turnId: "turn-1" }],
     ["AssistantTextDelta", { text: "x", turnId: "turn-1" }],
     ["ToolCallStarted", { callId: "call-1", toolName: "tool@1", turnId: "turn-1" }],
+    ["ToolOutputDelta", toolOutputPayload()],
+    ["PermissionDecided", permissionDecisionPayload()],
+    ["ApprovalRequested", approvalRequestPayload()],
+    ["ApprovalResolved", approvalResolutionPayload()],
+    ["ApprovalInvalidated", approvalInvalidationPayload()],
     ["ToolCallCompleted", { callId: "call-1", observation: {}, toolName: "tool@1", turnId: "turn-1" }],
     ["ToolCallFailed", { callId: "call-1", code: "action_failed", message: "failed", toolName: "tool@1", turnId: "turn-1" }],
     ["UsageReported", { inputTokens: 1, outputTokens: 1, turnId: "turn-1" }],
@@ -423,6 +956,106 @@ function apply(
     type,
   }) as RobinTurnApplicationEvent;
   return reduceRobinTurn(state, event);
+}
+
+function toolOutputPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    byteLength: 5,
+    callId: "call-1",
+    channel: "stdout",
+    limitExceeded: false,
+    safeText: "first",
+    sequence: 1,
+    textTruncated: false,
+    toolName: "robin.process.run@1",
+    turnId: "turn-1",
+    ...overrides,
+  });
+}
+
+function approvalRequestPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    actionHash: "a".repeat(64),
+    actionId: ACTION_ID,
+    approvalId: APPROVAL_ID,
+    callId: "call-1",
+    displayedSummary: DISPLAYED_SUMMARY,
+    displayedSummaryHash: canonicalSha256Hex(DISPLAYED_SUMMARY),
+    expiresAt: "2026-08-30T12:05:00.000Z",
+    normalizedRequestHash: "b".repeat(64),
+    policySnapshotHash: "d".repeat(64),
+    preconditionHash: "c".repeat(64),
+    requestedAt: "2026-08-30T12:00:00.000Z",
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+    ...overrides,
+  });
+}
+
+function permissionDecisionPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    actionHash: "a".repeat(64),
+    actionId: ACTION_ID,
+    callId: "call-1",
+    effect: "require_approval",
+    policySnapshotHash: "d".repeat(64),
+    policyVersionId: POLICY_VERSION_ID,
+    toolName: "robin.edit.apply_patch@1",
+    turnId: "turn-1",
+    winningPolicyName: "r2.default.edit.ask",
+    ...overrides,
+  });
+}
+
+function approvalResolutionPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  const requested = approvalRequestPayload();
+  const { displayedSummary: _displayedSummary, ...binding } = requested;
+  return Object.freeze({
+    ...binding,
+    decision: "allow_once",
+    outcome: "granted",
+    resolvedAt: "2026-08-30T12:00:30.000Z",
+    ...overrides,
+  });
+}
+
+function approvalInvalidationPayload(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  const requested = approvalRequestPayload();
+  const { displayedSummary: _displayedSummary, ...binding } = requested;
+  return Object.freeze({
+    ...binding,
+    invalidatedAt: "2026-08-30T12:01:00.000Z",
+    observedPreconditionHash: "e".repeat(64),
+    reason: "preconditions_changed",
+    ...overrides,
+  });
+}
+
+function approvalBindingMutations(): readonly Readonly<Record<string, unknown>>[] {
+  return Object.freeze([
+    Object.freeze({ actionHash: "f".repeat(64) }),
+    Object.freeze({ actionId: OTHER_ACTION_ID }),
+    Object.freeze({ approvalId: OTHER_APPROVAL_ID }),
+    Object.freeze({ callId: "call-other" }),
+    Object.freeze({ displayedSummaryHash: "f".repeat(64) }),
+    Object.freeze({ expiresAt: "2026-08-30T12:06:00.000Z" }),
+    Object.freeze({ normalizedRequestHash: "f".repeat(64) }),
+    Object.freeze({ policySnapshotHash: "f".repeat(64) }),
+    Object.freeze({ preconditionHash: "f".repeat(64) }),
+    Object.freeze({ requestedAt: "2026-08-30T11:59:00.000Z" }),
+    Object.freeze({ toolName: "robin.process.run@1" }),
+    Object.freeze({ turnId: "turn-other" }),
+  ]);
 }
 
 function assertIllegal(callback: () => unknown): void {

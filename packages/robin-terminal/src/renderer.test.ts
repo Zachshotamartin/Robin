@@ -9,7 +9,10 @@ import {
   StaleTerminalFrameError,
   wrapCells,
   writeTerminalFrame,
+  renderApprovalRequestBlock,
+  renderToolOutputLines,
 } from "./renderer.js";
+import type { TerminalApprovalRequest } from "./approval.js";
 import { detectTerminalCapabilities } from "./terminal-capabilities.js";
 
 function capability(columns: number, rows = 24) {
@@ -225,3 +228,190 @@ test("ASCII fallback headers and multiline prompt cursors are deterministic", ()
   assert.deepEqual(multilineFrame.rows.slice(-2), ["> one", "two"]);
   assert.deepEqual(multilineFrame.cursor, { row: 3, column: 4 });
 });
+
+test("approval rendering is complete, deterministic, and control-injection safe", () => {
+  const request: TerminalApprovalRequest = Object.freeze({
+    actionHash: "1".repeat(64),
+    actionId: "act-safe\u001b[2J",
+    approvalId: "apr-safe\u0007",
+    callId: "call-safe\rspoof",
+    displayedSummaryHash: "2".repeat(64),
+    expiresAt: "2026-08-30T02:05:00.000Z",
+    normalizedRequestHash: "3".repeat(64),
+    policySnapshotHash: "4".repeat(64),
+    preconditionHash: "5".repeat(64),
+    requestedAt: "2026-08-30T02:00:01.000Z",
+    toolName: "robin.edit.apply@1\tspoof",
+    turnId: "turn-safe",
+    canonicalSummary:
+      '{"command":"printf \\"complete summary\\"","sandboxed":false}',
+  });
+  const block = renderApprovalRequestBlock(request);
+  assert.equal(block.includes("\u001b"), false);
+  assert.equal(block.includes("\u0007"), false);
+  assert.equal(block.includes("\r"), false);
+  assert.equal(block.includes("\t"), false);
+  assert.match(block, /act-safe\\u\{1b\}\[2J/u);
+  assert.match(block, /apr-safe\\u\{07\}/u);
+  assert.match(block, /Canonical summary: \{"command"/u);
+  assert.match(block, /there is no default decision/u);
+  for (const label of [
+    "Tool:",
+    "Approval ID:",
+    "Action ID:",
+    "Call ID:",
+    "Turn ID:",
+    "Action hash:",
+    "Normalized request hash:",
+    "Precondition hash:",
+    "Policy snapshot hash:",
+    "Displayed summary hash:",
+  ]) {
+    assert.equal(block.includes(label), true, label);
+  }
+
+  let state = applyApproval(createReplState({ columns: 160, rows: 80 }), request);
+  const frame = buildTerminalFrame(state, capability(160, 80));
+  assert.equal(frame.rows.some((row) => row.startsWith("approval> ")), true);
+  assert.equal(frame.rows.join("\n").includes("complete summary"), true);
+  const identity = state.approval;
+  state = reduceRepl(state, {
+    type: "key",
+    key: { type: "resize", columns: 100, rows: 50 },
+  }).state;
+  assert.equal(state.approval, identity);
+});
+
+test("tool output labels every stdout and stderr line without interpreting controls", () => {
+  const lines = renderToolOutputLines({
+    byteLength: 19,
+    callId: "call-output\u001b]52;bad\u0007",
+    channel: "stderr",
+    limitExceeded: true,
+    name: "robin.process.run@1\u001b[31m",
+    safeText: "first\u001b[2J\nsecond\rline",
+    sequence: 7,
+    textTruncated: true,
+  });
+  assert.equal(lines.length, 2);
+  assert.equal(lines.every((line) => line.includes("[stderr #7]")), true);
+  assert.equal(lines.every((line) => line.includes("text_truncated=true")), true);
+  assert.equal(lines.every((line) => line.includes("limit_exceeded=true")), true);
+  assert.equal(lines.join("\n").includes("\u001b"), false);
+  assert.equal(lines.join("\n").includes("\u0007"), false);
+  assert.equal(lines.join("\n").includes("\r"), false);
+  assert.match(lines[0]!, /first\\u\{1b\}\[2J/u);
+  assert.match(lines[1]!, /second\\u\{0d\}line/u);
+});
+
+test("completed output cannot hide later lifecycle and final state in 24 rows", () => {
+  let state = reduceRepl(createReplState({ columns: 80, rows: 24 }), {
+    type: "turn_started",
+  }).state;
+  for (let index = 0; index < 10; index += 1) {
+    const callId = `history-${index}`;
+    state = reduceRepl(state, {
+      type: "tool_started",
+      callId,
+      name: `robin.repo.history_${index}@1`,
+    }).state;
+    state = reduceRepl(state, {
+      type: "tool_completed",
+      callId,
+      summary: `historical result ${index} ` + "y".repeat(140),
+    }).state;
+  }
+  state = reduceRepl(state, {
+    type: "tool_started",
+    callId: "process-call",
+    name: "robin.process.run@1",
+  }).state;
+  for (let sequence = 1; sequence <= 12; sequence += 1) {
+    state = reduceRepl(state, {
+      type: "tool_output",
+      byteLength: 60,
+      callId: "process-call",
+      channel: sequence % 2 === 0 ? "stderr" : "stdout",
+      limitExceeded: false,
+      name: "robin.process.run@1",
+      safeText: `${sequence}:` + "x".repeat(58),
+      sequence,
+      textTruncated: false,
+    }).state;
+  }
+  const liveFrame = buildTerminalFrame(state, capability(80, 24));
+  assert.match(liveFrame.rows.join("\n"), /\[(?:stdout|stderr) #12\]/u);
+
+  state = reduceRepl(state, {
+    type: "tool_completed",
+    callId: "process-call",
+    summary: "direct test passed",
+  }).state;
+  for (const [callId, name, summary] of [
+    ["status-call", "robin.git.status@1", "working tree inspected"],
+    ["diff-call", "robin.git.diff@1", "diff inspected"],
+  ] as const) {
+    state = reduceRepl(state, { type: "tool_started", callId, name }).state;
+    state = reduceRepl(state, {
+      type: "tool_completed",
+      callId,
+      summary,
+    }).state;
+  }
+  state = reduceRepl(state, {
+    type: "turn_completed",
+    text: "Repair verified and final diff reviewed.",
+  }).state;
+
+  const finalFrame = buildTerminalFrame(state, capability(80, 24));
+  const finalText = finalFrame.rows.join("\n");
+  assert.match(finalFrame.rows[0] ?? "", /^Robin · ready · 80x24/u);
+  assert.match(finalFrame.rows.at(-1) ?? "", /^> /u);
+  assert.equal(finalText.includes("Tool output"), false);
+  const processPosition = finalText.indexOf("robin.process.run@1");
+  const statusPosition = finalText.indexOf("robin.git.status@1");
+  const diffPosition = finalText.indexOf("robin.git.diff@1");
+  const finalPosition = finalText.indexOf("Repair verified");
+  assert.equal(processPosition >= 0, true);
+  assert.equal(statusPosition > processPosition, true);
+  assert.equal(diffPosition > statusPosition, true);
+  assert.equal(finalPosition > diffPosition, true);
+});
+
+test("pinned headers preserve prompt cursor bounds at tiny and wrapped sizes", () => {
+  let state = reduceRepl(createReplState({ columns: 40, rows: 2 }), {
+    type: "key",
+    key: { type: "text", text: "hello" },
+  }).state;
+  const tiny = buildTerminalFrame(state, capability(40, 2));
+  assert.equal(tiny.rows.length, 2);
+  assert.match(tiny.rows[0] ?? "", /^Robin · ready/u);
+  assert.equal(tiny.rows[1], "> hello");
+  assert.deepEqual(tiny.cursor, { row: 2, column: 8 });
+
+  state = reduceRepl(state, {
+    type: "key",
+    key: { type: "resize", columns: 8, rows: 3 },
+  }).state;
+  const wrapped = buildTerminalFrame(state, capability(8, 3));
+  assert.equal(wrapped.rows.length, 3);
+  assert.match(wrapped.rows[0] ?? "", /^Robin/u);
+  assert.ok(wrapped.cursor.row >= 1 && wrapped.cursor.row <= wrapped.rows.length);
+  assert.ok(wrapped.cursor.column >= 1 && wrapped.cursor.column <= 8);
+
+  const single = buildTerminalFrame(state, capability(8, 1));
+  assert.deepEqual(single.rows, ["Robin · "]);
+  assert.deepEqual(single.cursor, { row: 1, column: 8 });
+});
+
+function applyApproval(
+  initial: ReplState,
+  request: TerminalApprovalRequest,
+): ReplState {
+  let state = reduceRepl(initial, { type: "turn_started" }).state;
+  state = reduceRepl(state, { type: "approval_requested", request }).state;
+  return reduceRepl(state, {
+    type: "approval_presented",
+    approvalId: request.approvalId,
+  }).state;
+}

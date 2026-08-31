@@ -9,6 +9,7 @@ import { reduceRobinTurn } from "./turn-reducer.js";
 import {
   isTerminalTurnStatus,
   turnIdFromEvent,
+  type RobinPendingApprovalState,
   type RobinTurnState,
 } from "./turn-state.js";
 
@@ -17,6 +18,7 @@ export const MAXIMUM_QUEUED_ROBIN_MESSAGES = 8;
 export interface RobinSessionProjection {
   readonly activeTurnId: string | null;
   readonly lastSequence: number;
+  readonly pendingApproval: RobinPendingApprovalState | null;
   readonly permissionMode: RobinPermissionMode | null;
   readonly persistence: "ephemeral";
   readonly providerProfile: "synthetic";
@@ -30,6 +32,7 @@ export function createEmptyRobinSessionProjection(): RobinSessionProjection {
   return Object.freeze({
     activeTurnId: null,
     lastSequence: 0,
+    pendingApproval: null,
     permissionMode: null,
     persistence: "ephemeral",
     providerProfile: "synthetic",
@@ -73,6 +76,7 @@ export function reduceRobinSessionProjection(
       ...state,
       activeTurnId: null,
       lastSequence: event.sequence,
+      pendingApproval: null,
       queuedTurnIds: Object.freeze([]),
       status: "closed",
     });
@@ -114,6 +118,25 @@ function reduceTurnEvent(
   const turnId = turnIdFromEvent(event);
   const index = state.turns.findIndex((turn) => turn.turnId === turnId);
   const current = index < 0 ? undefined : state.turns[index];
+
+  if (event.type === "PermissionDecided") {
+    const actionIdentityUsed = state.turns.some((turn) =>
+      turn.toolCalls.some(
+        (call) => call.permission?.actionId === event.payload.actionId,
+      )
+    );
+    if (actionIdentityUsed) return illegalTransition();
+  }
+  if (event.type === "ApprovalRequested") {
+    const approvalIdentityUsed = state.turns.some((turn) =>
+      turn.toolCalls.some(
+        (call) =>
+          call.approval?.approvalId === event.payload.approvalId ||
+          call.approval?.actionId === event.payload.actionId,
+      )
+    );
+    if (approvalIdentityUsed) return illegalTransition();
+  }
 
   if (event.type === "UserMessageQueued") {
     const acceptedForegroundTurns = state.turns.filter(
@@ -164,10 +187,18 @@ function reduceTurnEvent(
     queuedTurnIds = queuedTurnIds.filter((queued) => queued !== turnId);
   }
 
+  const pendingApprovals = turns.flatMap((turn) =>
+    turn.toolCalls.flatMap((call) =>
+      call.approval?.status === "pending" ? [call.approval] : []
+    )
+  );
+  if (pendingApprovals.length > 1) return illegalTransition();
+
   return freezeProjection({
     ...state,
     activeTurnId,
     lastSequence: event.sequence,
+    pendingApproval: pendingApprovals[0] ?? null,
     queuedTurnIds: Object.freeze(queuedTurnIds),
     turns: Object.freeze(turns),
   });

@@ -10,14 +10,28 @@ import {
   insertInputText,
   moveInputCursor,
   moveInputCursorBy,
+  segmentGraphemes,
   type InputBuffer,
 } from "./input-buffer.js";
 import type { DecodedKeyEvent, KeyDecoderDiagnostic } from "./key-decoder.js";
+import {
+  MAXIMUM_APPROVAL_INPUT_UTF8_BYTES,
+  parseTerminalApprovalDecision,
+  sameTerminalApprovalBinding,
+  type TerminalApprovalDecision,
+  type TerminalApprovalInvalidation,
+  type TerminalApprovalRequest,
+  type TerminalApprovalResolution,
+} from "./approval.js";
 
 export const MAXIMUM_QUEUED_MESSAGES = 8;
 export const MAXIMUM_REPL_HISTORY = 100;
 export const MAXIMUM_REPL_DIAGNOSTICS = 32;
 export const MAXIMUM_REPL_INPUT_UTF8_BYTES = 65_536;
+export const MAXIMUM_REPL_TOOL_OUTPUT_DELTAS = 256;
+export const MAXIMUM_REPL_TOOL_OUTPUT_UTF8_BYTES = 256 * 1_024;
+export const MAXIMUM_REPL_TOOL_OUTPUT_DELTA_UTF8_BYTES = 32 * 1_024;
+export const MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES = 1_536;
 
 export type ReplStatus =
   | "ready"
@@ -36,6 +50,19 @@ export interface ReplToolStatus {
   readonly name: string;
   readonly status: "running" | "completed" | "failed";
   readonly summary: string | null;
+  readonly outputSequence: number;
+  readonly outputLimitExceeded: boolean;
+}
+
+export interface ReplToolOutputDelta {
+  readonly byteLength: number;
+  readonly callId: string;
+  readonly channel: "stdout" | "stderr";
+  readonly limitExceeded: boolean;
+  readonly name: string;
+  readonly safeText: string;
+  readonly sequence: number;
+  readonly textTruncated: boolean;
 }
 
 export interface ReplDiagnostic {
@@ -48,6 +75,16 @@ export interface ReplUsage {
   readonly outputTokens: number;
 }
 
+export interface ReplApprovalState extends TerminalApprovalRequest {
+  readonly input: InputBuffer;
+  readonly phase:
+    | "presenting"
+    | "awaiting_input"
+    | "response_submitted"
+    | "cancelling";
+  readonly submittedDecision: TerminalApprovalDecision | null;
+}
+
 export interface ReplState {
   readonly revision: number;
   readonly status: ReplStatus;
@@ -58,10 +95,14 @@ export interface ReplState {
   readonly transcript: readonly ReplTranscriptEntry[];
   readonly assistantStream: string;
   readonly tools: readonly ReplToolStatus[];
+  readonly toolOutput: readonly ReplToolOutputDelta[];
+  readonly toolOutputOmittedDeltas: number;
+  readonly toolOutputUtf8Bytes: number;
   readonly usage: ReplUsage;
   readonly columns: number;
   readonly rows: number;
   readonly diagnostics: readonly ReplDiagnostic[];
+  readonly approval: ReplApprovalState | null;
 }
 
 export type ReplEvent =
@@ -70,6 +111,17 @@ export type ReplEvent =
   | { readonly type: "turn_started" }
   | { readonly type: "assistant_delta"; readonly text: string }
   | { readonly type: "tool_started"; readonly callId: string; readonly name: string }
+  | {
+      readonly type: "tool_output";
+      readonly byteLength: number;
+      readonly callId: string;
+      readonly channel: "stdout" | "stderr";
+      readonly limitExceeded: boolean;
+      readonly name: string;
+      readonly safeText: string;
+      readonly sequence: number;
+      readonly textTruncated: boolean;
+    }
   | {
       readonly type: "tool_completed" | "tool_failed";
       readonly callId: string;
@@ -83,6 +135,21 @@ export type ReplEvent =
   | { readonly type: "turn_completed"; readonly text: string }
   | { readonly type: "turn_failed"; readonly message: string }
   | { readonly type: "turn_cancelled"; readonly message: string }
+  | { readonly type: "turn_cancellation_requested" }
+  | {
+      readonly type: "approval_requested";
+      readonly request: TerminalApprovalRequest;
+    }
+  | { readonly type: "approval_presented"; readonly approvalId: string }
+  | {
+      readonly type: "approval_resolved";
+      readonly resolution: TerminalApprovalResolution;
+    }
+  | {
+      readonly type: "approval_invalidated";
+      readonly invalidation: TerminalApprovalInvalidation;
+    }
+  | { readonly type: "approval_response_rejected"; readonly approvalId: string }
   | {
       readonly type: "local_command";
       readonly kind: "notice" | "error";
@@ -93,6 +160,11 @@ export type ReplEvent =
 export type ReplEffect =
   | { readonly type: "submit_message"; readonly text: string; readonly queued: boolean }
   | { readonly type: "request_cancel" }
+  | {
+      readonly type: "resolve_approval";
+      readonly approvalId: string;
+      readonly decision: TerminalApprovalDecision;
+    }
   | { readonly type: "force_exit" }
   | { readonly type: "close" };
 
@@ -114,10 +186,14 @@ export function createReplState(
     transcript: [],
     assistantStream: "",
     tools: [],
+    toolOutput: [],
+    toolOutputOmittedDeltas: 0,
+    toolOutputUtf8Bytes: 0,
     usage: Object.freeze({ inputTokens: 0, outputTokens: 0 }),
     columns: validDimension(options.columns, 80),
     rows: validDimension(options.rows, 24),
     diagnostics: [],
+    approval: null,
   });
 }
 
@@ -141,7 +217,11 @@ export function reduceRepl(state: ReplState, event: ReplEvent): ReplTransition {
           status: "working",
           assistantStream: "",
           tools: [],
+          toolOutput: [],
+          toolOutputOmittedDeltas: 0,
+          toolOutputUtf8Bytes: 0,
           usage: Object.freeze({ inputTokens: 0, outputTokens: 0 }),
+          approval: null,
         },
         [],
       );
@@ -160,10 +240,60 @@ export function reduceRepl(state: ReplState, event: ReplEvent): ReplTransition {
             name: event.name,
             status: "running",
             summary: null,
+            outputSequence: 0,
+            outputLimitExceeded: false,
           }),
         },
         [],
       );
+    case "tool_output": {
+      const existing = state.tools.find((tool) => tool.callId === event.callId);
+      if (
+        existing === undefined ||
+        existing.name !== event.name ||
+        existing.status !== "running" ||
+        event.sequence !== existing.outputSequence + 1 ||
+        !Number.isSafeInteger(event.byteLength) ||
+        event.byteLength <= 0 ||
+        Buffer.byteLength(event.safeText, "utf8") >
+          MAXIMUM_REPL_TOOL_OUTPUT_DELTA_UTF8_BYTES ||
+        (existing.outputLimitExceeded && !event.limitExceeded)
+      ) {
+        return changed(
+          state,
+          {
+            diagnostics: addDiagnostic(
+              state.diagnostics,
+              "invalid_tool_output_delta",
+            ),
+          },
+          [],
+        );
+      }
+      const captured = Object.freeze({
+        byteLength: event.byteLength,
+        callId: event.callId,
+        channel: event.channel,
+        limitExceeded: event.limitExceeded,
+        name: event.name,
+        safeText: event.safeText,
+        sequence: event.sequence,
+        textTruncated: event.textTruncated,
+      });
+      const output = appendBoundedToolOutput(state, captured);
+      return changed(
+        state,
+        {
+          tools: upsertTool(state.tools, {
+            ...existing,
+            outputSequence: event.sequence,
+            outputLimitExceeded: event.limitExceeded,
+          }),
+          ...output,
+        },
+        [],
+      );
+    }
     case "tool_completed":
     case "tool_failed": {
       const existing = state.tools.find((tool) => tool.callId === event.callId);
@@ -174,18 +304,21 @@ export function reduceRepl(state: ReplState, event: ReplEvent): ReplTransition {
           [],
         );
       }
+      const summary = settledToolSummary(state, event.callId, event.summary);
+      const output = removeToolOutputForCall(state, event.callId);
       return changed(
         state,
         {
           tools: upsertTool(state.tools, {
             ...existing,
             status: event.type === "tool_completed" ? "completed" : "failed",
-            summary: event.summary,
+            summary,
           }),
           transcript: appendTranscript(state.transcript, {
             kind: "tool",
-            text: `${existing.name}: ${event.summary}`,
+            text: `${existing.name}: ${summary}`,
           }),
+          ...output,
         },
         [],
       );
@@ -219,6 +352,129 @@ export function reduceRepl(state: ReplState, event: ReplEvent): ReplTransition {
       return settleTurn(state, "error", event.message);
     case "turn_cancelled":
       return settleTurn(state, "notice", event.message);
+    case "turn_cancellation_requested":
+      if (state.status !== "working") return transition(state, []);
+      return changed(
+        state,
+        {
+          status: "cancelling",
+          approval: state.approval === null
+            ? null
+            : updateApproval(state.approval, {
+                input: createInputBuffer(),
+                phase: "cancelling",
+              }),
+        },
+        [],
+      );
+    case "approval_requested":
+      if (state.approval !== null || state.status !== "working") {
+        return changed(
+          state,
+          {
+            diagnostics: addDiagnostic(
+              state.diagnostics,
+              "unexpected_approval_request",
+            ),
+          },
+          [],
+        );
+      }
+      return changed(
+        state,
+        {
+          approval: createApprovalState(event.request),
+        },
+        [],
+      );
+    case "approval_presented":
+      if (
+        state.approval === null ||
+        state.approval.approvalId !== event.approvalId ||
+        state.approval.phase !== "presenting"
+      ) {
+        return changed(
+          state,
+          {
+            diagnostics: addDiagnostic(
+              state.diagnostics,
+              "unknown_approval_presentation",
+            ),
+          },
+          [],
+        );
+      }
+      return changed(
+        state,
+        { approval: updateApproval(state.approval, { phase: "awaiting_input" }) },
+        [],
+      );
+    case "approval_resolved":
+      if (
+        state.approval === null ||
+        !sameTerminalApprovalBinding(state.approval, event.resolution)
+      ) {
+        return changed(
+          state,
+          {
+            diagnostics: addDiagnostic(
+              state.diagnostics,
+              "unknown_approval_resolution",
+            ),
+          },
+          [],
+        );
+      }
+      return changed(
+        state,
+        {
+          approval: null,
+          transcript: appendTranscript(state.transcript, {
+            kind: event.resolution.outcome === "granted" ? "notice" : "error",
+            text: approvalResolutionNotice(event.resolution),
+          }),
+        },
+        [],
+      );
+    case "approval_invalidated":
+      return changed(
+        state,
+        {
+          approval:
+            state.approval !== null &&
+            sameTerminalApprovalBinding(state.approval, event.invalidation)
+              ? null
+              : state.approval,
+          transcript: appendTranscript(state.transcript, {
+            kind: "error",
+            text:
+              `Approval ${event.invalidation.approvalId} for ` +
+              `${event.invalidation.toolName} was invalidated ` +
+              `(${event.invalidation.reason}); no execution authority remains.`,
+          }),
+        },
+        [],
+      );
+    case "approval_response_rejected":
+      if (
+        state.approval === null ||
+        state.approval.approvalId !== event.approvalId
+      ) {
+        return transition(state, []);
+      }
+      return changed(
+        state,
+        {
+          approval: null,
+          transcript: appendTranscript(state.transcript, {
+            kind: "error",
+            text:
+              `Approval ${event.approvalId} is no longer active; ` +
+              "no execution authority was granted.",
+          }),
+        },
+        [],
+      );
     case "local_command":
       return completeLocalCommand(state, event.kind, event.message);
     case "fatal":
@@ -237,6 +493,7 @@ export function reduceRepl(state: ReplState, event: ReplEvent): ReplTransition {
 }
 
 function reduceKey(state: ReplState, key: DecodedKeyEvent): ReplTransition {
+  if (state.approval !== null) return reduceApprovalKey(state, key);
   switch (key.type) {
     case "text":
     case "paste":
@@ -283,6 +540,139 @@ function reduceKey(state: ReplState, key: DecodedKeyEvent): ReplTransition {
   }
 }
 
+function reduceApprovalKey(
+  state: ReplState,
+  key: DecodedKeyEvent,
+): ReplTransition {
+  const approval = state.approval!;
+  if (key.type === "resize") {
+    return changed(state, { columns: key.columns, rows: key.rows }, []);
+  }
+  if (key.type === "ctrl_c") {
+    if (state.status !== "working") return transition(state, []);
+    return changed(
+      state,
+      {
+        status: "cancelling",
+        approval: updateApproval(approval, {
+          input: createInputBuffer(),
+          phase: "cancelling",
+        }),
+      },
+      [{ type: "request_cancel" }],
+    );
+  }
+  if (key.type === "ctrl_d") return transition(state, []);
+  if (approval.phase !== "awaiting_input") return transition(state, []);
+
+  switch (key.type) {
+    case "text":
+      return insertApprovalText(state, key.text);
+    case "paste":
+      return changed(
+        state,
+        {
+          diagnostics: addDiagnostic(
+            state.diagnostics,
+            "approval_paste_rejected",
+          ),
+        },
+        [],
+      );
+    case "left":
+      return changeApprovalInput(state, moveInputCursorBy(approval.input, -1));
+    case "right":
+      return changeApprovalInput(state, moveInputCursorBy(approval.input, 1));
+    case "home":
+    case "ctrl_a":
+      return changeApprovalInput(state, moveInputCursor(approval.input, 0));
+    case "end":
+    case "ctrl_e":
+      return changeApprovalInput(
+        state,
+        moveInputCursor(approval.input, approval.input.graphemes.length),
+      );
+    case "backspace":
+      return changeApprovalInput(state, deleteInputBackward(approval.input));
+    case "delete":
+      return changeApprovalInput(state, deleteInputForward(approval.input));
+    case "ctrl_u":
+      return changeApprovalInput(state, deleteInputBeforeCursor(approval.input));
+    case "ctrl_k":
+      return changeApprovalInput(state, deleteInputAfterCursor(approval.input));
+    case "ctrl_w":
+      return changeApprovalInput(state, deleteInputWordBackward(approval.input));
+    case "enter":
+      return submitApprovalInput(state);
+    case "up":
+    case "down":
+      return transition(state, []);
+  }
+}
+
+function insertApprovalText(state: ReplState, text: string): ReplTransition {
+  const approval = state.approval!;
+  if (
+    text.length === 0 ||
+    Buffer.byteLength(inputBufferText(approval.input) + text, "utf8") >
+      MAXIMUM_APPROVAL_INPUT_UTF8_BYTES
+  ) {
+    return text.length === 0
+      ? transition(state, [])
+      : changed(
+          state,
+          {
+            diagnostics: addDiagnostic(
+              state.diagnostics,
+              "approval_input_rejected",
+            ),
+          },
+          [],
+        );
+  }
+  return changeApprovalInput(state, insertInputText(approval.input, text));
+}
+
+function changeApprovalInput(
+  state: ReplState,
+  input: InputBuffer,
+): ReplTransition {
+  return changed(
+    state,
+    { approval: updateApproval(state.approval!, { input }) },
+    [],
+  );
+}
+
+function submitApprovalInput(state: ReplState): ReplTransition {
+  const approval = state.approval!;
+  const decision = parseTerminalApprovalDecision(inputBufferText(approval.input));
+  if (decision === null) {
+    return changed(
+      state,
+      {
+        approval: updateApproval(approval, { input: createInputBuffer() }),
+        diagnostics: addDiagnostic(
+          state.diagnostics,
+          "approval_decision_required",
+        ),
+      },
+      [],
+    );
+  }
+  return changed(
+    state,
+    {
+      approval: updateApproval(approval, {
+        input: createInputBuffer(),
+        phase: "response_submitted",
+        submittedDecision: decision,
+      }),
+    },
+    [{ type: "resolve_approval", approvalId: approval.approvalId, decision }],
+  );
+}
+
 function submitInput(state: ReplState): ReplTransition {
   const text = inputBufferText(state.input);
   if (text.trim().length === 0) return transition(state, []);
@@ -299,6 +689,10 @@ function submitInput(state: ReplState): ReplTransition {
         transcript,
         assistantStream: "",
         tools: [],
+        toolOutput: [],
+        toolOutputOmittedDeltas: 0,
+        toolOutputUtf8Bytes: 0,
+        approval: null,
       },
       [{ type: "submit_message", text, queued: false }],
     );
@@ -402,6 +796,10 @@ function settleTurn(
         transcript,
         assistantStream: "",
         tools: [],
+        toolOutput: [],
+        toolOutputOmittedDeltas: 0,
+        toolOutputUtf8Bytes: 0,
+        approval: null,
       },
       [],
     );
@@ -414,6 +812,10 @@ function settleTurn(
       transcript,
       assistantStream: "",
       tools: [],
+      toolOutput: [],
+      toolOutputOmittedDeltas: 0,
+      toolOutputUtf8Bytes: 0,
+      approval: null,
     },
     [],
   );
@@ -501,11 +903,180 @@ function freezeState(state: ReplState): ReplState {
       state.transcript.map((entry) => Object.freeze({ ...entry })),
     ),
     tools: Object.freeze(state.tools.map((tool) => Object.freeze({ ...tool }))),
+    toolOutput: Object.freeze(
+      state.toolOutput.map((delta) => Object.freeze({ ...delta })),
+    ),
     usage: Object.freeze({ ...state.usage }),
     diagnostics: Object.freeze(
       state.diagnostics.map((diagnostic) => Object.freeze({ ...diagnostic })),
     ),
+    approval: state.approval,
   });
+}
+
+function appendBoundedToolOutput(
+  state: ReplState,
+  delta: ReplToolOutputDelta,
+): Pick<
+  ReplState,
+  "toolOutput" | "toolOutputOmittedDeltas" | "toolOutputUtf8Bytes"
+> {
+  const retained = [...state.toolOutput, delta];
+  let retainedBytes =
+    state.toolOutputUtf8Bytes + Buffer.byteLength(delta.safeText, "utf8");
+  let omitted = state.toolOutputOmittedDeltas;
+  while (
+    retained.length > MAXIMUM_REPL_TOOL_OUTPUT_DELTAS ||
+    retainedBytes > MAXIMUM_REPL_TOOL_OUTPUT_UTF8_BYTES
+  ) {
+    const removed = retained.shift();
+    if (removed === undefined) break;
+    retainedBytes -= Buffer.byteLength(removed.safeText, "utf8");
+    omitted += 1;
+  }
+  return Object.freeze({
+    toolOutput: Object.freeze(retained),
+    toolOutputOmittedDeltas: omitted,
+    toolOutputUtf8Bytes: retainedBytes,
+  });
+}
+
+function removeToolOutputForCall(
+  state: ReplState,
+  callId: string,
+): Pick<
+  ReplState,
+  "toolOutput" | "toolOutputOmittedDeltas" | "toolOutputUtf8Bytes"
+> {
+  const retained = state.toolOutput.filter((delta) => delta.callId !== callId);
+  return Object.freeze({
+    toolOutput: Object.freeze(retained),
+    // The upstream session admits output for one exact active call at a time.
+    // If a defensive reducer caller interleaves calls, retained live deltas
+    // remain visible and their future evictions rebuild this counter.
+    toolOutputOmittedDeltas: 0,
+    toolOutputUtf8Bytes: retained.reduce(
+      (total, delta) => total + Buffer.byteLength(delta.safeText, "utf8"),
+      0,
+    ),
+  });
+}
+
+function settledToolSummary(
+  state: ReplState,
+  callId: string,
+  resultSummary: string,
+): string {
+  const output = state.toolOutput.filter((delta) => delta.callId === callId);
+  if (output.length === 0) return boundToolSummary(resultSummary);
+  const boundedResult = boundUtf8Prefix(resultSummary, 256);
+  const outputText = output
+    .map((delta) => `[${delta.channel} #${delta.sequence}] ${delta.safeText}`)
+    .join("\n");
+  const outputEdges = boundUtf8Edges(outputText, 1_152);
+  return boundToolSummary(
+    `${boundedResult}; bounded output head/tail: ${outputEdges}`,
+  );
+}
+
+function boundToolSummary(summary: string): string {
+  return boundUtf8Prefix(summary, MAXIMUM_REPL_TOOL_SUMMARY_UTF8_BYTES);
+}
+
+function boundUtf8Prefix(value: string, maximumBytes: number): string {
+  if (Buffer.byteLength(value, "utf8") <= maximumBytes) return value;
+  const suffix = "… [truncated]";
+  const maximumPrefixBytes =
+    maximumBytes - Buffer.byteLength(suffix, "utf8");
+  let prefix = "";
+  let prefixBytes = 0;
+  for (const grapheme of segmentGraphemes(value)) {
+    const graphemeBytes = Buffer.byteLength(grapheme, "utf8");
+    if (prefixBytes + graphemeBytes > maximumPrefixBytes) break;
+    prefix += grapheme;
+    prefixBytes += graphemeBytes;
+  }
+  return prefix + suffix;
+}
+
+function boundUtf8Edges(value: string, maximumBytes: number): string {
+  if (Buffer.byteLength(value, "utf8") <= maximumBytes) return value;
+  const marker = "\n… [middle omitted] …\n";
+  const markerBytes = Buffer.byteLength(marker, "utf8");
+  const contentBytes = Math.max(0, maximumBytes - markerBytes);
+  // Failure diagnostics generally precede verbose stacks and runner summaries,
+  // so retain two thirds of the bounded preview from the start while still
+  // preserving the process-settlement tail.
+  const headBytes = Math.ceil((contentBytes * 2) / 3);
+  const tailBytes = contentBytes - headBytes;
+  return takeUtf8Prefix(value, headBytes) + marker + takeUtf8Tail(value, tailBytes);
+}
+
+function takeUtf8Prefix(value: string, maximumBytes: number): string {
+  let prefix = "";
+  let prefixBytes = 0;
+  for (const grapheme of segmentGraphemes(value)) {
+    const graphemeBytes = Buffer.byteLength(grapheme, "utf8");
+    if (prefixBytes + graphemeBytes > maximumBytes) break;
+    prefix += grapheme;
+    prefixBytes += graphemeBytes;
+  }
+  return prefix;
+}
+
+function takeUtf8Tail(value: string, maximumBytes: number): string {
+  const graphemes = segmentGraphemes(value);
+  const retained: string[] = [];
+  let retainedBytes = 0;
+  for (let index = graphemes.length - 1; index >= 0; index -= 1) {
+    const grapheme = graphemes[index]!;
+    const graphemeBytes = Buffer.byteLength(grapheme, "utf8");
+    if (retainedBytes + graphemeBytes > maximumBytes) break;
+    retained.push(grapheme);
+    retainedBytes += graphemeBytes;
+  }
+  return retained.reverse().join("");
+}
+
+function createApprovalState(
+  request: TerminalApprovalRequest,
+): ReplApprovalState {
+  return Object.freeze({
+    ...request,
+    input: createInputBuffer(),
+    phase: "presenting",
+    submittedDecision: null,
+  });
+}
+
+function updateApproval(
+  approval: ReplApprovalState,
+  patch: Partial<
+    Pick<ReplApprovalState, "input" | "phase" | "submittedDecision">
+  >,
+): ReplApprovalState {
+  return Object.freeze({ ...approval, ...patch });
+}
+
+function approvalResolutionNotice(
+  resolution: TerminalApprovalResolution,
+): string {
+  if (resolution.outcome === "granted") {
+    return (
+      `Approval ${resolution.approvalId} granted once for ` +
+      `${resolution.toolName}; the one-use response was submitted.`
+    );
+  }
+  if (resolution.outcome === "stale") {
+    return (
+      `Approval ${resolution.approvalId} for ${resolution.toolName} became ` +
+      "stale; no execution authority was granted."
+    );
+  }
+  return (
+    `Approval ${resolution.approvalId} for ${resolution.toolName} was denied; ` +
+    "no execution authority was granted."
+  );
 }
 
 function validDimension(value: number | undefined, fallback: number): number {

@@ -45,3 +45,61 @@ test("flat event variants preserve textual state independently of color", () => 
     "[diagnostic:bad] ignored\n",
   );
 });
+
+test("flat approval output includes exact scope, complete summary, and safe outcomes", () => {
+  const request = {
+    actionHash: "1".repeat(64),
+    actionId: "act-1",
+    approvalId: "apr-1",
+    callId: "call-1",
+    displayedSummaryHash: "2".repeat(64),
+    expiresAt: "2026-08-30T02:05:00.000Z",
+    normalizedRequestHash: "3".repeat(64),
+    policySnapshotHash: "4".repeat(64),
+    preconditionHash: "5".repeat(64),
+    requestedAt: "2026-08-30T02:00:01.000Z",
+    toolName: "robin.process.run@1\u001b[31m",
+    turnId: "turn-1",
+    canonicalSummary: '{"argv":["npm","test"],"sandboxed":false}',
+  } as const;
+  const required = renderFlatEvent({ type: "approval_required", request });
+  assert.equal(required.includes("\u001b"), false);
+  assert.match(required, /Approval ID: apr-1/u);
+  assert.match(required, /Canonical summary: \{"argv"/u);
+  assert.match(required, /allow-once/u);
+  assert.equal(required.split("\n").filter(Boolean).length, 15);
+
+  const resolved = renderFlatEvent({
+    type: "approval_resolved",
+    resolution: {
+      ...request,
+      decision: "deny",
+      outcome: "denied",
+      resolvedAt: "2026-08-30T02:00:02.000Z",
+    },
+  });
+  assert.match(resolved, /decision=deny outcome=denied/u);
+});
+
+test("flat tool output is append-only, channel-labeled, and injection-safe", () => {
+  const rendered = renderFlatEvent({
+    type: "tool_output",
+    delta: {
+      byteLength: 10,
+      callId: "call-1",
+      channel: "stdout",
+      limitExceeded: false,
+      name: "robin.process.run@1",
+      safeText: "one\ntwo\u001b[2J",
+      sequence: 3,
+      textTruncated: false,
+    },
+  });
+  assert.equal(rendered.includes("\u001b"), false);
+  assert.equal(
+    rendered.split("\n").filter(Boolean).every((line) =>
+      line.includes("[stdout #3]")),
+    true,
+  );
+  assert.match(rendered, /two\\u\{1b\}\[2J/u);
+});
