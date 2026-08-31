@@ -39,9 +39,10 @@ bracketed paste, terminal restoration, and experimental headless formats are
 implemented.
 
 Local macOS real-PTY and isolated package install/execute/uninstall tests provide
-candidate evidence only. The full R0 prerequisite and R1 gates remain open, and
-configured hosted Linux/macOS PTY, package, and aggregate jobs have not yet
-provided accepted hosted evidence. Real workspace tools, file-backed resume,
+candidate evidence only. The configured hosted Linux/macOS PTY, package-smoke,
+and aggregate jobs passed on candidate commit `dc39937`. R0 is accepted on
+`main` at `2c042ca`, but R1 remains open until its refreshed exact-head gate
+passes and the candidate merges. Real workspace tools, file-backed resume,
 hosted providers, credentials/API keys, sandboxing, supported release packaging,
 and later extension surfaces remain planned until their named gates pass.
 
@@ -1347,7 +1348,7 @@ temporary roots, and credential fixtures at process exit.
 - Cross-adapter contract suites export one reusable function and are instantiated
   by every implementation.
 - OS integration tests live under package-specific `test/integration/` folders.
-- Packaged CLI/PTy/e2e tests live under `tests/e2e/`.
+- Packaged CLI/PTY/e2e tests live under `tests/e2e/`.
 - Hostile inputs live under `testdata/adversarial/` with provenance and expected
   classification.
 - Persisted compatibility fixtures live under `testdata/compatibility/<schema>/`.
@@ -1947,9 +1948,11 @@ cannot prove its budget or fixture isolation does not run.
 
 The four R1 rows above are present in the candidate workflow with third-party
 actions pinned to immutable commit hashes. Their current documentation status is
-**configured, hosted result pending**. Local macOS PTY and package tests do not
-establish that either hosted runner passed, that `r1-candidate` was green on the
-reviewed commit, or that branch protection requires those checks.
+**configured; exact stacked candidate result green**: Linux PTY, macOS PTY,
+package smoke, and `r1-candidate` passed on `dc39937`. These results establish
+candidate evidence only. The repository plan does not provide branch-protection
+enforcement, and a base-changing update requires fresh exact-head results before
+mainline acceptance.
 
 ### 12.3 Deterministic workflow network policy
 
@@ -2871,10 +2874,11 @@ R1 passes when:
 R1 requires no API key, network provider, real workspace mutation, sandbox,
 database, or daemon.
 
-The implementation and local macOS PTY/package evidence satisfy candidate
-portions of these criteria only. R1 remains open until the R0/mainline
-prerequisite is accepted and the exact hosted jobs above pass for the reviewed
-commit with the required evidence attached.
+The implementation and local plus hosted PTY/package/aggregate evidence satisfy
+the candidate portions of these criteria on `dc39937`. R0 is accepted on
+`main` at `2c042ca`. R1 remains open until the candidate is refreshed against
+that base, the exact hosted jobs pass again for the reviewed head, and R1 is
+merged with its required evidence attached.
 
 ### 19.3 R2 — Real repository coding tools
 

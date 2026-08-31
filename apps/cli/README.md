@@ -66,9 +66,10 @@ non-consequential synthetic fixture tools are the only tool effects.
 
 The raw-terminal scenarios are verified locally under a real macOS PTY,
 including two turns, the two fixture tools, queue promotion, resize, paste,
-single/double interrupt behavior, failure paths, and terminal restoration.
-Required hosted Linux and hosted macOS evidence is still pending, so this
-documentation does not claim that R1 is accepted. See
+single/double interrupt behavior, failure paths, and terminal restoration. The
+configured hosted Linux/macOS PTY, package-smoke, and aggregate jobs passed on
+stacked candidate `dc39937`; a base-changing update requires fresh exact-head
+evidence, so this documentation does not claim that R1 is accepted. See
 [Terminal Compatibility](../../docs/TERMINAL_COMPATIBILITY.md) for the exact
 matrix and fallback behavior.
 

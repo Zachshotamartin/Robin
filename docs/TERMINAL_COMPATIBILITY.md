@@ -7,10 +7,11 @@ experience over one ephemeral, in-memory application session. The only coding
 provider is the deterministic `synthetic` provider and the only model is
 `synthetic-r1-v1`.
 
-R1 is **not accepted**. The current branch has local macOS real-PTY evidence,
-but the required hosted Linux and hosted macOS checks have not yet supplied the
-complete release-gate evidence. This page describes candidate behavior; it is
-not a cross-platform support promise.
+R1 is **not accepted**. Local macOS real-PTY evidence and the configured hosted
+Linux/macOS PTY, package-smoke, and aggregate jobs passed on stacked candidate
+`dc39937`. R0 is accepted on `main` at `2c042ca`; R1 still requires fresh
+exact-head evidence after its base update and a mainline merge. This page
+describes candidate behavior; it is not a cross-platform support promise.
 
 ## Mode Selection
 
@@ -86,12 +87,12 @@ or resume. Exiting discards the entire coding session.
 | Local macOS real PTY, source-built CLI | Verified locally | No-argument and positional-prompt sessions, two fixture-tool turns, usage, FIFO queue promotion after cancellation, resize, inert bracketed paste, one- and two-interrupt paths, provider/tool failures, cleanup bytes, and termios restoration are exercised by the PTY harness. |
 | Local macOS isolated npm-prefix package test | Verified locally | The packed CLI is installed outside the workspace, completes the happy-path PTY fixture, restores terminal state, and uninstalls from the temporary prefix. This is development evidence, not hosted release evidence. |
 | Non-TTY `TERM=dumb` flat path | Deterministically tested locally | Output is append-only and contains no ANSI bytes while retaining synthetic tool and usage events. |
-| Hosted Ubuntu/Linux `pty-linux` job | Pending | The real-PTY semantic matrix, signals, resize, restoration, headless split, and leak checks still require hosted evidence. |
-| Hosted Tier-1 macOS integration | Pending | Terminal and iTerm2 release cells, exact OS/architecture provenance, package execution, and cleanup still require hosted evidence. |
+| Hosted Ubuntu/Linux `pty-linux` job | Candidate verified on `dc39937` | The real-PTY semantic matrix, signals, resize, restoration, headless split, and leak checks passed; a base update requires a fresh exact-head run. |
+| Hosted Tier-1 macOS integration | Candidate verified on `dc39937` | The configured macOS PTY semantics, package execution, and cleanup passed; this is candidate rather than release-support evidence. |
 | Windows/ConPTY and other terminals | Not claimed for R1 | No compatibility or release-support statement is made from the current evidence. |
 
-Because the hosted rows remain pending, passing local tests alone must not be
-reported as R1 acceptance.
+Passing local and hosted candidate tests must not be reported as R1 acceptance
+until the refreshed exact head is merged into `main`.
 
 Developers can exercise the current deterministic checks from the repository
 root:

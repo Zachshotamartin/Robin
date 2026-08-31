@@ -14,8 +14,9 @@ UX, provider normalization, and verification workflow. Its policy and runtime
 control layer is internal infrastructure for that coding experience, not the
 product's primary surface.
 
-> **Implementation status:** R0 remains an unaccepted pull-request candidate;
-> this branch stacks the R1 implementation candidate on that prerequisite.
+> **Implementation status:** R0 is accepted on `main` at merge commit
+> `2c042ca` after its merge-triggered Gate A/B workflow passed. This branch
+> contains the still-unaccepted R1 implementation candidate.
 > `robin` now has a raw-mode TTY editor, a non-TTY/accessible flat renderer,
 > streamed multi-turn conversation, prompt queuing, cancellation, resize and
 > paste handling, visible usage, and two deterministic read-only coding-tool
@@ -24,9 +25,9 @@ product's primary surface.
 > and tools use in-memory fixtures: Robin does not yet read or change the
 > physical repository,
 > run commands or Git, contact a network, store credentials, or persist a
-> session. Milestones A and B remain the accepted internal substrate. Neither
-> R0 nor R1 is accepted until the prerequisite, package, PTY, hosted-matrix, and
-> evidence gates are reviewed and mainline-backed.
+> session. Milestones A and B and R0 are accepted. R1 remains unaccepted until
+> its refreshed package, PTY, hosted-matrix, and evidence gates pass on the
+> exact post-R0 head and the candidate is merged.
 
 ## Intended Robin Experience
 
@@ -89,10 +90,13 @@ package, executable, documentation, and product name are Robin.
 
 ## Current Implementation
 
-The repository currently proves inherited Milestones A and B and contains a
-locally tested R1 synthetic coding-loop candidate. R1 is not accepted because
-its R0 prerequisite is not mainline-backed and its hosted/evidence gate has not
-yet been completed. The complete R1 terminal gate therefore remains open.
+The repository currently proves inherited Milestones A and B and contains an
+R1 synthetic coding-loop candidate. All configured hosted Linux/macOS PTY,
+package-smoke, and R1 aggregate checks passed on candidate commit `dc39937`.
+R0 is accepted on `main` at `2c042ca`. R1 is not accepted because its
+candidate has not merged and its base-changing update requires fresh exact-head
+evidence. Passing candidate evidence is not mainline acceptance, so the
+complete R1 terminal gate remains open.
 
 | Area | Implemented now | Not implemented now |
 |---|---|---|
@@ -264,7 +268,8 @@ terminal CLI / headless CLI / future editor client
 
 The branch now contains the first narrow implementation of the upper terminal,
 session, application, provider-neutral loop, and synthetic tool layers. It is
-intentionally fixture-only and ephemeral until the full R1 evidence gate passes.
+intentionally fixture-only and ephemeral; the configured R1 candidate evidence
+is green, but R1 remains unaccepted until its prerequisite and candidate merge.
 The build order creates a usable vertical coding workflow before deepening
 isolation, distributed durability, evaluation infrastructure, or clients.
 
@@ -345,8 +350,9 @@ The ordered roadmap is:
 2. **Coding-agent foundation — candidate under verification:** a normalized
    multi-request synthetic tool loop, shared versioned application path, raw and
    flat terminal renderers, cancellation/queue/resize behavior, headless formats,
-   output sanitization, and local PTY coverage now exist. R1 remains unaccepted
-   until R0 lands and the full hosted package/PTy/evidence gate is green.
+   output sanitization, and local plus hosted PTY coverage now exist. The hosted
+   package/PTY/aggregate candidate gate is green on `dc39937`. R0 is accepted;
+   R1 remains unaccepted until the refreshed candidate gate is green and merged.
 3. **Hosted-provider alpha (R2–R4):** one real direct provider with BYOK setup,
    real repository search/read/edit tools, command and test execution, Git diff
    review, permission prompts, interruption, continue/resume, and a complete

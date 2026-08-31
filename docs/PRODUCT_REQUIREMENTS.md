@@ -16,8 +16,10 @@ JSON, and streaming-JSON paths are implemented. It currently spells target
 `--no-save` flags.
 
 Local macOS real-PTY and isolated package install/execute/uninstall tests provide
-candidate evidence only. The R0 prerequisite and required hosted Linux/macOS
-jobs and aggregate evidence remain pending, so the complete R1 gate is open.
+candidate evidence only. R0 is accepted on `main` at `2c042ca`, and the
+configured hosted Linux/macOS jobs and aggregate passed on stacked candidate
+`dc39937`. The complete R1 gate remains open until fresh exact-head evidence
+passes after the base update and the candidate merges.
 There is no physical repository, process, Git, credential, network provider,
 API-key, durable-session, or resume capability, and the stable R7 automation
 contract remains planned. Current behavior is summarized in the repository
@@ -1225,13 +1227,15 @@ model requests around two deterministic fixture-tool observations. Raw TTY and
 append-only flat terminal modes, queued input, cancellation, resize, inert
 bracketed paste, PTY restoration, and experimental `--print` output are present.
 Local macOS real-PTY and isolated package install/execute/uninstall tests cover
-those candidate paths.
+those candidate paths. The configured hosted Linux/macOS PTY, package-smoke,
+and R1 aggregate jobs also passed on candidate commit `dc39937`.
 
-It is not a release or a complete R1 gate. The prerequisite baseline and
-required hosted Linux/macOS PTY, package, and aggregate evidence remain pending,
-and the full named failure/performance matrix still controls acceptance. R1
-makes no physical repository, hosted provider, API-key/credential, persistence,
-resume, sandbox, or stable automation claim.
+It is not a release or a complete R1 gate. R0 is accepted on `main` at
+`2c042ca`, but the R1 candidate has not merged and its base-changing update
+requires fresh exact-head hosted evidence. The full named failure/performance
+matrix still controls acceptance. R1 makes no physical repository, hosted
+provider, API-key/credential, persistence, resume, sandbox, or stable automation
+claim.
 
 ### 12.3 R3 durable synthetic coding gate
 

@@ -174,7 +174,7 @@ Until R1 is accepted, the truthful claim is:
 > substrate and is being pivoted into a coding-agent CLI. The current mainline
 > is not yet a usable coding agent.
 
-The stacked R1 branch contains a locally tested implementation candidate:
+The stacked R1 branch contains an implementation candidate:
 `robin` and `robin "prompt"` use one ephemeral application service with a
 raw-mode TTY editor or flat fallback, while `robin --print` uses the same
 provider-neutral, multi-request structured tool loop with experimental text,
@@ -187,10 +187,12 @@ bracketed paste, bounded usage/budgets, terminal cleanup, and PTY error paths
 have local automated coverage.
 
 The candidate still has no physical repository, process, Git, credential,
-network, durable-session, or resume capability. It is not an accepted phase:
-R0 is still an unmerged prerequisite, the R1 package inventory/evidence record
-must be captured from a clean commit, and the required hosted Linux/macOS PTY
-matrix must pass before the section 6.9 claim can change.
+network, durable-session, or resume capability. R0 is accepted on `main` at
+`2c042ca`; the R1 package inventory/evidence record is captured for source
+commit `2e1eb8a`, and the configured hosted Linux/macOS PTY, package-smoke, and
+aggregate jobs passed on stacked candidate `dc39937`. R1 is not accepted until
+the branch is refreshed against accepted `main`, those exact-head gates pass
+again, and the candidate merges.
 
 The preview currently spells the ordinary ask-first permission label `ask` and
 uses `--output-format` and `--no-save`. Those spellings are experimental. They
@@ -675,8 +677,8 @@ differentiating implementation.
 
 ## 5. R0 — Product Pivot, Repository Identity, and Clean Baseline
 
-**Status:** in progress on the Robin pivot branch. Milestones A and B remain the
-accepted substrate; R0 is not accepted until the rename gate passes.
+**Status:** accepted on `main` at merge commit `2c042ca`; the merge-triggered
+Gate A/B workflow passed. Milestones A and B remain the accepted substrate.
 
 **Effort range:** 3–5 focused days, including repository and package verification.
 
@@ -5501,8 +5503,8 @@ The phase sections define 230 implementation tickets:
 
 | Phase | Ticket range | Count | Current status |
 | --- | --- | ---: | --- |
-| R0 | R0.01–R0.12 | 12 | pull-request candidate; unaccepted until merged evidence is reviewed |
-| R1 | R1.01–R1.13 | 13 | implementation candidate; prerequisite/hosted/evidence gate not accepted |
+| R0 | R0.01–R0.12 | 12 | accepted on `main` at `2c042ca` |
+| R1 | R1.01–R1.13 | 13 | implementation candidate; hosted candidate checks green, prerequisite/mainline acceptance pending |
 | R2 | R2.01–R2.17 | 17 | planned |
 | R3 | R3.01–R3.18 | 18 | planned |
 | R4 | R4.01–R4.17 | 17 | planned |

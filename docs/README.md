@@ -57,18 +57,19 @@ profiles, and `robin policy` retains the policy debugger.
 R1 coding sessions remain ephemeral. The synthetic tools operate only on an
 in-memory fixture: there is no physical repository access, file editing,
 process execution, Git integration, provider/network request, API key,
-credential storage, durable session, continuation, or resume. A real macOS PTY
-has been exercised locally for the R1 terminal scenarios, but required hosted
-Linux and hosted macOS evidence remains pending. Therefore R1 is a candidate,
-not an accepted milestone. Planned documents may specify later features only as
-planned until their evidence gates pass.
+credential storage, durable session, continuation, or resume. Local and hosted
+Linux/macOS PTY plus package/aggregate candidate evidence passed on
+`dc39937`. R0 is accepted on `main` at `2c042ca`; R1 is still a candidate
+until fresh exact-head evidence passes after the base update and the candidate
+merges. Planned documents may specify later features only as planned until their
+evidence gates pass.
 
 ## Product Supporting Specifications
 
 - [Terminal compatibility and R1 verification status](TERMINAL_COMPATIBILITY.md):
   raw TTY selection, flat and headless fallbacks, keys, paste/resize/queue/
-  cancellation behavior, local macOS PTY evidence, and hosted checks that still
-  block R1 acceptance.
+  cancellation behavior, local and hosted candidate evidence, and the
+  exact-head/mainline conditions that still block R1 acceptance.
 - [Provider, credential, and external-agent compatibility](PROVIDER_AGENT_COMPATIBILITY.md):
   direct provider adapters, declared model capabilities, bring-your-own
   credentials, local and compatible endpoints, MCP, ACP, external agents, and

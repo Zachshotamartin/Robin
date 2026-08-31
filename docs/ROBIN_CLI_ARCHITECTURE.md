@@ -13,10 +13,13 @@ cancellation, resize, inert bracketed paste, terminal restoration, and
 experimental headless formats.
 
 Local macOS PTY and isolated package install/execute/uninstall runs are candidate
-evidence only. The R0 prerequisite and required hosted Linux/macOS and aggregate
-evidence remain pending, so R1 is not accepted. Real provider adapters, physical
-workspace tools, API-key/credential handling, a resumable local session store,
-and the extension system remain planned until their named acceptance tests pass.
+evidence only. The configured hosted Linux/macOS PTY, package-smoke, and
+aggregate jobs passed on candidate commit `dc39937`. R0 is accepted on
+`main` at `2c042ca`; R1 has not merged, so it remains unaccepted and its
+base-changing update requires fresh exact-head evidence. Real provider adapters,
+physical workspace tools, API-key/credential handling, a resumable local session
+store, and the extension system remain planned until their named acceptance
+tests pass.
 Each section below states how the implemented substrate is retained or replaced.
 
 This document defines how Robin becomes a coding agent in the terminal. The

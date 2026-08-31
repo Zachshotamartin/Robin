@@ -26,12 +26,15 @@ normative plan is split across:
 - Local repository: `/Users/zacharymartin/Desktop/portfolio_projects/Robin`
 - GitHub repository: `https://github.com/Zachshotamartin/Robin`
 - Origin: `https://github.com/Zachshotamartin/Robin.git`
-- Default branch baseline: `main` at `77902fd`
+- Accepted default branch: `main` at `2c042ca`
 - R0 candidate branch: `codex/robin-cli-pivot` at `23c99a8`
-- R0 pull request: #2; it remains a prerequisite candidate and must not be
-  described as accepted merely because its local or hosted checks are green.
+- R0 pull request #2 merged with merge commit `2c042ca`; the merge-triggered
+  Gate A/B workflow passed, so R0 is accepted.
 - R1 candidate branch: `codex/robin-r1-interactive-loop`, stacked on the R0
-  candidate until R0 is explicitly merged.
+  source history and awaiting its accepted-main merge commit.
+- R1 candidate head: `dc39937`; pull request #3 is stacked on pull request #2.
+- The configured Linux PTY, macOS PTY, package-smoke, and R1 aggregate jobs pass
+  on that exact stacked head. A base-changing update requires a fresh run.
 - Superseded pull request #1 is closed and archival.
 
 The unfinished pre-pivot Milestone C prototype remains preserved on
@@ -81,28 +84,28 @@ This candidate does **not** read or modify the physical repository, execute a
 process or Git command, call a hosted model, accept an API key, persist or resume
 a session, provide a strict sandbox, publish a supported package, or expose the
 stable automation protocol. Those capabilities remain owned by later gates.
-R1 also remains unaccepted until the R0 prerequisite and the exact reviewed
-hosted Linux/macOS/package/aggregate evidence pass on the candidate commit.
+R1 remains unaccepted until the candidate is refreshed against accepted
+`main`, the exact hosted Linux/macOS/package/aggregate evidence passes again
+on that reviewed head, and the candidate is merged.
 
 ## Immediate Next Work
 
-1. Complete review and acceptance of R0 pull request #2 without weakening its
-   evidence or treating a candidate manifest as mainline acceptance.
-2. Review the stacked R1 pull request, require `gate-b`, `pty-linux`,
-   `pty-macos`, `package-smoke`, and `r1-candidate` to pass on the exact head,
-   validate the clean-commit R1 evidence manifest, and only then mark R1
-   accepted.
-3. Build R2 as the first genuinely useful local coding slice: bounded physical
+1. Retarget pull request #3 to `main`, merge accepted `main` into the R1
+   branch without rewriting its evidence history, update acceptance status,
+   require `gate-b`, `pty-linux`, `pty-macos`, `package-smoke`, and
+   `r1-candidate` to pass again on the exact head, validate the clean-commit R1
+   evidence manifest, and only then merge and mark R1 accepted.
+2. Build R2 as the first genuinely useful local coding slice: bounded physical
    repository status/list/search/read, exact-preimage create/edit/apply, direct
    argv-based process execution, focused verification, and final status/diff in
    disposable real-Git fixtures. Delete, move, shell strings, network, and Git
    writes remain registered but denied at that gate.
-4. Build R3 durable local sessions, crash recovery, `continue`, and `resume` on
+3. Build R3 durable local sessions, crash recovery, `continue`, and `resume` on
    the R2 tool path.
-5. Build R4 around the frozen provider-neutral port with one hosted provider,
+4. Build R4 around the frozen provider-neutral port with one hosted provider,
    model discovery, session-scoped bring-your-own-key onboarding, redaction, and
    explicit manual real-provider smokes. CI must remain credential-free.
-6. Continue through R5 permissions and strict sandboxing, R6 daily Git workflow,
+5. Continue through R5 permissions and strict sandboxing, R6 daily Git workflow,
    R7 provider breadth and stable automation, and R8 configuration, trust, and
    instructions before calling Robin a supported first release.
 
