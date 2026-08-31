@@ -2,7 +2,7 @@
   "name": "@guard/event-store",
   "version": "0.0.0",
   "private": true,
-  "description": "Event-store port and deterministic in-memory adapter for the Guarded Agent kernel.",
+  "description": "Event-store port and deterministic in-memory adapter for Robin's internal kernel.",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -17,8 +17,8 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "typecheck": "tsc --build --force",
-    "test": "npm run build && node --test dist/*.test.js"
+    "typecheck": "tsc --build",
+    "test": "npm run build && node --test --test-reporter=../../scripts/deterministic-test-reporter.mjs dist/*.test.js"
   },
   "dependencies": {
     "@guard/contracts": "0.0.0"

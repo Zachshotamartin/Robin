@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robin.invalid/schema/gate-evidence-capture-config-v1.json",
+  "title": "Robin gate evidence capture config v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "gate",
+    "versionManifest",
+    "cliVersionManifest",
+    "dependencyLock",
+    "traceability",
+    "commands",
+    "requirements",
+    "fixtures",
+    "artifacts",
+    "supportedClaims",
+    "deferredClaims",
+    "knownLimitations"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "gate": { "$ref": "#/$defs/gate" },
+    "versionManifest": { "$ref": "#/$defs/relativePath" },
+    "cliVersionManifest": { "$ref": "#/$defs/relativePath" },
+    "dependencyLock": { "$ref": "#/$defs/relativePath" },
+    "traceability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["buildPlan", "operationsTestPlan"],
+      "properties": {
+        "buildPlan": { "$ref": "#/$defs/relativePath" },
+        "operationsTestPlan": { "$ref": "#/$defs/relativePath" }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/command" }
+    },
+    "requirements": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "$ref": "#/$defs/requirement" }
+    },
+    "fixtures": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "$ref": "#/$defs/fixture" }
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "supportedClaims": { "$ref": "#/$defs/stringSet" },
+    "deferredClaims": {
+      "allOf": [
+        { "$ref": "#/$defs/stringSet" },
+        { "type": "array", "minItems": 1 }
+      ]
+    },
+    "knownLimitations": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "$ref": "#/$defs/limitation" }
+    }
+  },
+  "$defs": {
+    "gate": {
+      "enum": [
+        "R0",
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "R5",
+        "R6",
+        "R7",
+        "R8",
+        "R9",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "maxLength": 100
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?!/)(?!\\.$)(?!.*\\\\)(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//)(?!.*\\/$).+$"
+    },
+    "boundedString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "pattern": "^[^\\s\\u0000](?:[^\\u0000]*[^\\s\\u0000])?$"
+    },
+    "stringSet": {
+      "type": "array",
+      "maxItems": 1000,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/boundedString" }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "executable", "args", "timeoutMs"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "executable": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[^/\\\\]+$"
+        },
+        "args": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "string",
+            "maxLength": 8192,
+            "pattern": "^[^\\u0000]*$"
+          }
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 3600000
+        }
+      }
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requirementId",
+        "terminalGate",
+        "status",
+        "ticketIds",
+        "testIds",
+        "commandIds",
+        "note"
+      ],
+      "properties": {
+        "requirementId": {
+          "type": "string",
+          "pattern": "^(?:FR|NFR)-[A-Z0-9]+-[0-9]{3}$"
+        },
+        "terminalGate": { "$ref": "#/$defs/gate" },
+        "status": { "const": "partial" },
+        "ticketIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^R(?:[0-9]|1[0-2])\\.[0-9]{2}$"
+          }
+        },
+        "testIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-[0-9]{3}$"
+          }
+        },
+        "commandIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "note": { "$ref": "#/$defs/boundedString" }
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "schemaVersion"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "path": { "$ref": "#/$defs/relativePath" },
+        "schemaVersion": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "mediaType"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "path": { "$ref": "#/$defs/relativePath" },
+        "mediaType": {
+          "type": "string",
+          "pattern": "^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$"
+        }
+      }
+    },
+    "limitation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "summary", "impact"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "summary": { "$ref": "#/$defs/boundedString" },
+        "impact": { "$ref": "#/$defs/boundedString" }
+      }
+    }
+  }
+}

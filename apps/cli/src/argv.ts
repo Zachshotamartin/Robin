@@ -10,6 +10,16 @@ export const POLICY_EFFECTS = ["allow", "deny", "require_approval"] as const;
 export type PolicyDefaultEffect = (typeof POLICY_EFFECTS)[number];
 export type PolicyOutputFormat = "human" | "json";
 
+export const SESSION_PERMISSION_MODES = ["ask", "plan"] as const;
+export type SessionPermissionMode = (typeof SESSION_PERMISSION_MODES)[number];
+
+export const SESSION_OUTPUT_FORMATS = ["text", "json", "stream-json"] as const;
+export type SessionOutputFormat = (typeof SESSION_OUTPUT_FORMATS)[number];
+
+export const DEFAULT_MAXIMUM_SESSION_TURNS = 16;
+export const MAXIMUM_SESSION_TURNS = 256;
+export const MAXIMUM_SESSION_PROMPT_BYTES = 65_536;
+
 export const MAXIMUM_CLI_ARGUMENTS = 128;
 export const MAXIMUM_CLI_ARGUMENT_BYTES = 1_048_576;
 export const MAXIMUM_CLI_TOTAL_ARGUMENT_BYTES = 2_097_152;
@@ -75,6 +85,25 @@ export type PolicyCliRequest =
 export type CliRequest =
   | { readonly kind: "help"; readonly command: CliHelpCommand }
   | { readonly kind: "version" }
+  | { readonly kind: "continue" }
+  | { readonly kind: "resume"; readonly selector: string | null }
+  | {
+      readonly kind: "interactive";
+      readonly prompt: string | null;
+      readonly provider: string;
+      readonly model: string | null;
+      readonly permissionMode: SessionPermissionMode;
+    }
+  | {
+      readonly kind: "print";
+      readonly prompt: string;
+      readonly provider: string;
+      readonly model: string | null;
+      readonly permissionMode: SessionPermissionMode;
+      readonly outputFormat: SessionOutputFormat;
+      readonly save: boolean;
+      readonly maximumTurns: number;
+    }
   | {
       readonly kind: "run";
       readonly profile: CliProfile;
@@ -82,6 +111,10 @@ export type CliRequest =
       readonly objective: ObjectiveInput;
     }
   | PolicyCliRequest;
+
+export type InteractiveCliRequest = Extract<CliRequest, { readonly kind: "interactive" }>;
+export type PrintCliRequest = Extract<CliRequest, { readonly kind: "print" }>;
+export type SessionCliRequest = InteractiveCliRequest | PrintCliRequest;
 
 export class CliUsageError extends Error {
   public constructor(message: string) {
@@ -104,6 +137,20 @@ const POLICY_SUBCOMMANDS = new Set([
   "explain",
   "simulate",
 ]);
+const SESSION_VALUE_OPTIONS = new Set([
+  "--provider",
+  "--model",
+  "--permission-mode",
+  "--output-format",
+  "--maximum-turns",
+]);
+const RESERVED_UNIMPLEMENTED_COMMANDS = new Set([
+  "sessions",
+  "auth",
+  "models",
+  "config",
+  "doctor",
+]);
 
 interface ParsedPolicyTokens {
   readonly positionals: readonly string[];
@@ -123,15 +170,34 @@ export function parseArgv(argv: readonly string[]): CliRequest {
   if (args.length === 1 && args[0] === "--version") {
     return Object.freeze({ kind: "version" });
   }
-  if (args.length === 0) {
-    throw new CliUsageError("A command is required.");
-  }
+  if (args.length === 0) return defaultInteractiveRequest();
   if (args[0] === "policy") {
     return parsePolicyArgv(args.slice(1));
   }
-  if (args[0] !== "run") {
-    throw new CliUsageError(`Unknown command: ${safeToken(args[0])}.`);
+  if (args[0] === "--continue") {
+    if (args.length !== 1) {
+      throw new CliUsageError("--continue does not accept arguments yet.");
+    }
+    return Object.freeze({ kind: "continue" });
   }
+  if (args[0] === "--resume") {
+    if (args.length > 2) {
+      throw new CliUsageError("--resume accepts at most one session selector.");
+    }
+    return Object.freeze({
+      kind: "resume",
+      selector:
+        args[1] === undefined
+          ? null
+          : validateSessionIdentifier(args[1], "session selector"),
+    });
+  }
+  if (RESERVED_UNIMPLEMENTED_COMMANDS.has(args[0]!)) {
+    throw new CliUsageError(
+      `Command robin ${args[0]} is reserved but not implemented in this preview.`,
+    );
+  }
+  if (args[0] !== "run") return parseSessionArgv(args);
   if (args.length === 2 && (args[1] === "--help" || args[1] === "-h")) {
     return Object.freeze({ kind: "help", command: "run" });
   }
@@ -223,7 +289,7 @@ export function parseArgv(argv: readonly string[]): CliRequest {
   }
 
   if (profile === undefined) {
-    throw new CliUsageError("--profile is required for guard run.");
+    throw new CliUsageError("--profile is required for robin run.");
   }
   const objectiveInputs = [objectiveFile, objectiveJson, delimiterObjective].filter(
     (candidate): candidate is string => candidate !== undefined,
@@ -244,6 +310,181 @@ export function parseArgv(argv: readonly string[]): CliRequest {
           : Object.freeze({ kind: "builtin" });
 
   return Object.freeze({ kind: "run", profile, format, objective });
+}
+
+function defaultInteractiveRequest(): CliRequest {
+  return Object.freeze({
+    kind: "interactive",
+    prompt: null,
+    provider: "synthetic",
+    model: null,
+    permissionMode: "ask",
+  });
+}
+
+function parseSessionArgv(args: readonly string[]): CliRequest {
+  let print = false;
+  let prompt: string | null = null;
+  let provider = "synthetic";
+  let model: string | null = null;
+  let permissionMode: SessionPermissionMode = "ask";
+  let outputFormat: SessionOutputFormat = "text";
+  let save = false;
+  let maximumTurns = DEFAULT_MAXIMUM_SESSION_TURNS;
+  let positionalOnly = false;
+  let outputFormatSpecified = false;
+  let noSaveSpecified = false;
+  let maximumTurnsSpecified = false;
+  const seen = new Set<string>();
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index]!;
+    if (token === "--" && !positionalOnly) {
+      positionalOnly = true;
+      continue;
+    }
+    if (!positionalOnly && (token === "--print" || token === "-p")) {
+      if (print) {
+        throw new CliUsageError("--print or -p may be specified only once.");
+      }
+      print = true;
+      continue;
+    }
+    if (!positionalOnly && token === "--no-save") {
+      if (noSaveSpecified) {
+        throw new CliUsageError("Option --no-save may be specified only once.");
+      }
+      noSaveSpecified = true;
+      save = false;
+      continue;
+    }
+    if (!positionalOnly && token.startsWith("-")) {
+      if (!SESSION_VALUE_OPTIONS.has(token)) {
+        throw new CliUsageError(`Unknown option: ${safeToken(token)}.`);
+      }
+      if (seen.has(token)) {
+        throw new CliUsageError(`Option ${token} may be specified only once.`);
+      }
+      seen.add(token);
+      const value = args[index + 1];
+      if (value === undefined || value === "--" || value.startsWith("--")) {
+        throw new CliUsageError(`Option ${token} requires an explicit value.`);
+      }
+      index += 1;
+      switch (token) {
+        case "--provider":
+          provider = validateSessionIdentifier(value, "--provider");
+          break;
+        case "--model":
+          model = validateSessionIdentifier(value, "--model");
+          break;
+        case "--permission-mode":
+          if (!isSessionPermissionMode(value)) {
+            throw new CliUsageError("--permission-mode must be ask or plan.");
+          }
+          permissionMode = value;
+          break;
+        case "--output-format":
+          if (!isSessionOutputFormat(value)) {
+            throw new CliUsageError(
+              "--output-format must be text, json, or stream-json.",
+            );
+          }
+          outputFormatSpecified = true;
+          outputFormat = value;
+          break;
+        case "--maximum-turns":
+          maximumTurnsSpecified = true;
+          maximumTurns = parseMaximumTurns(value);
+          break;
+      }
+      continue;
+    }
+    if (prompt !== null) {
+      throw new CliUsageError("Robin accepts at most one prompt argument.");
+    }
+    prompt = validateSessionPrompt(token);
+  }
+
+  if (!print) {
+    if (outputFormatSpecified) {
+      throw new CliUsageError("--output-format requires --print.");
+    }
+    if (noSaveSpecified) {
+      throw new CliUsageError("--no-save requires --print.");
+    }
+    if (maximumTurnsSpecified) {
+      throw new CliUsageError("--maximum-turns requires --print.");
+    }
+    return Object.freeze({
+      kind: "interactive",
+      prompt,
+      provider,
+      model,
+      permissionMode,
+    });
+  }
+  if (prompt === null) {
+    throw new CliUsageError("--print requires exactly one prompt argument.");
+  }
+  return Object.freeze({
+    kind: "print",
+    prompt,
+    provider,
+    model,
+    permissionMode,
+    outputFormat,
+    save,
+    maximumTurns,
+  });
+}
+
+function validateSessionIdentifier(value: string, option: string): string {
+  if (
+    value.length === 0 ||
+    Buffer.byteLength(value, "utf8") > 256 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u.test(value)
+  ) {
+    throw new CliUsageError(`${option} requires a bounded identifier.`);
+  }
+  return value;
+}
+
+function validateSessionPrompt(value: string): string {
+  if (
+    value.trim().length === 0 ||
+    value.includes("\u0000") ||
+    containsUnpairedSurrogate(value) ||
+    Buffer.byteLength(value, "utf8") > MAXIMUM_SESSION_PROMPT_BYTES
+  ) {
+    throw new CliUsageError("The prompt must be non-empty and bounded.");
+  }
+  return value;
+}
+
+function containsUnpairedSurrogate(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const following = value.charCodeAt(index + 1);
+      if (following < 0xdc00 || following > 0xdfff) return true;
+      index += 1;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function parseMaximumTurns(value: string): number {
+  if (!/^(?:[1-9][0-9]{0,2})$/u.test(value)) {
+    throw new CliUsageError("--maximum-turns must be an integer from 1 through 256.");
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed > MAXIMUM_SESSION_TURNS) {
+    throw new CliUsageError("--maximum-turns must be an integer from 1 through 256.");
+  }
+  return parsed;
 }
 
 function parsePolicyArgv(argv: readonly string[]): CliRequest {
@@ -351,7 +592,7 @@ function parseSimulateRequest(tokens: readonly string[]): PolicyCliRequest {
     new Set(["--catalog", "--from-catalog", "--to-catalog"]),
   );
   if (parsed.positionals.length !== 0) {
-    throw new CliUsageError("guard policy simulate accepts no positional arguments.");
+    throw new CliUsageError("robin policy simulate accepts no positional arguments.");
   }
   const rawCursor = parsed.values.get("--cursor") ?? null;
   if (
@@ -463,7 +704,7 @@ function parsePolicyTokens(
 function onePolicyPath(positionals: readonly string[], command: string): string {
   if (positionals.length !== 1) {
     throw new CliUsageError(
-      `guard policy ${command} requires exactly one policy source path.`,
+      `robin policy ${command} requires exactly one policy source path.`,
     );
   }
   return positionals[0]!;
@@ -528,6 +769,14 @@ function isOutputFormat(value: string): value is OutputFormat {
 
 function isPolicyEffect(value: string): value is PolicyDefaultEffect {
   return (POLICY_EFFECTS as readonly string[]).includes(value);
+}
+
+function isSessionPermissionMode(value: string): value is SessionPermissionMode {
+  return (SESSION_PERMISSION_MODES as readonly string[]).includes(value);
+}
+
+function isSessionOutputFormat(value: string): value is SessionOutputFormat {
+  return (SESSION_OUTPUT_FORMATS as readonly string[]).includes(value);
 }
 
 function captureArgv(value: readonly string[]): readonly string[] {

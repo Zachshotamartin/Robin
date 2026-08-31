@@ -1,10 +1,20 @@
-# Guarded Agent: Threat Model
+# Robin: Threat Model
 
 ## 1. Scope and Security Objective
 
-The threat model covers a local general agent runtime that releases selected context to an interchangeable model or external agent, receives proposed capability actions and outcomes, applies policy and approval decisions, executes bounded effects through profile-specific adapters, and persists audit/recovery state. Coding worktrees and containers are the highest-risk reference profile; local-corpus research is the non-coding reference profile.
+The threat model covers Robin, a local coding-agent CLI that releases selected
+repository and conversation context to a configured model, receives streamed
+text and tool requests, applies permissions and approvals, edits a developer
+workspace, runs bounded processes, performs explicit Git actions, and persists
+resumable local sessions. Optional worktrees, command sandboxes, MCP servers,
+hooks, subagents, external agents, daemons, and editor clients add boundaries as
+their milestones are implemented.
 
-Primary objective: prevent an untrusted agent/model, malicious source, malformed provider/protocol response, compromised adapter, or stale client from obtaining context or causing effects beyond the authority represented by the pinned task profile, policy, exact approval, compatibility tier, and execution profile.
+Primary objective: prevent an untrusted model, malicious repository content,
+malformed provider or extension response, compromised adapter, or stale client
+from obtaining context or causing effects beyond the authority represented by
+the coding session, configured roots, tool definition, permission policy, exact
+approval, compatibility tier, and execution profile.
 
 This is not a claim that containers defeat every kernel exploit or that a local administrator cannot tamper with their own data.
 
@@ -51,7 +61,7 @@ This is not a claim that containers defeat every kernel exploit or that a local 
 ## 4. Trust Assumptions
 
 - Operating system, container runtime, Git, PostgreSQL, Node runtime, and standard cryptographic implementation are trusted within documented limits.
-- The local user invoking Guarded Agent is authorized to inspect the selected repository.
+- The local user invoking Robin is authorized to inspect the selected repository.
 - A local administrator can defeat local controls and is not fully contained.
 - A remote provider or hosted agent receives context explicitly released to it; confidentiality after release depends on its terms, implementation, and configuration.
 - In-process provider/agent/capability adapters are trusted supply-chain code; unreviewed or task-supplied executable adapters are not loaded.
@@ -636,7 +646,7 @@ Evidence:
 | Text-only model prints a shell command or tool-call-shaped JSON | Content remains non-executable; no action or handler invocation exists |
 | Model profile claims unsupported tool or media capability | Startup rejects before credential resolution or source transmission |
 | Endpoint redirects a bearer credential | Trusted transport rejects redirect and sends no authentication to the new origin |
-| ACP agent asks the user for permission | Request may be displayed, but no Guarded approval exists and action cannot execute |
+| ACP agent asks the user for permission | Request may be displayed, but no Robin approval exists and action cannot execute |
 | MCP server marks a dangerous tool read-only | Annotation is ignored for enforcement; installed operation metadata and policy decide |
 | Repository requests installation of its own MCP server/adapter | Runtime refuses executable extension loading from analyzed content |
 | Contained CLI agent searches for API keys | No key is mounted/inherited; filtered snapshot and egress policy contain the attempt |

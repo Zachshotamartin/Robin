@@ -1,0 +1,26 @@
+{
+  "name": "@guard/robin-agent",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Provider-neutral direct-model coding session loop for Robin.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build",
+    "test": "npm run build && node --test --test-reporter=../../scripts/deterministic-test-reporter.mjs dist/*.test.js"
+  },
+  "dependencies": {
+    "@guard/contracts": "0.0.0",
+    "@guard/model-provider": "0.0.0"
+  }
+}

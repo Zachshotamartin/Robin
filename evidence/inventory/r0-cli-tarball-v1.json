@@ -1,0 +1,368 @@
+{
+  "schemaVersion": 1,
+  "packageName": "@zachshotamartin/robin",
+  "archive": {
+    "filename": "zachshotamartin-robin-0.0.0.tgz",
+    "tar": {
+      "bytes": 212480,
+      "sha256": "3fed3e5da67271521247633cb40ccbb1ea1b8fe9b46cc592d72bcdd4846675bd"
+    },
+    "compressionProfiles": [
+      {
+        "id": "darwin-arm64-npm-11-19-0-gzip-v1",
+        "platform": "darwin",
+        "arch": "arm64",
+        "npmVersion": "11.19.0",
+        "bytes": 38290,
+        "sha256": "09517ac6bce3eef26de165068f05eed151833ed92aa1f9a41e6afad92c7c01a9"
+      },
+      {
+        "id": "darwin-arm64-npm-10-9-8-gzip-v1",
+        "platform": "darwin",
+        "arch": "arm64",
+        "npmVersion": "10.9.8",
+        "bytes": 38438,
+        "sha256": "d8fd3fb748b79a0bff12204f547931aaf66290e9bbcd2c61c8478cfc05a888e4"
+      },
+      {
+        "id": "linux-x64-npm-10-9-8-gzip-v1",
+        "platform": "linux",
+        "arch": "x64",
+        "npmVersion": "10.9.8",
+        "bytes": 38438,
+        "sha256": "d8fd3fb748b79a0bff12204f547931aaf66290e9bbcd2c61c8478cfc05a888e4"
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": "LICENSE",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 1071,
+      "sha256": "6cd661b3f399367d0c974ba42f61f462642d6ac5abf0874525a3c648fd2f7163"
+    },
+    {
+      "path": "README.md",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 5678,
+      "sha256": "f0944276a94becb91826dc2f59c38b083cab10f3c184617bef326a37c1726b84"
+    },
+    {
+      "path": "dist/argv.d.ts",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 4214,
+      "sha256": "2a3fb8d92e02f819e400a3c8b5dbfaf5a048abad3875ec867b5ea9bdbf57b1de"
+    },
+    {
+      "path": "dist/argv.d.ts.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 3939,
+      "sha256": "96e51b5ed3c040007fca8f47eb399886bbf636b6eac289f76b59fbf25839a4cf"
+    },
+    {
+      "path": "dist/argv.js",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 23831,
+      "sha256": "8a372bf45d436da36e7ef09ceeb0a71d45536c051f51317f76fb22c1dd43a37c"
+    },
+    {
+      "path": "dist/argv.js.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 21799,
+      "sha256": "f5f16c193035d4c4162b839e9b82cadf2b724cd31c5c1fda6186c7c5e307851f"
+    },
+    {
+      "path": "dist/bin.d.ts",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 64,
+      "sha256": "eacba108ec9dd580caa5068fe681580d84c4afa3473d19fd2b5b607237f3a25c"
+    },
+    {
+      "path": "dist/bin.d.ts.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 100,
+      "sha256": "c5ed654e79ddd9ae0c330f5ea6b66d5f9e94d567b8880961b305c3e00b008127"
+    },
+    {
+      "path": "dist/bin.js",
+      "type": "file",
+      "mode": "0755",
+      "bytes": 533,
+      "sha256": "b4af2ad346a145ea301bbd732bcf75d29f7b610fd4a552ed0985c14cf9f85033"
+    },
+    {
+      "path": "dist/bin.js.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 671,
+      "sha256": "96f61b51982426db1d0cf401ebe18f80350c1a12c288a84053d0ab7204191f03"
+    },
+    {
+      "path": "dist/exit-codes.d.ts",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 421,
+      "sha256": "dc1494cc3d26da6441d65a04e57ac77f7422ac0fafc0b89a8f574f52bfb33e2e"
+    },
+    {
+      "path": "dist/exit-codes.d.ts.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 231,
+      "sha256": "6a9e4fe3d9faa84003aa35096f685117b1122a890bb4f12e057db8acfc0c4bb7"
+    },
+    {
+      "path": "dist/exit-codes.js",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 1297,
+      "sha256": "1d71ccb7cf2d883b4d9eed38c329d29fc086ff295d881551cd12c5196789d5bd"
+    },
+    {
+      "path": "dist/exit-codes.js.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 992,
+      "sha256": "bb3ce78fb611958d5888446cf0464fc27e1b8025c9805d1d098a65dfce201e5f"
+    },
+    {
+      "path": "dist/generated-build-metadata.d.ts",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 252,
+      "sha256": "720f90623b4874efc2c5f2c31dfdbda47ee0aa89b9af147e40a022ec69f2f818"
+    },
+    {
+      "path": "dist/generated-build-metadata.d.ts.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 218,
+      "sha256": "1e86b1dfb28f82833a288d7d7150090849be9e92a8582258b5aea7507225afaa"
+    },
+    {
+      "path": "dist/generated-build-metadata.js",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 278,
+      "sha256": "d877f67167746891b00dba8806fdcec152925c1e53c694fc64e92395a226d218"
+    },
+    {
+      "path": "dist/generated-build-metadata.js.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 303,
+      "sha256": "941ecc0ad1e5d199d970adafd8443beecf2d163ce182c122a02faabc8fb7323f"
+    },
+    {
+      "path": "dist/index.d.ts",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 1779,
+      "sha256": "72eb98736e6e4eed6862b4a0e9d4ddfd5451211d2a552835deeeceb1a0b382c0"
+    },
+    {
+      "path": "dist/index.d.ts.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 1218,
+      "sha256": "c4ef2b415539b0a712fb738218e7c9989a4d9b39e1d96b33144e5ebf133a033b"
+    },
+    {
+      "path": "dist/index.js",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 1199,
+      "sha256": "4d0e0469fcd6ef4de41bbbe16b888477a290d9cf22a526e2fdcc440f1e533929"
+    },
+    {
+      "path": "dist/index.js.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 816,
+      "sha256": "bb65be7bc4868b205274b9f0d2fab14d448ca1c9726ea872165fd8df54d0b181"
+    },
+    {
+      "path": "dist/main.d.ts",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 1570,
+      "sha256": "6c3722ecbc944265e9fcbeeca954fe1e31d5b4a512e69c3c4b0dce9ae151e937"
+    },
+    {
+      "path": "dist/main.d.ts.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 1367,
+      "sha256": "89e7b4d1a24a4a0a517380a93d71121aa09fe354c3ca65f24b3325f27200c972"
+    },
+    {
+      "path": "dist/main.js",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 9085,
+      "sha256": "0458e1895513f4af26cb4a4c9966c42e98712709b4cb6c87fa539f62b65429db"
+    },
+    {
+      "path": "dist/main.js.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 3857,
+      "sha256": "16ee61004ed36941a5d72a93a4e3bfc9ac91ccd0bbe546f247fbee8b8ae14433"
+    },
+    {
+      "path": "dist/objectives.d.ts",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 943,
+      "sha256": "04c77a9795d650b60b558bc0b07194e8a6fb41ceee3722960411fa9b545732e5"
+    },
+    {
+      "path": "dist/objectives.d.ts.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 574,
+      "sha256": "c462043c1a46d8265f6e75d33ffbfe35b4c9fba617d2b67a7d8fb7950f473eba"
+    },
+    {
+      "path": "dist/objectives.js",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 7021,
+      "sha256": "0b1bdec1f292d0bb1b4594dc1fc56ada5cff385df40b69990ed0a096b30d2aaf"
+    },
+    {
+      "path": "dist/objectives.js.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 5807,
+      "sha256": "e26d249dc8149f92e7d5306bcbd3589d852f044c6b8f17b9870c0b7334b003d0"
+    },
+    {
+      "path": "dist/policy-commands.d.ts",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 1159,
+      "sha256": "69071d98267099de36c698a446e3dec3dc62e483f0129449b7ff167dce3f86f6"
+    },
+    {
+      "path": "dist/policy-commands.d.ts.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 901,
+      "sha256": "12e90b8699abe12cd7c5922b4e67c2e2955f9643b7f5815c777fb5a2274bd2c9"
+    },
+    {
+      "path": "dist/policy-commands.js",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 19028,
+      "sha256": "1bc157f30788f8a2f04bdb836eea6a2de994fe04fbed2e295e093de9b96caa7b"
+    },
+    {
+      "path": "dist/policy-commands.js.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 17658,
+      "sha256": "ecb271b7e56f7119781f1ad3b347665fd536ece24517403eaf9d36ce4c059950"
+    },
+    {
+      "path": "dist/render.d.ts",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 734,
+      "sha256": "23c7ad535d945586cc02c6237af39992e4527a6802a241d7dd09f7e52f8e9cf9"
+    },
+    {
+      "path": "dist/render.d.ts.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 683,
+      "sha256": "d86eddf8ba78fdb1e9288628365d5163197ebd312ed6ed3bae594b19a09ac54d"
+    },
+    {
+      "path": "dist/render.js",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 3275,
+      "sha256": "71af44a0206f22855818bfb40590caf42acfe0db96bf135b6374b6ca50be315d"
+    },
+    {
+      "path": "dist/render.js.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 3566,
+      "sha256": "c57a2eab6896bb6d846ddcc4281a5098365d4a5d0075cabe33ea20f9984e5de5"
+    },
+    {
+      "path": "dist/session-command.d.ts",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 920,
+      "sha256": "2f167b2fe71e51009e8b92667a05274c9274bcace7ef07b8b789fe56af0b70ed"
+    },
+    {
+      "path": "dist/session-command.d.ts.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 835,
+      "sha256": "8d628e5ac498e60b07da193e1ba44a7c446f052e8ea9e04d153a46317a3bfde3"
+    },
+    {
+      "path": "dist/session-command.js",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 8860,
+      "sha256": "a36396e26490dd9d8c739056c963f9a9dee03761df61bfbd2800add3a710f66b"
+    },
+    {
+      "path": "dist/session-command.js.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 7821,
+      "sha256": "7691f393d03bb64aafd32f5534d5c6f435b9c13b50b2282fef9c0e944a693e85"
+    },
+    {
+      "path": "dist/warm-cli.d.ts",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 502,
+      "sha256": "c1a492f952d27f545899ebfc2ebb3ae15b0c8c9462b5fe1131c9857c2d7430b7"
+    },
+    {
+      "path": "dist/warm-cli.d.ts.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 585,
+      "sha256": "d010803f9508f5393982acf343d52cdd7eda00b57069b349e6461efeb6a76ac1"
+    },
+    {
+      "path": "dist/warm-cli.js",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 2573,
+      "sha256": "d67dd22fb911cd5cdc7a783665c89fdd34911191fe74de6281cc57216570d6bb"
+    },
+    {
+      "path": "dist/warm-cli.js.map",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 2448,
+      "sha256": "4befe98b3dae11711a2a32627007c0b4d6f1baf40163c8ead993cc58c3241e49"
+    },
+    {
+      "path": "package.json",
+      "type": "file",
+      "mode": "0644",
+      "bytes": 1553,
+      "sha256": "f88a1401805d57974cf137216f30fdc8f38caf46cd6f73d63abd96da4d014b3c"
+    }
+  ]
+}

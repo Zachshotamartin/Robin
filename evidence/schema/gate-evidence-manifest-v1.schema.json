@@ -1,0 +1,382 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robin.invalid/schema/gate-evidence-manifest-v1.json",
+  "title": "Robin gate evidence manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "gate",
+    "commit",
+    "dirty",
+    "robinVersion",
+    "dependencyLockSha256",
+    "environment",
+    "commands",
+    "requirements",
+    "fixtures",
+    "artifacts",
+    "supportedClaims",
+    "deferredClaims",
+    "knownLimitations",
+    "generatedAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "gate": { "$ref": "#/$defs/gate" },
+    "commit": {
+      "type": "string",
+      "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+    },
+    "dirty": { "const": false },
+    "robinVersion": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "dependencyLockSha256": { "$ref": "#/$defs/sha256" },
+    "environment": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": { "$ref": "#/$defs/environment" },
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "required": ["name"],
+            "properties": { "name": { "const": "platform" } }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": ["name"],
+            "properties": { "name": { "const": "arch" } }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": ["name"],
+            "properties": { "name": { "const": "node" } }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": ["name"],
+            "properties": { "name": { "const": "npm" } }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": ["name"],
+            "properties": { "name": { "const": "git" } }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": ["name", "value"],
+            "properties": {
+              "name": { "const": "commandIsolation" },
+              "value": {
+                "enum": [
+                  "macos-sandbox-exec-source-deny",
+                  "posix-process-group-source-audit",
+                  "windows-direct-child-source-audit-unsupported"
+                ]
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "commands": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/commandResult" }
+    },
+    "requirements": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "$ref": "#/$defs/requirement" }
+    },
+    "fixtures": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "$ref": "#/$defs/capturedFixture" }
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "$ref": "#/$defs/capturedArtifact" }
+    },
+    "supportedClaims": { "$ref": "#/$defs/stringSet" },
+    "deferredClaims": {
+      "allOf": [
+        { "$ref": "#/$defs/stringSet" },
+        { "type": "array", "minItems": 1 }
+      ]
+    },
+    "knownLimitations": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "$ref": "#/$defs/limitation" }
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "gate": {
+      "enum": [
+        "R0",
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "R5",
+        "R6",
+        "R7",
+        "R8",
+        "R9",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "maxLength": 100
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?!/)(?!\\.$)(?!.*\\\\)(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//)(?!.*\\/$).+$"
+    },
+    "boundedString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "pattern": "^[^\\s\\u0000](?:[^\\u0000]*[^\\s\\u0000])?$"
+    },
+    "stringSet": {
+      "type": "array",
+      "maxItems": 1000,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/boundedString" }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value"],
+      "properties": {
+        "name": {
+          "enum": ["platform", "arch", "node", "npm", "git", "commandIsolation"]
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "observedStreamDigest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "sha256"],
+      "properties": {
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "replayStreamDigest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["normalization", "bytes", "sha256"],
+      "properties": {
+        "normalization": { "const": "ascii-digit-runs-v1" },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "streamEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed", "replay"],
+      "properties": {
+        "observed": { "$ref": "#/$defs/observedStreamDigest" },
+        "replay": { "$ref": "#/$defs/replayStreamDigest" }
+      }
+    },
+    "durationVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "factor", "slackMs"],
+      "properties": {
+        "mode": { "const": "replay-envelope-v1" },
+        "factor": { "const": 4 },
+        "slackMs": { "const": 1000 }
+      }
+    },
+    "commandResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "executable",
+        "args",
+        "display",
+        "timeoutMs",
+        "exitCode",
+        "signal",
+        "status",
+        "observedDurationMs",
+        "durationVerification",
+        "stdout",
+        "stderr",
+        "summary"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "executable": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[^/\\\\]+$"
+        },
+        "args": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "string",
+            "maxLength": 8192,
+            "pattern": "^[^\\u0000]*$"
+          }
+        },
+        "display": { "type": "string", "minLength": 2 },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 3600000
+        },
+        "exitCode": { "const": 0 },
+        "signal": { "const": null },
+        "status": { "const": "passed" },
+        "observedDurationMs": { "type": "integer", "minimum": 0, "maximum": 3600000 },
+        "durationVerification": { "$ref": "#/$defs/durationVerification" },
+        "stdout": { "$ref": "#/$defs/streamEvidence" },
+        "stderr": { "$ref": "#/$defs/streamEvidence" },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requirementId",
+        "terminalGate",
+        "status",
+        "ticketIds",
+        "testIds",
+        "commandIds",
+        "note"
+      ],
+      "properties": {
+        "requirementId": {
+          "type": "string",
+          "pattern": "^(?:FR|NFR)-[A-Z0-9]+-[0-9]{3}$"
+        },
+        "terminalGate": { "$ref": "#/$defs/gate" },
+        "status": { "const": "partial" },
+        "ticketIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^R(?:[0-9]|1[0-2])\\.[0-9]{2}$"
+          }
+        },
+        "testIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-[0-9]{3}$"
+          }
+        },
+        "commandIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "note": { "$ref": "#/$defs/boundedString" }
+      }
+    },
+    "capturedFixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "schemaVersion", "bytes", "sha256"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "path": { "$ref": "#/$defs/relativePath" },
+        "schemaVersion": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "capturedArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "mediaType", "bytes", "sha256"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "path": { "$ref": "#/$defs/relativePath" },
+        "mediaType": {
+          "type": "string",
+          "pattern": "^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$"
+        },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "limitation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "summary", "impact"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "summary": { "$ref": "#/$defs/boundedString" },
+        "impact": { "$ref": "#/$defs/boundedString" }
+      }
+    }
+  }
+}

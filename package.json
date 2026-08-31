@@ -1,9 +1,17 @@
 {
-  "name": "guarded-agent",
+  "name": "robin",
   "version": "0.0.0",
   "private": true,
-  "description": "A policy-enforced runtime for interchangeable agents, models, context sources, and capability packs.",
+  "description": "A provider-flexible coding agent CLI for interactive repository work.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Zachshotamartin/Robin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Zachshotamartin/Robin/issues"
+  },
+  "homepage": "https://github.com/Zachshotamartin/Robin#readme",
   "type": "module",
   "engines": {
     "node": ">=22.0.0",
@@ -14,26 +22,39 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "node scripts/run-workspace-script.mjs build",
     "check": "npm run static && npm run test:unit",
+    "evidence:capture:r0": "node scripts/gate-evidence.mjs capture --config evidence/config/r0.json --output evidence/manifests/r0.json",
+    "evidence:validate": "node scripts/gate-evidence.mjs validate",
+    "evidence:validate-config:r0": "node scripts/gate-evidence.mjs validate-config --config evidence/config/r0.json",
     "static": "npm run typecheck && npm run test:repository",
     "test": "npm run test:repository && npm run test:unit",
-    "test:repository": "node --test scripts/check-docs.test.mjs scripts/check-architecture.test.mjs scripts/check-gate-b-configuration.test.mjs scripts/check-repository-policy.test.mjs",
-    "test:unit": "npm run test --workspaces --if-present",
+    "test:evidence": "node --test --test-reporter=./scripts/deterministic-test-reporter.mjs scripts/gate-evidence.test.mjs",
+    "test:reporter": "node --test --test-reporter=./scripts/deterministic-test-reporter.mjs scripts/deterministic-test-reporter.test.mjs",
+    "test:repository": "node --test --test-reporter=./scripts/deterministic-test-reporter.mjs scripts/check-docs.test.mjs scripts/check-architecture.test.mjs scripts/check-gate-b-configuration.test.mjs scripts/check-repository-policy.test.mjs scripts/deterministic-test-reporter.test.mjs scripts/gate-evidence.test.mjs scripts/workspace-graph.test.mjs",
+    "test:unit": "node scripts/run-workspace-script.mjs test",
     "test:contracts": "npm run test:gate:b:contracts",
-    "test:gate:b:contracts": "npm run test --workspace @guard/contracts --workspace @guard/schema-validation --workspace @guard/profile-registry --workspace @guard/event-store --workspace @guard/agent-driver --workspace @guard/model-provider --workspace @guard/policy-language --workspace @guard/policy-engine --workspace @guard/context-broker --workspace @guard/capability-gateway --workspace @guard/capability-synthetic --workspace @guard/capability-repository --workspace @guard/runtime --workspace @guard/runtime-host --workspace @guard/milestone-a-scenarios --workspace @guard/cli",
+    "pretest:gate:b:contracts": "npm run build",
+    "test:gate:b:contracts": "npm run test --workspace @guard/contracts --workspace @guard/schema-validation --workspace @guard/profile-registry --workspace @guard/event-store --workspace @guard/agent-driver --workspace @guard/model-provider --workspace @guard/policy-language --workspace @guard/policy-engine --workspace @guard/context-broker --workspace @guard/capability-gateway --workspace @guard/capability-synthetic --workspace @guard/capability-repository --workspace @guard/runtime --workspace @guard/runtime-host --workspace @guard/milestone-a-scenarios --workspace @guard/robin-agent --workspace @guard/robin-application --workspace @zachshotamartin/robin",
+    "pretest:eval:deterministic": "npm run build",
     "test:eval:deterministic": "npm run test --workspace @guard/milestone-b-scenarios",
+    "pretest:policy-parser": "npm run build",
     "test:policy-parser": "npm run test --workspace @guard/policy-language",
+    "pretest:policy-engine": "npm run build",
     "test:policy-engine": "npm run test --workspace @guard/policy-engine",
+    "pretest:mutation:boundaries": "npm run build",
     "test:mutation:boundaries": "node scripts/run-boundary-mutation-tests.mjs",
+    "pretest:mutation:policy": "npm run build",
     "test:mutation:policy": "npm run test:mutation --workspace @guard/policy-engine",
+    "pretest:mutation:gate:b": "npm run build",
     "test:mutation:gate:b": "npm run test:mutation:boundaries && npm run test:mutation:policy",
     "test:gate:a": "npm run test:repository && npm run test:contracts",
     "test:gate:b": "npm run test:repository && npm run test:gate:b:contracts && npm run test:eval:deterministic && npm run test:mutation:gate:b",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "node scripts/run-workspace-script.mjs typecheck"
   },
   "devDependencies": {
     "@types/node": "26.4.0",
+    "ajv": "8.20.0",
     "typescript": "7.0.2"
   }
 }

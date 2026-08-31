@@ -1,4 +1,4 @@
-# Guarded Agent: Open Questions and Deferred Decisions
+# Robin: Open Questions and Deferred Decisions
 
 A forward-looking register of decisions the plan intentionally defers. Each entry names its current fail-closed position and the concrete trigger that reopens it. Closing an entry requires an ADR under `docs/decisions/` and, where marked, new threat-model and test coverage. This register complements the [deep audit](./DEEP_AUDIT.md), which records resolved findings.
 

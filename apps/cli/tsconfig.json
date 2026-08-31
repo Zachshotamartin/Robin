@@ -9,6 +9,7 @@
     { "path": "../../packages/contracts" },
     { "path": "../../packages/milestone-a-scenarios" },
     { "path": "../../packages/policy-engine" },
-    { "path": "../../packages/policy-language" }
+    { "path": "../../packages/policy-language" },
+    { "path": "../../packages/robin-application" }
   ]
 }

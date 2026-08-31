@@ -1,12 +1,19 @@
 # ADR-0001: Foundational Technology and Scope Choices
 
-- Status: accepted
+- Status: superseded by ADR-0007
 - Date: 2026-08-30
 - Related findings or requirements: DA-050 (partially), DA-057, DA-058, PLAN_REVIEW corrections 1, 2, 6, 7, 10
 
 ## Context
 
-The planning documents settled a set of foundational choices before implementation. Those choices were distributed across the build plan, plan review, and deep audit but were never recorded as explicit decisions with alternatives. This ADR consolidates them so later reversals follow the documented ADR rule instead of silent drift.
+The planning documents settled a set of foundational choices before
+implementation. Those choices were distributed across the build plan, plan
+review, and deep audit but were never recorded as explicit decisions with
+alternatives. ADR-0007 later reversed the product shape, local persistence,
+default workspace, provider-transport preference, and sequencing as a coherent
+coding-agent CLI pivot. The language/runtime, narrow-dependency discipline,
+policy-language implementation, and MIT license decisions remain applicable
+through the newer documents.
 
 ## Decision
 

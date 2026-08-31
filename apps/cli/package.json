@@ -1,12 +1,21 @@
 {
-  "name": "@guard/cli",
+  "name": "@zachshotamartin/robin",
   "version": "0.0.0",
   "private": true,
-  "description": "Command-line interface for deterministic Guarded Agent runs and policy debugging.",
+  "description": "Robin coding agent CLI for interactive, provider-flexible repository work.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Zachshotamartin/Robin.git",
+    "directory": "apps/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/Zachshotamartin/Robin/issues"
+  },
+  "homepage": "https://github.com/Zachshotamartin/Robin#readme",
   "type": "module",
   "bin": {
-    "guard": "./dist/bin.js"
+    "robin": "./dist/bin.js"
   },
   "exports": {
     ".": {
@@ -16,19 +25,26 @@
   },
   "files": [
     "dist",
-    "README.md",
-    "testdata"
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.test.d.ts.map",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.js.map",
+    "LICENSE",
+    "README.md"
   ],
   "scripts": {
-    "build": "tsc --build",
+    "generate:build-metadata": "node scripts/generate-build-metadata.mjs",
+    "check:build-metadata": "node scripts/generate-build-metadata.mjs --check",
+    "build": "npm run generate:build-metadata && tsc --build && node scripts/ensure-bin-executable.mjs",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "typecheck": "tsc --build --force",
-    "test": "npm run build && node --test dist/*.test.js"
+    "typecheck": "npm run check:build-metadata && tsc --build",
+    "test": "npm run build && node --test --test-reporter=../../scripts/deterministic-test-reporter.mjs dist/*.test.js"
   },
   "dependencies": {
     "@guard/contracts": "0.0.0",
     "@guard/milestone-a-scenarios": "0.0.0",
     "@guard/policy-engine": "0.0.0",
-    "@guard/policy-language": "0.0.0"
+    "@guard/policy-language": "0.0.0",
+    "@guard/robin-application": "0.0.0"
   }
 }

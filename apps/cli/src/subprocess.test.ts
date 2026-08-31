@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
-import { execFile as execFileCallback } from "node:child_process";
+import {
+  execFile as execFileCallback,
+  spawn,
+} from "node:child_process";
+import { once } from "node:events";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
+
+import { GENERATED_BUILD_METADATA } from "./generated-build-metadata.js";
 
 const execFile = promisify(execFileCallback);
 const BIN = fileURLToPath(new URL("./bin.js", import.meta.url));
@@ -30,6 +36,114 @@ const POLICY_ACTION = fileURLToPath(
 const POLICY_ACTIONS = fileURLToPath(
   new URL("../testdata/policy-actions-v1.json", import.meta.url),
 );
+const COLD_PATH_LOADER = fileURLToPath(
+  new URL("../scripts/reject-warm-cli-imports.mjs", import.meta.url),
+);
+const COLD_SIDE_EFFECT_SENTINEL = fileURLToPath(
+  new URL("../scripts/reject-cold-side-effects.mjs", import.meta.url),
+);
+const PROCESS_INTERNALS = process as typeof process & {
+  readonly binding?: (name: string) => unknown;
+  readonly _debugProcess?: (processId: number) => void;
+  readonly _kill?: (processId: number, signal: number) => unknown;
+  readonly _linkedBinding?: (name: string) => unknown;
+};
+
+test("help, version, and parse failures never resolve the warm CLI graph", async () => {
+  const cases = [
+    {
+      argv: ["--version"],
+      stdout: new RegExp(`^${escapeRegExp(GENERATED_BUILD_METADATA.version)}\\n$`, "u"),
+      stderr: /^$/u,
+      code: 0,
+    },
+    { argv: ["--help"], stdout: /^Usage: robin /u, stderr: /^$/u, code: 0 },
+    { argv: ["run", "--help"], stdout: /^Usage: robin run /u, stderr: /^$/u, code: 0 },
+    { argv: ["policy", "--help"], stdout: /^Usage: robin policy /u, stderr: /^$/u, code: 0 },
+    { argv: ["policy", "check", "--help"], stdout: /^Usage: robin policy check /u, stderr: /^$/u, code: 0 },
+    { argv: ["policy", "format", "--help"], stdout: /^Usage: robin policy format /u, stderr: /^$/u, code: 0 },
+    { argv: ["policy", "test", "--help"], stdout: /^Usage: robin policy test /u, stderr: /^$/u, code: 0 },
+    { argv: ["policy", "explain", "--help"], stdout: /^Usage: robin policy explain /u, stderr: /^$/u, code: 0 },
+    { argv: ["policy", "simulate", "--help"], stdout: /^Usage: robin policy simulate /u, stderr: /^$/u, code: 0 },
+    {
+      argv: ["--unknown-cold-path-option"],
+      stdout: /^$/u,
+      stderr: /^robin: Unknown option: --unknown-cold-path-option\./u,
+      code: 2,
+    },
+  ] as const;
+
+  for (const fixture of cases) {
+    const result = await executeCold(fixture.argv);
+    assert.equal(result.code, fixture.code, fixture.argv.join(" "));
+    assert.match(result.stdout, fixture.stdout, fixture.argv.join(" "));
+    assert.match(result.stderr, fixture.stderr, fixture.argv.join(" "));
+  }
+
+  const armedSentinel = await executeCold(["-p", "prove the warm boundary"]);
+  assert.equal(armedSentinel.code, 7);
+  assert.match(armedSentinel.stderr, /robin_cold_path_warm_import/u);
+
+  const forbiddenBuiltinImport = await executeNode([
+    "--no-warnings",
+    "--experimental-loader",
+    pathToFileURL(COLD_PATH_LOADER).href,
+    "--input-type=module",
+    "--eval",
+    "await import('node:fs')",
+  ]);
+  assert.notEqual(forbiddenBuiltinImport.code, 0);
+  assert.match(
+    forbiddenBuiltinImport.stderr,
+    /robin_cold_path_warm_import/u,
+  );
+
+  const sideEffectProbes = [
+    "await fetch('https://example.invalid')",
+    "process.stdin.setRawMode(true)",
+  ];
+  if (typeof process.getBuiltinModule === "function") {
+    sideEffectProbes.push("process.getBuiltinModule('node:fs')");
+    sideEffectProbes.push(
+      "process.getBuiltinModule('node:module').createRequire(import.meta.url)('node:fs')",
+    );
+  }
+  if (typeof PROCESS_INTERNALS.binding === "function") {
+    sideEffectProbes.push("process.binding('fs')");
+  }
+  if (typeof PROCESS_INTERNALS._linkedBinding === "function") {
+    sideEffectProbes.push("process._linkedBinding('fs')");
+  }
+  if (typeof PROCESS_INTERNALS._kill === "function") {
+    sideEffectProbes.push("process._kill(process.pid, 0)");
+  }
+  if (typeof PROCESS_INTERNALS._debugProcess === "function") {
+    sideEffectProbes.push("process._debugProcess(process.pid)");
+  }
+  if (typeof process.dlopen === "function") {
+    sideEffectProbes.push("process.dlopen({}, '/tmp/robin-cold-path-probe.node')");
+  }
+  if (typeof process.execve === "function" && process.platform !== "win32") {
+    sideEffectProbes.push("process.execve('/usr/bin/true', ['true'], {})");
+  }
+  if (typeof process.report?.writeReport === "function") {
+    sideEffectProbes.push(
+      `process.report.writeReport(${JSON.stringify(process.platform === "win32" ? "NUL" : "/dev/null")})`,
+    );
+  }
+  for (const probe of sideEffectProbes) {
+    const result = await executeNode([
+      "--no-warnings",
+      "--import",
+      pathToFileURL(COLD_SIDE_EFFECT_SENTINEL).href,
+      "--input-type=module",
+      "--eval",
+      probe,
+    ]);
+    assert.notEqual(result.code, 0, probe);
+    assert.match(result.stderr, /robin_cold_path_side_effect/u, probe);
+  }
+});
 
 test("source-installed bin runs the synthetic human profile", async () => {
   const result = await execute([
@@ -42,7 +156,7 @@ test("source-installed bin runs the synthetic human profile", async () => {
     SYNTHETIC_OBJECTIVE,
   ]);
   assert.equal(result.code, 0);
-  assert.match(result.stdout, /Guarded Agent run run_/u);
+  assert.match(result.stdout, /Robin run run_/u);
   assert.match(result.stdout, /RunCompleted/u);
   assert.match(result.stdout, /Status: completed/u);
   assert.match(result.stdout, /GUARDED AGENTS TRANSFORM BOUNDED DATA\./u);
@@ -107,6 +221,72 @@ test("source-installed bin rejects API-key flags without leaking the value", asy
   assert.match(result.stderr, /Unknown option: --api-key/u);
   assert.doesNotMatch(result.stderr, new RegExp(secret, "u"));
 });
+
+test("source-installed bin runs one headless Robin preview turn", async () => {
+  const result = await execute(["-p", "Explain the current slice."]);
+  assert.equal(result.code, 0);
+  assert.equal(result.stderr, "");
+  assert.match(result.stdout, /^Robin received: Explain the current slice\./u);
+  assert.match(result.stdout, /no repository files were read or changed/u);
+});
+
+test("source-installed bin emits parseable stream JSON for a preview turn", async () => {
+  const result = await execute([
+    "--print",
+    "--output-format",
+    "stream-json",
+    "Stream one turn.",
+  ]);
+  assert.equal(result.code, 0);
+  assert.equal(result.stderr, "");
+  const records = result.stdout
+    .trimEnd()
+    .split("\n")
+    .map((line) => JSON.parse(line) as {
+      readonly schemaVersion: number;
+      readonly persistence: string;
+      readonly event: { readonly type: string };
+    });
+  assert.equal(records.length > 3, true);
+  assert.equal(records.every((record) => record.schemaVersion === 1), true);
+  assert.equal(records.every((record) => record.persistence === "ephemeral"), true);
+  assert.equal(records[0]?.event.type, "turn_started");
+  assert.equal(records.at(-1)?.event.type, "turn_completed");
+});
+
+test(
+  "source-installed bin exits quietly when a headless output pipe closes early",
+  { timeout: 30_000 },
+  async () => {
+    const child = spawn(
+      process.execPath,
+      [
+        BIN,
+        "--print",
+        "--output-format",
+        "stream-json",
+        "x".repeat(12_000),
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    await once(child.stdout, "data");
+    child.stdout.destroy();
+    const [code, signal] = (await once(child, "close")) as [
+      number | null,
+      NodeJS.Signals | null,
+    ];
+
+    assert.equal(code, 0);
+    assert.equal(signal, null);
+    assert.doesNotMatch(stderr, /EPIPE|Unhandled 'error' event|node:events/u);
+  },
+);
 
 test("source-installed bin checks, formats, and tests policies", async () => {
   const checked = await execute(["policy", "check", STRICT_POLICY, "--json"]);
@@ -174,8 +354,32 @@ async function execute(argv: readonly string[]): Promise<{
   readonly stdout: string;
   readonly stderr: string;
 }> {
+  return executeNode([BIN, ...argv]);
+}
+
+async function executeCold(argv: readonly string[]): Promise<{
+  readonly code: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}> {
+  return executeNode([
+    "--no-warnings",
+    "--import",
+    pathToFileURL(COLD_SIDE_EFFECT_SENTINEL).href,
+    "--experimental-loader",
+    pathToFileURL(COLD_PATH_LOADER).href,
+    BIN,
+    ...argv,
+  ]);
+}
+
+async function executeNode(argv: readonly string[]): Promise<{
+  readonly code: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}> {
   try {
-    const result = await execFile(process.execPath, [BIN, ...argv], {
+    const result = await execFile(process.execPath, argv, {
       encoding: "utf8",
       maxBuffer: 4 * 1024 * 1024,
       timeout: 30_000,
@@ -197,4 +401,8 @@ function isExecFileError(value: unknown): value is {
   readonly stderr?: string;
 } {
   return typeof value === "object" && value !== null;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }

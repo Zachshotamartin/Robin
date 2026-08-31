@@ -19,8 +19,8 @@
     "build": "tsc --build",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "generate:goldens": "npm run build && node dist/generate-goldens.js",
-    "typecheck": "tsc --build --force",
-    "test": "npm run build && node --test dist/*.test.js"
+    "typecheck": "tsc --build",
+    "test": "npm run build && node --test --test-reporter=../../scripts/deterministic-test-reporter.mjs dist/*.test.js"
   },
   "dependencies": {
     "@guard/agent-driver": "0.0.0",

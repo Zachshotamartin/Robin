@@ -2,7 +2,7 @@
   "name": "@guard/runtime",
   "version": "0.0.0",
   "private": true,
-  "description": "Pure event-sourced runtime kernel for Guarded Agent.",
+  "description": "Pure event-sourced internal runtime kernel for Robin.",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -17,8 +17,8 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "typecheck": "tsc --build --force",
-    "test": "npm run build && node --test dist/*.test.js"
+    "typecheck": "tsc --build",
+    "test": "npm run build && node --test --test-reporter=../../scripts/deterministic-test-reporter.mjs dist/*.test.js"
   },
   "dependencies": {
     "@guard/contracts": "0.0.0"

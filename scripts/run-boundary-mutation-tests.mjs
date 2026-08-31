@@ -164,7 +164,6 @@ const mutations = Object.freeze([
 
 validateConfig(config, mutations);
 
-const buildStartedAt = performance.now();
 const build = await runChild(
   process.execPath,
   [
@@ -182,8 +181,6 @@ if (build.timedOut || build.exitCode !== 0) {
     `boundary mutation prerequisite build failed${build.timedOut ? " by timeout" : ""}:\n${boundedOutput(build)}`,
   );
 }
-const buildDurationMs = Math.round(performance.now() - buildStartedAt);
-
 const temporaryRoot = await mkdtemp(
   path.join(repositoryRoot, ".boundary-mutation-"),
 );
@@ -192,7 +189,6 @@ assert.match(path.basename(temporaryRoot), /^\.boundary-mutation-/u);
 
 const results = [];
 const baselineResults = [];
-const suiteStartedAt = performance.now();
 try {
   const baselines = new Map();
   for (const candidate of mutations) {
@@ -216,7 +212,7 @@ try {
     }
     baselineResults.push({
       exercise: candidate.exercise,
-      durationMs: baseline.durationMs,
+      passed: true,
     });
   }
 
@@ -268,7 +264,6 @@ try {
       critical: candidate.critical,
       killed,
       timedOut: exercised.timedOut,
-      durationMs: exercised.durationMs,
       failure: killed ? boundedOutput(exercised) : null,
     });
   }
@@ -282,7 +277,7 @@ const criticalSurvivors = results.filter(
   (result) => result.critical && !result.killed,
 );
 const report = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   thresholdPercent: config.minimumScorePercent,
   scorePercent,
   killed,
@@ -291,8 +286,11 @@ const report = {
   equivalentMutants: config.equivalentMutants,
   timeoutTerminationScope:
     process.platform === "win32" ? "direct-child" : "process-group",
-  buildDurationMs,
-  mutationDurationMs: Math.round(performance.now() - suiteStartedAt),
+  timing: {
+    mode: "timeouts-enforced-not-reported",
+    buildTimeoutMs: config.buildTimeoutMs,
+    perExerciseTimeoutMs: config.perExerciseTimeoutMs,
+  },
   baselineResults,
   results,
 };
@@ -401,7 +399,6 @@ function runExercise(exercise, moduleUrl) {
 
 function runChild(command, args, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const startedAt = performance.now();
     const supportsProcessGroupTermination = process.platform !== "win32";
     const child = spawn(command, args, {
       cwd: repositoryRoot,
@@ -442,7 +439,6 @@ function runChild(command, args, timeoutMs) {
         timedOut,
         stdout,
         stderr,
-        durationMs: Math.round(performance.now() - startedAt),
       });
     });
   });

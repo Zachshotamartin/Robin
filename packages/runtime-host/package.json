@@ -2,7 +2,7 @@
   "name": "@guard/runtime-host",
   "version": "0.0.0",
   "private": true,
-  "description": "Synchronous application host for the Guarded Agent runtime kernel.",
+  "description": "Synchronous application host for Robin's internal runtime kernel.",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -17,8 +17,8 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "typecheck": "tsc --build --force",
-    "test": "npm run build && node --test dist/*.test.js"
+    "typecheck": "tsc --build",
+    "test": "npm run build && node --test --test-reporter=../../scripts/deterministic-test-reporter.mjs dist/*.test.js"
   },
   "dependencies": {
     "@guard/agent-driver": "0.0.0",

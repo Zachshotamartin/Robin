@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "typecheck": "tsc --build --force",
-    "test": "npm run build && node --test dist/*.test.js"
+    "typecheck": "tsc --build",
+    "test": "npm run build && node --test --test-reporter=../../scripts/deterministic-test-reporter.mjs dist/*.test.js"
   }
 }

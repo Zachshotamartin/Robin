@@ -1,6 +1,16 @@
-# Guarded Agent: Detailed Implementation Guide
+# Robin: Detailed Implementation Guide
 
-This document explains how to implement the system described in the full build plan. It is deliberately concrete about data flow, algorithms, transaction boundaries, failure cases, and tests. The full plan defines product scope and sequencing; this guide defines implementation mechanics.
+Document status: retained implementation reference for the completed A/B
+substrate and later internal control-layer components. Its runtime-first
+milestone section is superseded by [ADR-0007](decisions/ADR-0007-robin-coding-agent-product-pivot.md)
+and [BUILD_PLAN.md](BUILD_PLAN.md). The coding-agent application mechanics are
+specified in [ROBIN_CLI_ARCHITECTURE.md](ROBIN_CLI_ARCHITECTURE.md).
+
+This document remains deliberately concrete about algorithms, transaction
+boundaries, failure cases, and tests that are still useful inside Robin. Where
+it describes the CLI as a late event renderer, PostgreSQL as an early local
+requirement, a local-corpus research release, or the generic runtime as the
+product, the newer Robin documents take precedence.
 
 ## 1. Engineering Rules That Shape Every Module
 
@@ -392,7 +402,7 @@ Use these binding powers:
 
 The parser constructs an AST containing source spans on every node. It never reads repository or environment data.
 
-Error recovery synchronizes at `policy`, `effect`, `reason`, closing brace, or end of file. `guard policy check` should report multiple independent syntax errors in one run.
+Error recovery synchronizes at `policy`, `effect`, `reason`, closing brace, or end of file. `robin policy check` should report multiple independent syntax errors in one run.
 
 ### 5.4 Type checking
 
@@ -583,7 +593,7 @@ Every run pins one evidence mode:
 - `durable_encrypted`: store the exact ordered agent-visible semantic transcript and, for direct-model drivers, required opaque provider-protocol items as local encrypted artifacts. This mode supports restart resume after the durability milestone when the selected driver implements lossless resume.
 - `ephemeral_metadata`: store only hashes and safe metadata; retain released content in memory for the current process. Process loss makes the run non-resumable and appends a terminal explanation instead of regenerating agent/model history.
 
-Encryption uses a vetted authenticated-encryption implementation with a random nonce per object, an OS credential-store-backed master key, a recorded key ID and format version, and authenticated metadata binding artifact ID, run ID, media type, and schema version. Missing or revoked keys fail closed. Rotation rewrites objects to a new key in bounded, resumable batches and verifies plaintext hash before replacing references. Guarded Agent does not design a custom cipher.
+Encryption uses a vetted authenticated-encryption implementation with a random nonce per object, an OS credential-store-backed master key, a recorded key ID and format version, and authenticated metadata binding artifact ID, run ID, media type, and schema version. Missing or revoked keys fail closed. Rotation rewrites objects to a new key in bounded, resumable batches and verifies plaintext hash before replacing references. Robin does not design a custom cipher.
 
 ## 7. Capability Gateway Implementation
 
@@ -1310,7 +1320,7 @@ An uncertain attempt remains visible in cost accounting even if usage is unavail
 
 ### 14.6 Credential broker and trusted transport
 
-Implement credentials before the first real provider. `guard credentials add` accepts secret bytes through hidden input or an OS credential-store UI and writes them directly to a platform adapter. PostgreSQL and configuration store only `credentialRef`, strategy ID, provider label, exact origin binding, safe account label, creation time, and last validation status.
+Implement credentials before the first real provider. `robin auth add <credential-name>` accepts secret bytes through hidden input or an OS credential-store UI and writes them directly to a platform adapter. PostgreSQL and configuration store only `credentialRef`, strategy ID, provider label, exact origin binding, safe account label, creation time, and last validation status.
 
 The provider adapter compiles an unsigned request. The trusted transport then:
 
@@ -1661,7 +1671,7 @@ Use a nonce-based content security policy, local bundled assets, no remote scrip
 Use this precedence from lowest to highest:
 
 1. Built-in safe defaults
-2. User configuration in the guarded-agent data directory
+2. User configuration in the robin data directory
 3. Repository configuration committed with the project
 4. Explicit CLI flags
 
@@ -1804,7 +1814,11 @@ No pull-request job receives a real provider or external-agent credential.
 6. Publish CLI package and VSIX only when their respective phases are complete.
 7. Create a GitHub release containing guarantees, known limitations, migration notes, and eval summary.
 
-## 24. Detailed Milestone Execution
+## 24. Superseded Runtime-First Milestone Execution
+
+The following milestones record the original sequence and current A/B evidence.
+Do not use C through H as the active Robin build order; use the R-series in
+[BUILD_PLAN.md](BUILD_PLAN.md).
 
 Milestones map to the build plan's phased roadmap as follows; Phase 0 (specification and threat model) precedes Milestone A and is complete when these documents are accepted.
 
@@ -1830,7 +1844,7 @@ Implementation order:
 5. Define context-source and capability-pack ports plus an in-memory generic source and operation.
 6. Implement a synthetic non-coding profile; then implement coding list, read, and patch-proposal operations against virtual fixtures without changing kernel packages.
 7. Implement a synchronous command dispatcher using durable command types in memory.
-8. Add `guard run` that streams event-derived views.
+8. Add `robin` that streams event-derived views.
 9. Add a golden run history fixture and replay it in tests.
 
 Deliverable: one provider-free generic task and one scripted coding task complete through the same reducer, proving that Git and model-provider concepts are outside the kernel.

@@ -8,7 +8,7 @@ coverage/
 !.env.example
 artifacts/
 runs/
-.guarded-agent/
+.robin/
 .vscode-test/
 *.log
 *.pid

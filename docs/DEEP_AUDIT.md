@@ -1,4 +1,4 @@
-# Guarded Agent: Deep Plan Audit and Resolution Register
+# Robin: Deep Plan Audit and Resolution Register
 
 This document records the end-to-end design audit performed after the initial plan was assembled. It is not a claim that the system is implemented. It identifies contradictions, unsafe ambiguities, missing mechanics, and sequencing errors, then records the decision that the source documents must follow.
 
@@ -190,7 +190,7 @@ Policy effects use deny-overrides combination. Priority never converts a deny in
 
 The domain keeps a provider-neutral semantic view for policy, UI, and evaluation, plus the smallest lossless provider-protocol record needed to continue the conversation. For the Responses API adapter this includes item ordering, call IDs, function-call outputs, response and request identifiers, and opaque encrypted reasoning content when required by the selected model and stateless mode.
 
-Opaque reasoning content is never decrypted, summarized, displayed, or interpreted by Guarded Agent. It follows the same local encryption and retention policy as the transcript.
+Opaque reasoning content is never decrypted, summarized, displayed, or interpreted by Robin. It follows the same local encryption and retention policy as the transcript.
 
 ### 5.7 Network and dependency behavior
 

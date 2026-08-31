@@ -2,7 +2,7 @@
   "name": "@guard/contracts",
   "version": "0.0.0",
   "private": true,
-  "description": "Generic branded identifiers, domain errors, and canonical serialization for the Guarded Agent kernel.",
+  "description": "Generic branded identifiers, domain errors, and canonical serialization for Robin's internal kernel.",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -17,8 +17,8 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "typecheck": "tsc --build --force",
-    "test": "npm run build && node --test dist/*.test.js"
+    "typecheck": "tsc --build",
+    "test": "npm run build && node --test --test-reporter=../../scripts/deterministic-test-reporter.mjs dist/*.test.js"
   },
   "dependencies": {
     "uuid": "14.0.2"

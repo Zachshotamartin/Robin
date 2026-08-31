@@ -2,7 +2,7 @@
   "name": "@guard/milestone-a-scenarios",
   "version": "0.0.0",
   "private": true,
-  "description": "Deterministic end-to-end Milestone A scenario evidence for the Guarded Agent runtime.",
+  "description": "Deterministic end-to-end Milestone A scenario evidence for Robin's internal runtime.",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -18,8 +18,8 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "typecheck": "tsc --build --force",
-    "test": "npm run build && node --test dist/*.test.js"
+    "typecheck": "tsc --build",
+    "test": "npm run build && node --test --test-reporter=../../scripts/deterministic-test-reporter.mjs dist/*.test.js"
   },
   "dependencies": {
     "@guard/agent-driver": "0.0.0",

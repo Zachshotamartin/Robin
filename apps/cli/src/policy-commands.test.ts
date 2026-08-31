@@ -834,7 +834,7 @@ test("simulation treats identical snapshots as unchanged", async () => {
 });
 
 test("default file reader accepts the exact source limit and rejects one byte more", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "guard-policy-bound-"));
+  const directory = await mkdtemp(join(tmpdir(), "robin-policy-bound-"));
   const exactPath = join(directory, "exact.guard");
   const oversizedPath = join(directory, "oversized.guard");
   await writeFile(exactPath, Buffer.alloc(MAXIMUM_POLICY_SOURCE_BYTES, 0x20));
@@ -860,7 +860,7 @@ test("default file reader accepts the exact source limit and rejects one byte mo
 });
 
 test("default file reader rejects invalid UTF-8 and symbolic-link inputs", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "guard-policy-file-kind-"));
+  const directory = await mkdtemp(join(tmpdir(), "robin-policy-file-kind-"));
   const invalidUtf8Path = join(directory, "invalid.guard");
   const policyPath = join(directory, "policy.guard");
   const symbolicPath = join(directory, "policy-link.guard");
