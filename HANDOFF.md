@@ -89,13 +89,58 @@ stable automation protocol. Those capabilities remain owned by later gates.
 Those limitations are deliberate R1 boundaries, not missing R1 acceptance
 evidence. R2 owns the first physical-workspace and process effects.
 
+## Active R2 Candidate
+
+The unaccepted `codex/robin-r2-real-tool-loop` branch now composes the accepted
+R1 terminal and provider-neutral loop with a real coding workflow:
+
+- startup requires and binds the current physical Git worktree, then exposes
+  canonical root, repository identity, initial HEAD/branch, and initial dirty
+  status as presentation-only facts;
+- `packages/tool-workspace` implements bounded list, explicit-path literal
+  search, classified whole/byte/line reads, exact-preimage structured patches,
+  atomic file creation/replacement, stale checks, and an in-memory edit ledger;
+- `packages/tool-process` implements direct executable-plus-argv requests,
+  reviewed executable resolution, filtered environments, bounded ordered
+  stdout/stderr, timeout/cancellation escalation, and process-group cleanup;
+- `packages/tool-git` implements controlled Git discovery plus bounded,
+  read-only status and working/staged diff operations;
+- `packages/robin-tools` registers exactly eight R2 tools and ensures that the
+  normalized action approved by policy is the action dispatched once;
+- `packages/robin-session` and `packages/robin-application` record exact
+  approval request/resolution/invalidation state and bounded `ToolOutputDelta`
+  events without turning replay or UI state into execution authority;
+- `packages/robin-terminal` and `apps/cli` present complete approval scope,
+  accept only exact typed allow-once/deny decisions, render safe ordered live
+  output, and fail closed on cancellation, EOF, paste, or headless approval;
+- `synthetic-r2-v1` deterministically lists, searches, reads, edits, runs
+  `npm test`, handles one ordinary failure with a re-read and second edit, reruns
+  verification, and reviews final Git status/diff in generated repositories;
+- the accepted immutable R1 path remains selectable with
+  `--model synthetic-r1-v1`.
+
+R2 edits the live checkout immediately after each exact approval. Sessions and
+approvals are ephemeral. Approved processes run directly on the host with **no
+filesystem isolation and no network isolation**; reduced environment, direct
+argv, output bounds, and process ownership are not a sandbox. R2 has no hosted
+or local production provider, API-key input, BYOK onboarding, durable resume,
+shell tool, network tool, file delete/move, Git mutation, or supported package
+release. Provider/model breadth remains R4 and later work.
+
+These are branch-candidate claims backed by current source and focused tests,
+not accepted release claims. R2 becomes accepted only after its complete PTY,
+repository-safety, packaging, hosted matrix, documentation, and aggregate gate
+pass at one reviewed head and the merge-triggered mainline gate also passes.
+
 ## Immediate Next Work
 
-1. Build R2 as the first genuinely useful local coding slice: bounded physical
-   repository status/list/search/read, exact-preimage create/edit/apply, direct
-   argv-based process execution, focused verification, and final status/diff in
-   disposable real-Git fixtures. Delete, move, shell strings, network, and Git
-   writes remain registered but denied at that gate.
+1. Finish and freeze the R2 candidate: complete raw/flat PTY approval and
+   live-output acceptance, repository safety/oracle checks, source-package
+   smoke validation, reviewed package-inventory refresh, hosted R2 candidate
+   results, evidence configuration/capture, and truthful live-workspace/no-
+   sandbox documentation at one exact commit. Delete, move, shell strings,
+   network, workspace executables, and Git writes remain absent or denied at
+   this gate.
 2. Build R3 durable local sessions, crash recovery, `continue`, and `resume` on
    the R2 tool path.
 3. Build R4 around the frozen provider-neutral port with one hosted provider,
@@ -115,9 +160,17 @@ npm run evidence:validate-config:r1
 npm run test:repository
 npm run test:unit
 npm run test:gate:b
+npm test --workspace @guard/tool-workspace
+npm test --workspace @guard/tool-process
+npm test --workspace @guard/tool-git
+npm test --workspace @guard/robin-tools
+npm test --workspace @guard/robin-application
+npm test --workspace @guard/robin-terminal
+npm test --workspace @zachshotamartin/robin
 npm run test:pty
 npm run test:package
 npm run test:gate:r1
+npm run test:gate:r2
 git diff --check
 ```
 

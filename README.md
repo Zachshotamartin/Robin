@@ -1,11 +1,10 @@
 # Robin
 
-Robin is a local-first, provider-flexible coding agent for the terminal,
-currently available as the accepted deterministic R1 vertical slice described below. Its
-intended product workflow is to start `robin` in a repository, describe work in
-natural language, and collaborate with an agent that can inspect the codebase,
-edit files, run commands and tests, review Git changes, and resume the same
-session later.
+Robin is a local-first, provider-flexible coding agent for the terminal. The
+active R2 candidate now exercises the first physical-repository coding loop:
+start `robin` in a Git worktree, let the deterministic fixture agent inspect the
+codebase, approve exact edits and test commands, and review the resulting Git
+status and diff. Durable sessions and real model providers remain later gates.
 
 Robin targets the same product category and terminal interaction model as
 Claude Code. It is not a wrapper around Claude Code or another coding-agent
@@ -14,20 +13,20 @@ UX, provider normalization, and verification workflow. Its policy and runtime
 control layer is internal infrastructure for that coding experience, not the
 product's primary surface.
 
-> **Implementation status:** R0 is accepted on `main` at merge commit
-> `2c042ca`. R1 is accepted on `main` at merge commit `fb64cf1`; all nine
-> required checks passed both on reviewed pull-request head `9907287` and on
-> the merge-triggered `main` workflow.
-> `robin` now has a raw-mode TTY editor, a non-TTY/accessible flat renderer,
-> streamed multi-turn conversation, prompt queuing, cancellation, resize and
-> paste handling, visible usage, and two deterministic read-only coding-tool
-> calls. `robin -p` uses the same provider-neutral application path with text,
-> JSON, or streaming JSON output. The credential-free synthetic model provider
-> and tools use in-memory fixtures: Robin does not yet read or change the
-> physical repository,
-> run commands or Git, contact a network, store credentials, or persist a
-> session. Milestones A and B and Robin R0–R1 are accepted. R2 real-workspace
-> tools and approvals are in development and are not current release claims.
+> **Implementation status:** Milestones A and B plus Robin R0 and R1 are
+> accepted on `main`. R1 is accepted at merge commit `fb64cf1` after all nine
+> required jobs passed at reviewed head `9907287` and again after merge. R2 is
+> an unaccepted candidate
+> whose branch-only capabilities are not current release claims. It runs
+> on `codex/robin-r2-real-tool-loop`. It binds the current physical Git worktree,
+> exposes eight bounded repository/edit/process/Git tools, presents one-use
+> manual approvals, and streams bounded process output. The only R2 model comes
+> from the credential-free synthetic model provider `synthetic-r2-v1`; it is a
+> deterministic fixture. Sessions and
+> approvals are ephemeral, approved processes run directly on the host, and
+> there is **no filesystem or network isolation**. Hosted providers, BYOK,
+> provider/model flexibility, durable resume, and a supported installer are not
+> current claims.
 
 ## Intended Robin Experience
 
@@ -91,18 +90,16 @@ package, executable, documentation, and product name are Robin.
 ## Current Implementation
 
 The repository proves inherited Milestones A and B plus accepted Robin R0 and
-R1. The reviewed R1 head `9907287` passed all nine required hosted checks, was
-merged as `fb64cf1`, and the same nine checks passed on the merge-triggered
-`main` workflow. R2 is now implementing real bounded workspace, edit, process,
-Git-read, and approval behavior; none of those R2 capabilities is claimed until
-its complete gate passes and merges.
+R1. The active R2 branch adds an integrated, locally tested candidate over a
+physical Git worktree. These R2 behaviors are present in source and tests, but
+remain candidate claims until the complete R2 gate passes and merges.
 
 | Area | Implemented now | Not implemented now |
 |---|---|---|
-| CLI | Ephemeral `robin` and `robin "prompt"` raw-mode TTY sessions with streamed output, grapheme-aware editing, bracketed paste, resize, queueing, and one-/two-stage interruption; flat non-TTY/screen-reader fallback; `robin -p` text/JSON/stream-JSON; retained `robin run`; implemented `robin policy` debugger | Setup wizard, durable sessions, auth, models, doctor, shell completion, supported distribution channel |
-| Agent and model | Provider-neutral multi-request structured tool loop, bounded provider-item collection, deterministic streaming synthetic provider, turn/tool/output/time budgets, application-wide ordered events, and inherited scripted driver | Hosted/local provider transport, provider onboarding, production model adapters, external-agent bridge |
-| Repository work | The interactive loop invokes two gateway-mediated, read-only tools over one immutable TypeScript fixture; retained virtual scenarios cover list/search/read/proposed-patch/diff contracts | Physical repository reads or mutation, real patch application, command/test execution, Git or worktrees |
-| Control substrate | Strict contracts, versioned application events, pure turn reducer/replay, cancellation scopes, policy evaluation, context release, capability mediation, and deterministic evidence | Durable approvals, sandbox enforcement, restart reconciliation, production audit storage |
+| CLI | Ephemeral `robin` and `robin "prompt"` raw-mode TTY sessions with streamed output, grapheme-aware editing, bracketed paste, resize, queueing, interruption, exact approval input, and live stdout/stderr; flat non-TTY/screen-reader fallback; `robin -p` text/JSON/stream-JSON; retained `robin run`; implemented `robin policy` debugger | Setup wizard, durable sessions, auth, models, doctor, shell completion, supported distribution channel |
+| Agent and model | Provider-neutral multi-request structured tool loop, bounded provider-item collection, deterministic streaming `synthetic-r2-v1` provider, turn/tool/output/time budgets, application-wide ordered events, and inherited R1 fixture provider | Hosted/local provider transport, BYOK onboarding, production model adapters, arbitrary prompts/models, external-agent bridge |
+| Repository work | Current-worktree discovery and startup facts; bounded physical list/literal-search/read; exact-preimage atomic patch/create; trusted direct executable plus argv; bounded live output; read-only Git status/diff; initial dirty-state capture and edit attribution | Delete/move, shell command text, workspace executables, network tools, Git writes, worktrees, unrestricted agent-selected workflows |
+| Control substrate | Strict contracts, versioned application events, pure turn reducer/replay, cancellation scopes, policy evaluation, context release, capability mediation, one-use in-memory approvals, stale-precondition rejection, and deterministic evidence | Durable approvals, strict sandbox enforcement, restart reconciliation, production audit storage |
 | Persistence | Atomic in-memory event store for deterministic scenarios | Durable transcripts, saved sessions, crash recovery, background supervision |
 | Credentials | No credential is needed or read | API-key onboarding, OS credential storage, origin-bound injection, rotation |
 
@@ -135,10 +132,10 @@ contracts and current limits.
 
 - Node.js 22 or newer
 - npm 10 or newer
-- Git for cloning and contributor workflows
+- Git for cloning, contributor workflows, and the R2 physical-worktree bootstrap
 
 PostgreSQL, Docker or Podman, a provider account, and an API key are not needed
-for the current deterministic implementation and synthetic R1 candidate.
+for the current deterministic implementation and synthetic R2 candidate.
 There is no public Robin release or global installer yet; use the repository
 build below.
 
@@ -164,15 +161,26 @@ reviewed boundaries.
 Build first. The local compiled binary is named `robin`; invoking its JavaScript
 entry point avoids implying that a global package has already been published.
 
-Run the ephemeral synthetic coding conversation:
+Run the ephemeral R2 coding workflow from inside a physical Git worktree:
 
 ```bash
-node apps/cli/dist/bin.js
-node apps/cli/dist/bin.js "Explain what this preview can do."
-node apps/cli/dist/bin.js -p "Summarize the current implementation."
-node apps/cli/dist/bin.js --print --output-format json "Explain Robin."
-node apps/cli/dist/bin.js --print --output-format stream-json "Stream one turn."
+# Run this assignment from the Robin source root after building.
+ROBIN_SOURCE="$(pwd)"
+cd /path/to/a/disposable-git-worktree
+node "$ROBIN_SOURCE/apps/cli/dist/bin.js"
+node "$ROBIN_SOURCE/apps/cli/dist/bin.js" "Find and fix the deterministic fixture bug."
+node "$ROBIN_SOURCE/apps/cli/dist/bin.js" --permission-mode plan \
+  "Inspect without changing anything."
 ```
+
+Startup binds and prints the discovered worktree root, branch, and initial dirty
+state. The default `synthetic-r2-v1` model is a deterministic gate fixture, not
+a general-purpose language model: it looks for one exact arithmetic defect,
+applies an exact-preimage replacement after approval, runs `npm test`, handles
+one recognized follow-up defect after an ordinary failing test, reruns the test,
+and finally inspects Git status and the working-tree diff. See the
+[CLI guide](apps/cli/README.md) for a disposable repository that exercises the
+complete two-edit/two-test path.
 
 In a capable TTY, interactive mode uses a raw terminal editor. Enter submits,
 Ctrl-C cancels the active turn, a second Ctrl-C during the escalation window
@@ -182,19 +190,50 @@ non-TTY, `TERM=dumb`, or the screen-reader override, Robin uses the line-oriente
 flat renderer. `/help`, `/exit`, and `/quit` are available in both interactive
 forms.
 
-The first synthetic turn visibly invokes
-`robin.synthetic.workspace_summary@1` and
-`robin.synthetic.inspect_file@1`. Both read only an immutable in-memory fixture;
-they do not inspect the checkout from which Robin was launched. A follow-up turn
-uses the prior observations to prove in-process conversation continuity. The
-banner and shutdown diagnostic state that the conversation is ephemeral. Text
-output escapes terminal control characters. The experimental machine formats declare
-`stability: "experimental"`; they preserve parsed model text while emitting
-terminal controls as standard JSON escapes and contain no ANSI output.
+In `ask` mode, bounded list/search/read and Git status/diff calls are allowed
+inside the bound worktree. Each patch, file creation, or direct process run
+pauses on a complete approval summary. Type exactly `y` or `allow-once` to grant
+that single bound action, or `n` or `deny` to refuse it. Empty Enter, pasted
+text, unrelated prompts, Ctrl-C, and Ctrl-D never grant authority. Changing an
+approved precondition makes the approval stale. `plan` mode keeps the same
+physical reads but denies edit and process effects.
+
+Approved processes execute directly on the host with a reduced environment and
+reviewed executable roots. Robin does not invoke a shell or enable workspace
+executables, but R2 is still explicitly **unsandboxed**: an approved process has
+no filesystem isolation and no network isolation. Use only a disposable or
+reviewed repository. Robin does not stage, commit, reset, checkout, push, or
+otherwise mutate Git metadata.
+
+Print mode still uses the same application path and experimental machine
+formats:
+
+```bash
+node "$ROBIN_SOURCE/apps/cli/dist/bin.js" -p "Inspect the deterministic fixture."
+node "$ROBIN_SOURCE/apps/cli/dist/bin.js" --print --output-format json \
+  "Inspect the fixture."
+node "$ROBIN_SOURCE/apps/cli/dist/bin.js" --print --output-format stream-json \
+  "Inspect the fixture."
+```
+
+Because print mode has no trusted approval-input channel, it automatically
+denies any requested edit or process action instead of hanging or assuming
+consent. Machine envelopes declare `stability: "experimental"`, include the
+physical workspace and explicit isolation facts for R2, contain no ANSI
+presentation bytes, and serialize terminal controls safely.
+
+Use the accepted R1 immutable in-memory fixture explicitly when physical
+repository effects are unwanted:
+
+```bash
+node "$ROBIN_SOURCE/apps/cli/dist/bin.js" --model synthetic-r1-v1 \
+  "Explain the fixture."
+```
 
 Run the retained deterministic synthetic and virtual-coding fixtures:
 
 ```bash
+cd "$ROBIN_SOURCE"
 node apps/cli/dist/bin.js run --profile synthetic-demo
 node apps/cli/dist/bin.js run --profile coding-virtual
 ```
@@ -217,9 +256,9 @@ node apps/cli/dist/bin.js run --profile synthetic-demo --quiet -- \
 
 The compatibility `run` command accepts only the two built-in objectives. The
 session surface accepts only `--provider synthetic`; selecting a real provider
-returns a clear configuration error. Raw API-key arguments, external agents,
-network access, real-repository tools, and durable session flags are not
-accepted rather than pretending unsupported configuration is protected.
+returns a clear configuration error. Raw API-key arguments, hosted/local model
+endpoints, external agents, and durable-session flags are not accepted rather
+than pretending unsupported configuration works.
 
 The advanced policy debugger is also implemented:
 
@@ -240,11 +279,12 @@ Use `node apps/cli/dist/bin.js --help`,
 `node apps/cli/dist/bin.js run --help`, and
 `node apps/cli/dist/bin.js policy --help` for the current command reference.
 
-No command above contacts a network service, reads an environment credential,
-starts a model server, mutates a checkout, invokes Git, or launches a child
-process. Session text streams in-process; compatibility-scenario output remains
-buffered until completion. Conversation state lives only in memory, so the
-current CLI cannot resume after exit.
+The synthetic provider itself contacts no network service and reads no API key.
+R2 startup and review invoke controlled read-only Git commands; an explicitly
+approved verification invokes a trusted host executable and may mutate anything
+that host process can access because there is no filesystem or network sandbox.
+Approved edits change the live checkout immediately. Conversation and approval
+state live only in memory, so the current CLI cannot resume after exit.
 
 ## Architecture at a Glance
 
@@ -265,10 +305,12 @@ terminal CLI / headless CLI / future editor client
  events, context release, checkpoints, evidence, persistence
 ```
 
-The accepted R1 baseline contains the first narrow implementation of the upper terminal,
-session, application, provider-neutral loop, and synthetic tool layers. It is
-intentionally fixture-only and ephemeral. Its reviewed exact-head and
-post-merge acceptance evidence is green.
+The accepted R1 baseline contains the first narrow implementation of the upper
+terminal, session, application, provider-neutral loop, and synthetic tool
+layers. The R2 candidate composes those layers with the physical workspace,
+atomic edit, direct process, read-only Git, one-use approval, and live tool-output
+packages. It remains ephemeral and unsandboxed, and its exact-head R2 acceptance
+gate has not yet closed.
 The build order creates a usable vertical coding workflow before deepening
 isolation, distributed durability, evaluation infrastructure, or clients.
 
@@ -352,18 +394,21 @@ The ordered roadmap is:
    output sanitization, and local plus hosted PTY coverage now exist. The
    reviewed R1 head `9907287` and merge commit `fb64cf1` both have a green
    nine-job hosted gate.
-3. **Hosted-provider alpha (R2–R4):** one real direct provider with BYOK setup,
-   real repository search/read/edit tools, command and test execution, Git diff
-   review, permission prompts, interruption, continue/resume, and a complete
-   end-to-end demonstration.
-4. **First supported developer bundle (R5–R8):** strict permission/sandbox
+3. **Physical coding loop — R2 candidate:** bounded real repository
+   list/search/read, exact approved edits, approved direct test execution, live
+   output, read-only Git review, and dirty-workspace preservation. The behavior
+   exists on the active branch but remains unaccepted until the R2 gate closes.
+4. **Durability and hosted-provider alpha — R3–R4:** saved continuation/resume,
+   one real direct provider, session-scoped BYOK setup, and a provider-backed
+   end-to-end demonstration without changing tool semantics.
+5. **First supported developer bundle (R5–R8):** strict permission/sandbox
    evidence, richer Git workflows and checkpoints, provider breadth, stable
    headless contracts, credential stores, configuration and trust, instructions,
    skills, hooks, and MCP.
-5. **Robin 1.0 hardening (R10):** packaging, clean-machine
+6. **Robin 1.0 hardening (R10):** packaging, clean-machine
    install/upgrade/rollback/uninstall, migrations, deterministic evals,
    adversarial evidence, accessibility, and release operations.
-6. **Post-1.0 orchestration and clients (R9, R11–R12):** subagents, isolated
+7. **Post-1.0 orchestration and clients (R9, R11–R12):** subagents, isolated
    worktrees, background supervision, a stable client protocol, and a VS Code
    extension. A Code-OSS fork is considered only if a documented extension
    limitation justifies its maintenance cost.
