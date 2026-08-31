@@ -184,6 +184,11 @@ export interface PreparedCapabilityAction {
 export interface EvaluatedCapabilityAction {
   readonly prepared: PreparedCapabilityAction;
   readonly decision: PolicyDecision;
+  /**
+   * Gateway-authoritative binding of the exact normalized policy decision.
+   * Approval challenges copy this value unchanged.
+   */
+  readonly policySnapshotHash: string;
   readonly [evaluatedCapabilityActionBrand]: true;
 }
 

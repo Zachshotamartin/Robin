@@ -7,6 +7,7 @@ import {
   DEFAULT_JSON_BOUNDARY_LIMITS,
   PolicyVersionIdKind,
   canonicalBytes,
+  canonicalSha256Hex,
   canonicalize,
   createDomainError,
   isDomainError,
@@ -114,6 +115,15 @@ function policyDecision(
     reason: overrides.reason ?? `Fixture policy returned ${resolvedEffect}.`,
     matchedPolicyNames: Object.freeze([...matchedPolicyNames]),
     trace: Object.freeze(trace),
+  });
+}
+
+function expectedPolicySnapshotHash(decision: PolicyDecision): string {
+  return canonicalSha256Hex({
+    schemaVersion: 1,
+    policyVersionId: decision.policyVersionId,
+    policyContentHash: decision.trace["policyContentHash"],
+    decision,
   });
 }
 
@@ -1269,6 +1279,10 @@ test("an allowed evaluated receipt dispatches the exact normalized action once",
   );
   assert.equal(evaluated.prepared, prepared);
   assert.equal(evaluated.decision.effect, "allow");
+  assert.equal(
+    evaluated.policySnapshotHash,
+    expectedPolicySnapshotHash(evaluated.decision),
+  );
   assert.equal(Object.isFrozen(evaluated), true);
   assert.equal(Object.isFrozen(evaluated.decision), true);
   assert.equal(Object.isFrozen(evaluated.decision.trace), true);
@@ -1603,6 +1617,48 @@ test("deny and approval decisions cannot reach handler or release", async () => 
   }
 });
 
+test("evaluated receipts expose one exact immutable policy snapshot hash for every effect", async () => {
+  const observedHashes = new Set<string>();
+  for (const effect of ["allow", "deny", "require_approval"] as const) {
+    const calls = spies();
+    const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
+    const gateway = new CapabilityGateway(
+      registry,
+      policyEvaluator({ effect }),
+      {
+        approvalClock: { now: () => "2026-08-30T12:00:00.000Z" },
+        approvalIdSource: { nextApprovalId: () => APPROVAL_ID },
+      },
+    );
+    const evaluated = gateway.evaluate(
+      await gateway.normalize(
+        proposal(),
+        normalizationContext(),
+        registry.createAdvertisement([REFERENCE]),
+      ),
+    );
+    const expected = expectedPolicySnapshotHash(evaluated.decision);
+
+    assert.equal(evaluated.policySnapshotHash, expected);
+    assert.match(evaluated.policySnapshotHash, /^[a-f0-9]{64}$/u);
+    assert.equal(Object.isFrozen(evaluated), true);
+    assert.throws(() => {
+      (evaluated as { policySnapshotHash: string }).policySnapshotHash =
+        "0".repeat(64);
+    }, TypeError);
+    assert.equal(evaluated.policySnapshotHash, expected);
+    observedHashes.add(evaluated.policySnapshotHash);
+
+    if (effect === "require_approval") {
+      const challenge = gateway.createApprovalChallenge(evaluated, {
+        displayedSummary: { operation: "increment alpha" },
+      });
+      assert.equal(challenge.policySnapshotHash, evaluated.policySnapshotHash);
+    }
+  }
+  assert.equal(observedHashes.size, 3);
+});
+
 test("approval challenge binds the displayed summary and exact authorization facts", async () => {
   const calls = spies();
   const registry = new CapabilityPackRegistry([pack(counterOperation(calls))]);
@@ -1646,6 +1702,7 @@ test("approval challenge binds the displayed summary and exact authorization fac
   assert.match(challenge.normalizedRequestHash, /^[a-f0-9]{64}$/u);
   assert.match(challenge.preconditionHash, /^[a-f0-9]{64}$/u);
   assert.match(challenge.policySnapshotHash, /^[a-f0-9]{64}$/u);
+  assert.equal(challenge.policySnapshotHash, evaluated.policySnapshotHash);
   assert.match(challenge.displayedSummaryHash, /^[a-f0-9]{64}$/u);
   assert.equal(Object.isFrozen(challenge), true);
   assert.equal(Object.isFrozen(challenge.displayedSummary), true);
@@ -2363,6 +2420,7 @@ test("prepared and evaluated ownership defeats identity, hash, and foreign-gatew
   const reconstructedReceipt = {
     prepared: firstEvaluated.prepared,
     decision: firstEvaluated.decision,
+    policySnapshotHash: firstEvaluated.policySnapshotHash,
   } as unknown as ReturnType<CapabilityGateway["evaluate"]>;
   await assert.rejects(
     first.execute(reconstructedReceipt, { signal: new AbortController().signal }),
@@ -2474,6 +2532,7 @@ test("malformed policy decisions fail closed before handler and release", async 
     { ...valid, trace: { ...valid.trace, defaultEffect: "deny" } },
     { ...valid, trace: { ...valid.trace, result: "deny" } },
     { ...valid, trace: { ...valid.trace, policyContentHash: "short" } },
+    { ...valid, policySnapshotHash: "0".repeat(64) },
     { ...valid, extra: true },
     accessorDecision,
     proxyDecision,

@@ -75,6 +75,7 @@ interface EvaluatedProvenance extends PreparedProvenance {
   readonly prepared: PreparedCapabilityAction;
   readonly decision: PolicyDecision;
   readonly decisionHash: string;
+  readonly policySnapshotHash: string;
   consumed: boolean;
 }
 
@@ -83,7 +84,6 @@ interface ApprovalChallengeProvenance extends EvaluatedProvenance {
   readonly challengeHash: string;
   readonly normalizedRequestHash: string;
   readonly preconditionHash: string;
-  readonly policySnapshotHash: string;
   readonly displayedSummaryHash: string;
   readonly requestedAtMs: number;
   readonly expiresAtMs: number;
@@ -301,15 +301,18 @@ export class CapabilityGateway {
       );
     }
     const decisionHash = canonicalSha256Hex(decision);
+    const policySnapshotHash = policySnapshotHashFor(decision);
     const receipt = Object.freeze({
       prepared,
       decision,
+      policySnapshotHash,
     }) as unknown as EvaluatedCapabilityAction;
     this.#evaluated.set(receipt, {
       ...provenance,
       prepared,
       decision,
       decisionHash,
+      policySnapshotHash,
       consumed: false,
     });
     return receipt;
@@ -412,7 +415,7 @@ export class CapabilityGateway {
     }
     const normalizedRequestHash = normalizedRequestHashFor(provenance.action);
     const preconditionHash = preconditionHashFor(provenance.action.preconditions);
-    const policySnapshotHash = policySnapshotHashFor(provenance.decision);
+    const policySnapshotHash = provenance.policySnapshotHash;
     const displayedSummaryHash = canonicalSha256Hex(
       challengeInput.displayedSummary,
     );
@@ -728,10 +731,12 @@ export class CapabilityGateway {
       provenance === undefined ||
       evaluated.prepared !== provenance.prepared ||
       evaluated.decision !== provenance.decision ||
+      evaluated.policySnapshotHash !== provenance.policySnapshotHash ||
       provenance.prepared.action !== provenance.action ||
       provenance.prepared.actionHash !== provenance.actionHash ||
       canonicalSha256Hex(provenance.action) !== provenance.actionHash ||
-      canonicalSha256Hex(provenance.decision) !== provenance.decisionHash
+      canonicalSha256Hex(provenance.decision) !== provenance.decisionHash ||
+      policySnapshotHashFor(provenance.decision) !== provenance.policySnapshotHash
     ) {
       throw invariant(
         "Capability authorization requires this gateway's evaluated action receipt.",
@@ -756,6 +761,7 @@ export class CapabilityGateway {
         provenance.preconditionHash ||
       policySnapshotHashFor(provenance.decision) !==
         provenance.policySnapshotHash ||
+      challenge.policySnapshotHash !== provenance.policySnapshotHash ||
       canonicalSha256Hex(challenge.displayedSummary) !==
         provenance.displayedSummaryHash
     ) {
