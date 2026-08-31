@@ -44,6 +44,31 @@ test("R1 application completes two tools and a state-dependent follow-up", async
       .map((event) => event.payload.callId),
     ["r1-turn-1-workspace-summary", "r1-turn-1-inspect-file"],
   );
+  assert.deepEqual(
+    first
+      .filter((event) => event.type === "PermissionDecided")
+      .map((event) => [event.payload.callId, event.payload.effect]),
+    [
+      ["r1-turn-1-workspace-summary", "allow"],
+      ["r1-turn-1-inspect-file", "allow"],
+    ],
+  );
+  for (const callId of [
+    "r1-turn-1-workspace-summary",
+    "r1-turn-1-inspect-file",
+  ]) {
+    const lifecycle = first
+      .filter(
+        (event) =>
+          "callId" in event.payload && event.payload.callId === callId,
+      )
+      .map((event) => event.type);
+    assert.deepEqual(lifecycle, [
+      "ToolCallStarted",
+      "PermissionDecided",
+      "ToolCallCompleted",
+    ]);
+  }
   const firstResult = first.find((event) => event.type === "TurnCompleted");
   assert.match(firstResult?.payload.text ?? "", /total - value/u);
 

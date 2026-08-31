@@ -20,6 +20,7 @@ import type {
   CompletedProviderToolCall,
   ToolDispatcher,
 } from "@guard/robin-agent";
+import type { RobinApplicationToolLifecycle } from "./tool-lifecycle.js";
 
 export interface R1GatewayActionIdSource {
   nextActionId(): ActionId;
@@ -31,11 +32,13 @@ export class R1GatewayToolDispatcher implements ToolDispatcher {
   readonly #gateway: CapabilityGateway;
   readonly #advertisement: CapabilityAdvertisement;
   readonly #ids: R1GatewayActionIdSource;
+  readonly #lifecycle: RobinApplicationToolLifecycle | null;
 
   public constructor(
     ids: R1GatewayActionIdSource = Object.freeze({
       nextActionId: () => ActionIdKind.generate(),
     }),
+    lifecycle: RobinApplicationToolLifecycle | null = null,
   ) {
     const registry = new CapabilityPackRegistry([
       createRobinSyntheticCodingPack(),
@@ -57,6 +60,7 @@ export class R1GatewayToolDispatcher implements ToolDispatcher {
       },
     );
     this.#ids = Object.freeze({ nextActionId: ids.nextActionId.bind(ids) });
+    this.#lifecycle = lifecycle;
     this.advertisedOperations = Object.freeze(
       this.#advertisement.operations.map((operation) =>
         Object.freeze({
@@ -99,10 +103,18 @@ export class R1GatewayToolDispatcher implements ToolDispatcher {
       },
       this.#advertisement,
     );
-    const result = await this.#gateway.execute(
-      this.#gateway.evaluate(prepared),
-      { signal },
-    );
+    const evaluated = this.#gateway.evaluate(prepared);
+    this.#lifecycle?.permissionDecided({
+      actionHash: evaluated.prepared.actionHash,
+      actionId: evaluated.prepared.action.actionId,
+      callId: call.callId,
+      effect: evaluated.decision.effect,
+      policySnapshotHash: evaluated.policySnapshotHash,
+      policyVersionId: evaluated.decision.policyVersionId,
+      toolName: r1ToolDisplayName(call),
+      winningPolicyName: evaluated.decision.winningPolicyName,
+    });
+    const result = await this.#gateway.execute(evaluated, { signal });
     return result.agent;
   }
 }

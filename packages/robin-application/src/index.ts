@@ -38,6 +38,15 @@ export {
   r1ToolDisplayName,
 } from "./gateway-tool-dispatcher.js";
 export type { R1GatewayActionIdSource } from "./gateway-tool-dispatcher.js";
+export { captureApprovalDecision } from "./tool-lifecycle.js";
+export type {
+  RobinApplicationToolDispatcherFactory,
+  RobinApplicationToolLifecycle,
+  RobinToolApprovalInvalidation,
+  RobinToolApprovalRequest,
+  RobinToolApprovalResolution,
+  RobinToolPermissionDecision,
+} from "./tool-lifecycle.js";
 export {
   DEFAULT_R1_SHUTDOWN_TIMEOUT_MS,
   MAXIMUM_R1_SHUTDOWN_TIMEOUT_MS,
