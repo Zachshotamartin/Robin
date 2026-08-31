@@ -240,6 +240,10 @@ test("the actual tarball installs with its local workspace closure and runs offl
     XDG_STATE_HOME: join(stateCanaryRoot, "state"),
     XDG_CACHE_HOME: join(stateCanaryRoot, "cache"),
     XDG_RUNTIME_DIR: join(stateCanaryRoot, "runtime"),
+    // Node 22.23+ may create its own module compile cache below TMPDIR before
+    // Robin's entry point runs. Disable that runtime-owned cache so this
+    // canary measures only filesystem state created by the installed CLI.
+    NODE_DISABLE_COMPILE_CACHE: "1",
     NODE_OPTIONS: [
       "--no-warnings",
       `--import=${pathToFileURL(installedColdSideEffectSentinel).href}`,
