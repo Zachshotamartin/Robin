@@ -5,6 +5,7 @@ import { inputBufferText } from "./input-buffer.js";
 import {
   MAXIMUM_QUEUED_MESSAGES,
   MAXIMUM_REPL_INPUT_UTF8_BYTES,
+  MAXIMUM_REPL_TOOL_OUTPUT_DELTAS,
   createReplState,
   reduceRepl,
   type ReplEvent,
@@ -373,6 +374,94 @@ test("approval denial, invalidation, Ctrl-C, and Ctrl-D remain visibly safe", ()
   );
 });
 
+test("tool output preserves channel order, rejects gaps, and cannot alter approval input", () => {
+  let state = apply(
+    createReplState(),
+    { type: "turn_started" },
+    { type: "tool_started", callId: "call-output", name: "robin.process.run@1" },
+    toolOutputEvent({
+      callId: "call-output",
+      name: "robin.process.run@1",
+      safeText: "stdout line\n",
+    }),
+    toolOutputEvent({
+      callId: "call-output",
+      channel: "stderr",
+      name: "robin.process.run@1",
+      safeText: "stderr line",
+      sequence: 2,
+    }),
+  );
+  assert.deepEqual(
+    state.toolOutput.map((delta) => [delta.channel, delta.sequence]),
+    [["stdout", 1], ["stderr", 2]],
+  );
+  assert.equal(state.tools[0]?.outputSequence, 2);
+
+  const rejected = reduceRepl(
+    state,
+    toolOutputEvent({
+      callId: "call-output",
+      name: "robin.process.run@1",
+      sequence: 4,
+    }),
+  ).state;
+  assert.deepEqual(rejected.toolOutput, state.toolOutput);
+  assert.equal(
+    rejected.diagnostics.at(-1)?.code,
+    "invalid_tool_output_delta",
+  );
+
+  const request = approvalRequest();
+  state = apply(
+    state,
+    { type: "approval_requested", request },
+    { type: "approval_presented", approvalId: request.approvalId },
+    { type: "key", key: { type: "text", text: "deny" } },
+  );
+  const approvalBeforeOutput = state.approval;
+  const approvalInputBeforeOutput = state.approval?.input;
+  state = reduceRepl(
+    state,
+    toolOutputEvent({
+      callId: "call-output",
+      name: "robin.process.run@1",
+      safeText: "settling output",
+      sequence: 3,
+    }),
+  ).state;
+  assert.equal(state.approval, approvalBeforeOutput);
+  assert.equal(state.approval?.input, approvalInputBeforeOutput);
+  assert.equal(inputBufferText(state.approval!.input), "deny");
+});
+
+test("raw live tool output retains a bounded ordered tail", () => {
+  let state = apply(
+    createReplState(),
+    { type: "turn_started" },
+    { type: "tool_started", callId: "call-output", name: "robin.process.run@1" },
+  );
+  for (let sequence = 1; sequence <= MAXIMUM_REPL_TOOL_OUTPUT_DELTAS + 1; sequence += 1) {
+    state = reduceRepl(
+      state,
+      toolOutputEvent({
+        callId: "call-output",
+        name: "robin.process.run@1",
+        safeText: String(sequence % 10),
+        sequence,
+      }),
+    ).state;
+  }
+  assert.equal(state.toolOutput.length, MAXIMUM_REPL_TOOL_OUTPUT_DELTAS);
+  assert.equal(state.toolOutputOmittedDeltas, 1);
+  assert.equal(state.toolOutput[0]?.sequence, 2);
+  assert.equal(
+    state.toolOutput.at(-1)?.sequence,
+    MAXIMUM_REPL_TOOL_OUTPUT_DELTAS + 1,
+  );
+  assert.equal(state.toolOutputUtf8Bytes, MAXIMUM_REPL_TOOL_OUTPUT_DELTAS);
+});
+
 function approvalRequest(): TerminalApprovalRequest {
   return Object.freeze({
     actionHash: "1".repeat(64),
@@ -408,4 +497,21 @@ function approvalResolution(
     outcome,
     resolvedAt: "2026-08-30T02:00:02.000Z",
   });
+}
+
+function toolOutputEvent(
+  overrides: Partial<Extract<ReplEvent, { readonly type: "tool_output" }>> = {},
+): Extract<ReplEvent, { readonly type: "tool_output" }> {
+  return {
+    type: "tool_output",
+    byteLength: 5,
+    callId: "call-1",
+    channel: "stdout",
+    limitExceeded: false,
+    name: "tool@1",
+    safeText: "hello",
+    sequence: 1,
+    textTruncated: false,
+    ...overrides,
+  };
 }

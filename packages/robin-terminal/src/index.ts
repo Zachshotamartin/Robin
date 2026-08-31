@@ -60,6 +60,9 @@ export {
   MAXIMUM_REPL_DIAGNOSTICS,
   MAXIMUM_REPL_HISTORY,
   MAXIMUM_REPL_INPUT_UTF8_BYTES,
+  MAXIMUM_REPL_TOOL_OUTPUT_DELTA_UTF8_BYTES,
+  MAXIMUM_REPL_TOOL_OUTPUT_DELTAS,
+  MAXIMUM_REPL_TOOL_OUTPUT_UTF8_BYTES,
   createReplState,
   reduceRepl,
 } from "./repl-reducer.js";
@@ -71,6 +74,7 @@ export type {
   ReplState,
   ReplStatus,
   ReplToolStatus,
+  ReplToolOutputDelta,
   ReplTranscriptEntry,
   ReplTransition,
 } from "./repl-reducer.js";
@@ -83,6 +87,7 @@ export {
   renderApprovalRequestBlock,
   renderApprovalRequestLines,
   renderApprovalResolutionLine,
+  renderToolOutputLines,
   wrapCells,
   writeTerminalFrame,
   StaleTerminalFrameError,

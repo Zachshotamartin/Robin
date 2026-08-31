@@ -21,6 +21,7 @@ import {
   type DecodedKeyEvent,
   type ReplEvent,
   type ReplState,
+  type ReplToolOutputDelta,
   type TerminalApprovalInvalidation,
   type TerminalApprovalRequest,
   type TerminalApprovalResolution,
@@ -422,6 +423,12 @@ async function consumeFlatTurn(
           summary: `${event.payload.code}: ${event.payload.message}`,
         });
         break;
+      case "ToolOutputDelta":
+        renderer.append({
+          type: "tool_output",
+          delta: toTerminalToolOutput(event),
+        });
+        break;
       case "ApprovalRequested":
         approvals.requested(toTerminalApprovalRequest(event));
         break;
@@ -652,6 +659,21 @@ async function runRawSession(
           summary: `${event.payload.code}: ${event.payload.message}`,
         });
         break;
+      case "ToolOutputDelta": {
+        const delta = toTerminalToolOutput(event);
+        apply({
+          type: "tool_output",
+          byteLength: delta.byteLength,
+          callId: delta.callId,
+          channel: delta.channel,
+          limitExceeded: delta.limitExceeded,
+          name: delta.name,
+          safeText: delta.safeText,
+          sequence: delta.sequence,
+          textTruncated: delta.textTruncated,
+        });
+        break;
+      }
       case "ApprovalRequested": {
         const request = toTerminalApprovalRequest(event);
         apply({ type: "approval_requested", request });
@@ -929,4 +951,19 @@ function toTerminalApprovalInvalidation(
   event: Extract<RobinApplicationEvent, { readonly type: "ApprovalInvalidated" }>,
 ): TerminalApprovalInvalidation {
   return Object.freeze({ ...event.payload });
+}
+
+function toTerminalToolOutput(
+  event: Extract<RobinApplicationEvent, { readonly type: "ToolOutputDelta" }>,
+): ReplToolOutputDelta {
+  return Object.freeze({
+    byteLength: event.payload.byteLength,
+    callId: event.payload.callId,
+    channel: event.payload.channel,
+    limitExceeded: event.payload.limitExceeded,
+    name: event.payload.toolName,
+    safeText: event.payload.safeText,
+    sequence: event.payload.sequence,
+    textTruncated: event.payload.textTruncated,
+  });
 }

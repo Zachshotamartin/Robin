@@ -10,6 +10,7 @@ import {
   wrapCells,
   writeTerminalFrame,
   renderApprovalRequestBlock,
+  renderToolOutputLines,
 } from "./renderer.js";
 import type { TerminalApprovalRequest } from "./approval.js";
 import { detectTerminalCapabilities } from "./terminal-capabilities.js";
@@ -279,6 +280,28 @@ test("approval rendering is complete, deterministic, and control-injection safe"
     key: { type: "resize", columns: 100, rows: 50 },
   }).state;
   assert.equal(state.approval, identity);
+});
+
+test("tool output labels every stdout and stderr line without interpreting controls", () => {
+  const lines = renderToolOutputLines({
+    byteLength: 19,
+    callId: "call-output\u001b]52;bad\u0007",
+    channel: "stderr",
+    limitExceeded: true,
+    name: "robin.process.run@1\u001b[31m",
+    safeText: "first\u001b[2J\nsecond\rline",
+    sequence: 7,
+    textTruncated: true,
+  });
+  assert.equal(lines.length, 2);
+  assert.equal(lines.every((line) => line.includes("[stderr #7]")), true);
+  assert.equal(lines.every((line) => line.includes("text_truncated=true")), true);
+  assert.equal(lines.every((line) => line.includes("limit_exceeded=true")), true);
+  assert.equal(lines.join("\n").includes("\u001b"), false);
+  assert.equal(lines.join("\n").includes("\u0007"), false);
+  assert.equal(lines.join("\n").includes("\r"), false);
+  assert.match(lines[0]!, /first\\u\{1b\}\[2J/u);
+  assert.match(lines[1]!, /second\\u\{0d\}line/u);
 });
 
 function applyApproval(

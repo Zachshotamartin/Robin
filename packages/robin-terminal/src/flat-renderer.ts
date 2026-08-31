@@ -2,6 +2,7 @@ import {
   renderApprovalInvalidationLine,
   renderApprovalRequestLines,
   renderApprovalResolutionLine,
+  renderToolOutputLines,
   sanitizeTerminalData,
 } from "./renderer.js";
 import type {
@@ -10,6 +11,7 @@ import type {
   TerminalApprovalRequest,
   TerminalApprovalResolution,
 } from "./approval.js";
+import type { ReplToolOutputDelta } from "./repl-reducer.js";
 
 export type FlatRenderEvent =
   | { readonly type: "session_started"; readonly label: string }
@@ -51,7 +53,8 @@ export type FlatRenderEvent =
   | {
       readonly type: "approval_invalidated";
       readonly invalidation: TerminalApprovalInvalidation;
-    };
+    }
+  | { readonly type: "tool_output"; readonly delta: ReplToolOutputDelta };
 
 export interface FlatWriter {
   write(bytes: string): unknown;
@@ -100,6 +103,10 @@ export function renderFlatEvent(event: FlatRenderEvent): string {
         `[approval:invalidated] ` +
         `${renderApprovalInvalidationLine(event.invalidation)}\n`
       );
+    case "tool_output":
+      return renderToolOutputLines(event.delta)
+        .map((line) => `[tool-output] ${line}\n`)
+        .join("");
   }
 }
 

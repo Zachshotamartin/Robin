@@ -3,7 +3,11 @@ import {
   inputBufferText,
   segmentGraphemes,
 } from "./input-buffer.js";
-import type { ReplState, ReplTranscriptEntry } from "./repl-reducer.js";
+import type {
+  ReplState,
+  ReplToolOutputDelta,
+  ReplTranscriptEntry,
+} from "./repl-reducer.js";
 import { MAXIMUM_REPL_INPUT_UTF8_BYTES } from "./repl-reducer.js";
 import type {
   TerminalApprovalInvalidation,
@@ -75,6 +79,20 @@ export function buildTerminalFrame(
         columns,
       ),
     );
+  }
+  if (state.toolOutputOmittedDeltas > 0) {
+    rows.push(
+      ...wrapCells(
+        `Tool output: ${state.toolOutputOmittedDeltas} earlier ` +
+          "delta(s) omitted from the bounded live view.",
+        columns,
+      ),
+    );
+  }
+  for (const delta of state.toolOutput) {
+    for (const line of renderToolOutputLines(delta)) {
+      rows.push(...wrapCells(line, columns));
+    }
   }
   if (state.approval !== null) {
     for (const line of renderApprovalRequestLines(state.approval)) {
@@ -272,6 +290,21 @@ export function renderApprovalInvalidationLine(
   );
 }
 
+/** Every logical line repeats its source channel and sequence identity. */
+export function renderToolOutputLines(
+  delta: ReplToolOutputDelta,
+): readonly string[] {
+  const label =
+    `Tool output ${sanitizeTerminalData(delta.name)} ` +
+    `[${delta.channel} #${delta.sequence}] ` +
+    `call=${sanitizeTerminalData(delta.callId)} ` +
+    `source_bytes=${delta.byteLength} ` +
+    `text_truncated=${delta.textTruncated} ` +
+    `limit_exceeded=${delta.limitExceeded}`;
+  const lines = sanitizeTerminalData(delta.safeText).split("\n");
+  return Object.freeze(lines.map((line) => `${label}: ${line}`));
+}
+
 export function wrapCells(value: string, columns: number): readonly string[] {
   const width = Math.max(1, Math.trunc(columns));
   const rows: string[] = [""];
@@ -344,6 +377,11 @@ function renderDiagnostic(code: string, count: number): string {
       return (
         `Notice [${code}] No authority was granted. Type exactly y or ` +
         `allow-once, or n or deny, then press Enter.${occurrence}`
+      );
+    case "invalid_tool_output_delta":
+      return (
+        `Notice [${code}] An out-of-order or invalid tool output delta was ` +
+        `rejected.${occurrence}`
       );
     default:
       return `Notice [${sanitizeTerminalData(code)}] Terminal input was rejected.${occurrence}`;

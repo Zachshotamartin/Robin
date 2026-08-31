@@ -27,6 +27,9 @@ export const MAXIMUM_QUEUED_MESSAGES = 8;
 export const MAXIMUM_REPL_HISTORY = 100;
 export const MAXIMUM_REPL_DIAGNOSTICS = 32;
 export const MAXIMUM_REPL_INPUT_UTF8_BYTES = 65_536;
+export const MAXIMUM_REPL_TOOL_OUTPUT_DELTAS = 256;
+export const MAXIMUM_REPL_TOOL_OUTPUT_UTF8_BYTES = 256 * 1_024;
+export const MAXIMUM_REPL_TOOL_OUTPUT_DELTA_UTF8_BYTES = 32 * 1_024;
 
 export type ReplStatus =
   | "ready"
@@ -45,6 +48,19 @@ export interface ReplToolStatus {
   readonly name: string;
   readonly status: "running" | "completed" | "failed";
   readonly summary: string | null;
+  readonly outputSequence: number;
+  readonly outputLimitExceeded: boolean;
+}
+
+export interface ReplToolOutputDelta {
+  readonly byteLength: number;
+  readonly callId: string;
+  readonly channel: "stdout" | "stderr";
+  readonly limitExceeded: boolean;
+  readonly name: string;
+  readonly safeText: string;
+  readonly sequence: number;
+  readonly textTruncated: boolean;
 }
 
 export interface ReplDiagnostic {
@@ -77,6 +93,9 @@ export interface ReplState {
   readonly transcript: readonly ReplTranscriptEntry[];
   readonly assistantStream: string;
   readonly tools: readonly ReplToolStatus[];
+  readonly toolOutput: readonly ReplToolOutputDelta[];
+  readonly toolOutputOmittedDeltas: number;
+  readonly toolOutputUtf8Bytes: number;
   readonly usage: ReplUsage;
   readonly columns: number;
   readonly rows: number;
@@ -90,6 +109,17 @@ export type ReplEvent =
   | { readonly type: "turn_started" }
   | { readonly type: "assistant_delta"; readonly text: string }
   | { readonly type: "tool_started"; readonly callId: string; readonly name: string }
+  | {
+      readonly type: "tool_output";
+      readonly byteLength: number;
+      readonly callId: string;
+      readonly channel: "stdout" | "stderr";
+      readonly limitExceeded: boolean;
+      readonly name: string;
+      readonly safeText: string;
+      readonly sequence: number;
+      readonly textTruncated: boolean;
+    }
   | {
       readonly type: "tool_completed" | "tool_failed";
       readonly callId: string;
@@ -154,6 +184,9 @@ export function createReplState(
     transcript: [],
     assistantStream: "",
     tools: [],
+    toolOutput: [],
+    toolOutputOmittedDeltas: 0,
+    toolOutputUtf8Bytes: 0,
     usage: Object.freeze({ inputTokens: 0, outputTokens: 0 }),
     columns: validDimension(options.columns, 80),
     rows: validDimension(options.rows, 24),
@@ -182,6 +215,9 @@ export function reduceRepl(state: ReplState, event: ReplEvent): ReplTransition {
           status: "working",
           assistantStream: "",
           tools: [],
+          toolOutput: [],
+          toolOutputOmittedDeltas: 0,
+          toolOutputUtf8Bytes: 0,
           usage: Object.freeze({ inputTokens: 0, outputTokens: 0 }),
           approval: null,
         },
@@ -202,10 +238,60 @@ export function reduceRepl(state: ReplState, event: ReplEvent): ReplTransition {
             name: event.name,
             status: "running",
             summary: null,
+            outputSequence: 0,
+            outputLimitExceeded: false,
           }),
         },
         [],
       );
+    case "tool_output": {
+      const existing = state.tools.find((tool) => tool.callId === event.callId);
+      if (
+        existing === undefined ||
+        existing.name !== event.name ||
+        existing.status !== "running" ||
+        event.sequence !== existing.outputSequence + 1 ||
+        !Number.isSafeInteger(event.byteLength) ||
+        event.byteLength <= 0 ||
+        Buffer.byteLength(event.safeText, "utf8") >
+          MAXIMUM_REPL_TOOL_OUTPUT_DELTA_UTF8_BYTES ||
+        (existing.outputLimitExceeded && !event.limitExceeded)
+      ) {
+        return changed(
+          state,
+          {
+            diagnostics: addDiagnostic(
+              state.diagnostics,
+              "invalid_tool_output_delta",
+            ),
+          },
+          [],
+        );
+      }
+      const captured = Object.freeze({
+        byteLength: event.byteLength,
+        callId: event.callId,
+        channel: event.channel,
+        limitExceeded: event.limitExceeded,
+        name: event.name,
+        safeText: event.safeText,
+        sequence: event.sequence,
+        textTruncated: event.textTruncated,
+      });
+      const output = appendBoundedToolOutput(state, captured);
+      return changed(
+        state,
+        {
+          tools: upsertTool(state.tools, {
+            ...existing,
+            outputSequence: event.sequence,
+            outputLimitExceeded: event.limitExceeded,
+          }),
+          ...output,
+        },
+        [],
+      );
+    }
     case "tool_completed":
     case "tool_failed": {
       const existing = state.tools.find((tool) => tool.callId === event.callId);
@@ -598,6 +684,9 @@ function submitInput(state: ReplState): ReplTransition {
         transcript,
         assistantStream: "",
         tools: [],
+        toolOutput: [],
+        toolOutputOmittedDeltas: 0,
+        toolOutputUtf8Bytes: 0,
         approval: null,
       },
       [{ type: "submit_message", text, queued: false }],
@@ -803,11 +892,41 @@ function freezeState(state: ReplState): ReplState {
       state.transcript.map((entry) => Object.freeze({ ...entry })),
     ),
     tools: Object.freeze(state.tools.map((tool) => Object.freeze({ ...tool }))),
+    toolOutput: Object.freeze(
+      state.toolOutput.map((delta) => Object.freeze({ ...delta })),
+    ),
     usage: Object.freeze({ ...state.usage }),
     diagnostics: Object.freeze(
       state.diagnostics.map((diagnostic) => Object.freeze({ ...diagnostic })),
     ),
     approval: state.approval,
+  });
+}
+
+function appendBoundedToolOutput(
+  state: ReplState,
+  delta: ReplToolOutputDelta,
+): Pick<
+  ReplState,
+  "toolOutput" | "toolOutputOmittedDeltas" | "toolOutputUtf8Bytes"
+> {
+  const retained = [...state.toolOutput, delta];
+  let retainedBytes =
+    state.toolOutputUtf8Bytes + Buffer.byteLength(delta.safeText, "utf8");
+  let omitted = state.toolOutputOmittedDeltas;
+  while (
+    retained.length > MAXIMUM_REPL_TOOL_OUTPUT_DELTAS ||
+    retainedBytes > MAXIMUM_REPL_TOOL_OUTPUT_UTF8_BYTES
+  ) {
+    const removed = retained.shift();
+    if (removed === undefined) break;
+    retainedBytes -= Buffer.byteLength(removed.safeText, "utf8");
+    omitted += 1;
+  }
+  return Object.freeze({
+    toolOutput: Object.freeze(retained),
+    toolOutputOmittedDeltas: omitted,
+    toolOutputUtf8Bytes: retainedBytes,
   });
 }
 

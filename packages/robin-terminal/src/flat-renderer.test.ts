@@ -80,3 +80,26 @@ test("flat approval output includes exact scope, complete summary, and safe outc
   });
   assert.match(resolved, /decision=deny outcome=denied/u);
 });
+
+test("flat tool output is append-only, channel-labeled, and injection-safe", () => {
+  const rendered = renderFlatEvent({
+    type: "tool_output",
+    delta: {
+      byteLength: 10,
+      callId: "call-1",
+      channel: "stdout",
+      limitExceeded: false,
+      name: "robin.process.run@1",
+      safeText: "one\ntwo\u001b[2J",
+      sequence: 3,
+      textTruncated: false,
+    },
+  });
+  assert.equal(rendered.includes("\u001b"), false);
+  assert.equal(
+    rendered.split("\n").filter(Boolean).every((line) =>
+      line.includes("[stdout #3]")),
+    true,
+  );
+  assert.match(rendered, /two\\u\{1b\}\[2J/u);
+});

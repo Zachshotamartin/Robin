@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { PassThrough, Readable } from "node:stream";
 import test from "node:test";
+import { stripVTControlCharacters } from "node:util";
 
 import {
   ActionIdKind,
@@ -108,6 +109,12 @@ test(
       /Canonical summary: \{"afterHash":"b{64}","beforeHash":"a{64}"/u,
     );
     assert.match(rendered, /decision=allow_once outcome=granted/u);
+    const stdoutPosition = rendered.indexOf("[stdout #1]");
+    const stderrPosition = rendered.indexOf("[stderr #2]");
+    assert.equal(stdoutPosition >= 0, true);
+    assert.equal(stderrPosition > stdoutPosition, true);
+    assert.match(rendered, /stdout line\\u\{1b\}\[2J/u);
+    assert.match(rendered, /stderr line/u);
     assert.equal(rendered.includes("\u001b"), false);
     assert.equal(
       application.snapshot.events.filter(
@@ -251,6 +258,52 @@ test(
   },
 );
 
+test(
+  "raw mode renders ordered live stdout and stderr and still restores the terminal",
+  { timeout: 5_000 },
+  async () => {
+    const terminal = rawTerminal();
+    const application = approvalApplication();
+    let rendered = "";
+    let allowed = false;
+    let closed = false;
+    terminal.output.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      rendered += text;
+      if (!allowed && text.includes("Decision: type exactly")) {
+        allowed = true;
+        queueMicrotask(() => terminal.input.write("allow-once\r"));
+      } else if (
+        !closed &&
+        rendered.includes("[stderr #2]") &&
+        text.includes("Robin · ready")
+      ) {
+        closed = true;
+        queueMicrotask(() => terminal.input.write(Buffer.from([0x04])));
+      }
+    });
+
+    const code = await executeInteractiveSession(
+      REQUEST,
+      application,
+      terminal.input,
+      terminal.output,
+      { write() {} },
+      { TERM: "xterm-256color", LANG: "en_US.UTF-8" },
+    );
+
+    assert.equal(code, 0);
+    const visible = stripVTControlCharacters(rendered);
+    const stdoutPosition = rendered.indexOf("[stdout #1]");
+    const stderrPosition = rendered.indexOf("[stderr #2]");
+    assert.equal(stdoutPosition >= 0, true);
+    assert.equal(stderrPosition > stdoutPosition, true);
+    assert.match(visible, /stdout line\\u\{1b\}\[2J/u);
+    assert.equal(rendered.includes("stdout line\u001b[2J"), false);
+    assert.deepEqual(terminal.rawModes, [true, false]);
+  },
+);
+
 function approvalApplication(): R1RobinApplication {
   nextSession += 1;
   let timestamp = 0;
@@ -359,6 +412,28 @@ function approvalDispatcherFactory(): RobinApplicationToolDispatcherFactory {
         outcome: decision === "allow_once" ? "granted" : "denied",
         resolvedAt: "2026-08-30T02:00:02.000Z",
       });
+      if (decision === "allow_once") {
+        lifecycle.toolOutput?.({
+          byteLength: 12,
+          callId: call.callId,
+          channel: "stdout",
+          limitExceeded: false,
+          safeText: "stdout line\u001b[2J\n",
+          sequence: 1,
+          textTruncated: false,
+          toolName: TOOL_NAME,
+        });
+        lifecycle.toolOutput?.({
+          byteLength: 11,
+          callId: call.callId,
+          channel: "stderr",
+          limitExceeded: false,
+          safeText: "stderr line\n",
+          sequence: 2,
+          textTruncated: false,
+          toolName: TOOL_NAME,
+        });
+      }
       return Object.freeze({
         schemaVersion: 1,
         status: decision === "allow_once" ? "executed" : "denied",
