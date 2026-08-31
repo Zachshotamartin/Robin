@@ -1,0 +1,515 @@
+{
+  "schemaVersion": 1,
+  "gate": "R1",
+  "commit": "2e1eb8a5d0faf62e240f06f49c1ab5514d9cf68a",
+  "dirty": false,
+  "robinVersion": "0.0.0",
+  "dependencyLockSha256": "cb23a03667ffaead86126e48248f2d34b3048f8a5e51038479f2cecdaf9d2968",
+  "environment": [
+    {
+      "name": "platform",
+      "value": "darwin"
+    },
+    {
+      "name": "arch",
+      "value": "arm64"
+    },
+    {
+      "name": "node",
+      "value": "v26.7.0"
+    },
+    {
+      "name": "npm",
+      "value": "11.19.0"
+    },
+    {
+      "name": "git",
+      "value": "git version 2.43.1"
+    },
+    {
+      "name": "commandIsolation",
+      "value": "macos-sandbox-exec-source-deny"
+    }
+  ],
+  "commands": [
+    {
+      "id": "dependency-install",
+      "executable": "npm",
+      "args": [
+        "ci",
+        "--ignore-scripts",
+        "--silent",
+        "--no-audit",
+        "--no-fund"
+      ],
+      "display": "[\"npm\",\"ci\",\"--ignore-scripts\",\"--silent\",\"--no-audit\",\"--no-fund\"]",
+      "timeoutMs": 900000,
+      "exitCode": 0,
+      "signal": null,
+      "status": "passed",
+      "observedDurationMs": 874,
+      "durationVerification": {
+        "mode": "replay-envelope-v1",
+        "factor": 4,
+        "slackMs": 1000
+      },
+      "stdout": {
+        "observed": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "stderr": {
+        "observed": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "summary": "passed; observed duration=874ms; stdout=0 bytes; stderr=0 bytes"
+    },
+    {
+      "id": "dependency-tree",
+      "executable": "npm",
+      "args": [
+        "ls",
+        "--all",
+        "--json"
+      ],
+      "display": "[\"npm\",\"ls\",\"--all\",\"--json\"]",
+      "timeoutMs": 300000,
+      "exitCode": 0,
+      "signal": null,
+      "status": "passed",
+      "observedDurationMs": 177,
+      "durationVerification": {
+        "mode": "replay-envelope-v1",
+        "factor": 4,
+        "slackMs": 1000
+      },
+      "stdout": {
+        "observed": {
+          "bytes": 11756,
+          "sha256": "c1d40996257e4d8b2767575e5f05f5a6ef657a2f133de853a36c3210f4457cdf"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 11725,
+          "sha256": "5260147afd1e22287607c9b2c7aee4cf782341a2173ffc49b69ac62034ee3b5e"
+        }
+      },
+      "stderr": {
+        "observed": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "summary": "passed; observed duration=177ms; stdout=11756 bytes; stderr=0 bytes"
+    },
+    {
+      "id": "static",
+      "executable": "npm",
+      "args": [
+        "run",
+        "static"
+      ],
+      "display": "[\"npm\",\"run\",\"static\"]",
+      "timeoutMs": 900000,
+      "exitCode": 0,
+      "signal": null,
+      "status": "passed",
+      "observedDurationMs": 10179,
+      "durationVerification": {
+        "mode": "replay-envelope-v1",
+        "factor": 4,
+        "slackMs": 1000
+      },
+      "stdout": {
+        "observed": {
+          "bytes": 31720,
+          "sha256": "60d57a94c69cd1b16f41cc9351d8052762d8c39e3589d5353186ede28a160f61"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 31453,
+          "sha256": "6ac4444b31dd7a99583421f6fc2ff1052560502d1a89299e89b10576805f60df"
+        }
+      },
+      "stderr": {
+        "observed": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "summary": "passed; observed duration=10179ms; stdout=31720 bytes; stderr=0 bytes"
+    },
+    {
+      "id": "unit-contract",
+      "executable": "npm",
+      "args": [
+        "run",
+        "test:unit"
+      ],
+      "display": "[\"npm\",\"run\",\"test:unit\"]",
+      "timeoutMs": 1200000,
+      "exitCode": 0,
+      "signal": null,
+      "status": "passed",
+      "observedDurationMs": 30408,
+      "durationVerification": {
+        "mode": "replay-envelope-v1",
+        "factor": 4,
+        "slackMs": 1000
+      },
+      "stdout": {
+        "observed": {
+          "bytes": 299076,
+          "sha256": "83dfb961a4b3810d9c17f7d0f8ad26d25491821ad931fc58575942a2d669336b"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 296877,
+          "sha256": "7a90f958cae17681e79a188693c3279db08152eacc4782c894928c5839c08c20"
+        }
+      },
+      "stderr": {
+        "observed": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "summary": "passed; observed duration=30408ms; stdout=299076 bytes; stderr=0 bytes"
+    },
+    {
+      "id": "pty-local",
+      "executable": "npm",
+      "args": [
+        "run",
+        "test:pty"
+      ],
+      "display": "[\"npm\",\"run\",\"test:pty\"]",
+      "timeoutMs": 900000,
+      "exitCode": 0,
+      "signal": null,
+      "status": "passed",
+      "observedDurationMs": 6793,
+      "durationVerification": {
+        "mode": "replay-envelope-v1",
+        "factor": 4,
+        "slackMs": 1000
+      },
+      "stdout": {
+        "observed": {
+          "bytes": 5580,
+          "sha256": "7d71223a364ebd44a3f1f94b69c6a35f516d708e7ee91d98687b4b937bace38c"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 5573,
+          "sha256": "dfb303f18587f899150cad5e1da38b6656ca81dc27a386fd559dcfa3802219db"
+        }
+      },
+      "stderr": {
+        "observed": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "summary": "passed; observed duration=6793ms; stdout=5580 bytes; stderr=0 bytes"
+    },
+    {
+      "id": "package-smoke",
+      "executable": "npm",
+      "args": [
+        "run",
+        "test:package"
+      ],
+      "display": "[\"npm\",\"run\",\"test:package\"]",
+      "timeoutMs": 900000,
+      "exitCode": 0,
+      "signal": null,
+      "status": "passed",
+      "observedDurationMs": 9970,
+      "durationVerification": {
+        "mode": "replay-envelope-v1",
+        "factor": 4,
+        "slackMs": 1000
+      },
+      "stdout": {
+        "observed": {
+          "bytes": 4664,
+          "sha256": "98accf0978222fb5eb7558af0512bc6a166a635486a55b5e5ecb980341d96838"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 4661,
+          "sha256": "1d98c6e56f4a37b1cb5212fa682e2c6768a5256435743636f646290d99517603"
+        }
+      },
+      "stderr": {
+        "observed": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "summary": "passed; observed duration=9970ms; stdout=4664 bytes; stderr=0 bytes"
+    },
+    {
+      "id": "gate-b",
+      "executable": "npm",
+      "args": [
+        "run",
+        "test:gate:b"
+      ],
+      "display": "[\"npm\",\"run\",\"test:gate:b\"]",
+      "timeoutMs": 3600000,
+      "exitCode": 0,
+      "signal": null,
+      "status": "passed",
+      "observedDurationMs": 53008,
+      "durationVerification": {
+        "mode": "replay-envelope-v1",
+        "factor": 4,
+        "slackMs": 1000
+      },
+      "stdout": {
+        "observed": {
+          "bytes": 326788,
+          "sha256": "4b9a331b0cc2cb15a20df9ead5ef1654697f132128ccc69cf41cc1024f7375a6"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 324426,
+          "sha256": "7a470c3985b5b211d38ff5e284edc16fa90a4777a9708c9bbbbbdccdd710b29c"
+        }
+      },
+      "stderr": {
+        "observed": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "replay": {
+          "normalization": "ascii-digit-runs-v1",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "summary": "passed; observed duration=53008ms; stdout=326788 bytes; stderr=0 bytes"
+    }
+  ],
+  "requirements": [
+    {
+      "requirementId": "FR-CLI-001",
+      "terminalGate": "R1",
+      "status": "partial",
+      "ticketIds": [
+        "R1.10",
+        "R1.12"
+      ],
+      "testIds": [
+        "E2E-001"
+      ],
+      "commandIds": [
+        "package-smoke"
+      ],
+      "note": "The installed private candidate enters the same synthetic coding session under a real PTY; R1 acceptance still requires reviewed hosted evidence."
+    },
+    {
+      "requirementId": "FR-CLI-005",
+      "terminalGate": "R1",
+      "status": "partial",
+      "ticketIds": [
+        "R1.10"
+      ],
+      "testIds": [
+        "UNIT-001"
+      ],
+      "commandIds": [
+        "unit-contract"
+      ],
+      "note": "R1 closes the implemented prompt-versus-reserved-command paths without claiming the later complete administrative command tree."
+    },
+    {
+      "requirementId": "FR-AGT-002",
+      "terminalGate": "R3",
+      "status": "partial",
+      "ticketIds": [
+        "R1.02"
+      ],
+      "testIds": [
+        "UNIT-004"
+      ],
+      "commandIds": [
+        "unit-contract"
+      ],
+      "note": "R1 implements and prefix-replays the ephemeral legal turn state model; R3 owns durable replay and recovery completion."
+    },
+    {
+      "requirementId": "FR-AUTO-004",
+      "terminalGate": "R7",
+      "status": "partial",
+      "ticketIds": [
+        "R0.06"
+      ],
+      "testIds": [
+        "TERM-012"
+      ],
+      "commandIds": [
+        "package-smoke"
+      ],
+      "note": "The installed R1 candidate preserves ANSI-free implemented headless output; R7 owns the stable automation contract and full operating-system matrix."
+    },
+    {
+      "requirementId": "NFR-MAINT-001",
+      "terminalGate": "R12",
+      "status": "partial",
+      "ticketIds": [
+        "R1.01",
+        "R1.10"
+      ],
+      "testIds": [
+        "SEC-018"
+      ],
+      "commandIds": [
+        "static"
+      ],
+      "note": "R1 preserves terminal, application, agent, provider, tool, and state package boundaries; R12 closes the requirement across the selected editor client."
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "r1-pty-driver",
+      "path": "tests/pty/robin_pty_driver.py",
+      "schemaVersion": 1,
+      "bytes": 11394,
+      "sha256": "bb79c7d90dbcc33571b8bd9f13831e64e9e04badedd3df718879b3913cc037a5"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "cli-package-manifest",
+      "path": "apps/cli/package.json",
+      "mediaType": "application/json",
+      "bytes": 1591,
+      "sha256": "0d5161ee38a644a2ec374e21aedf0f52996353cd90fc6af362b0b66c7f58ab7e"
+    },
+    {
+      "id": "cli-tarball-inventory",
+      "path": "evidence/inventory/r1-cli-tarball-v1.json",
+      "mediaType": "application/json",
+      "bytes": 12845,
+      "sha256": "cdeb7353eef8bcc2b32a4b81e8212ef161d3699260a27f4270201a070a3c6167"
+    },
+    {
+      "id": "terminal-compatibility",
+      "path": "docs/TERMINAL_COMPATIBILITY.md",
+      "mediaType": "text/markdown",
+      "bytes": 7410,
+      "sha256": "f7bc9acc394f67e3c2283b2456366c4a3b02abedbaa0edcaa951c49854b78a8c"
+    },
+    {
+      "id": "application-event-contract",
+      "path": "packages/robin-application/src/application-event.ts",
+      "mediaType": "text/typescript",
+      "bytes": 16922,
+      "sha256": "5bf2acec3ef129ec352ef978dcd56309f6fcf5c3989f25bdaecb782c9aca22e6"
+    },
+    {
+      "id": "turn-state-reducer",
+      "path": "packages/robin-session/src/turn-state.ts",
+      "mediaType": "text/typescript",
+      "bytes": 2479,
+      "sha256": "5ef33a7f4345b72f2bf81a85ef1073dfd4a9e47f4387c5755d1ccd588d02893d"
+    }
+  ],
+  "supportedClaims": [
+    "This manifest records local deterministic R1 candidate commands at the tested commit; it does not by itself establish R1 acceptance.",
+    "The same provider-neutral application and turn coordinator power the implemented raw, flat, text, JSON, and streaming-JSON candidate surfaces.",
+    "The local real-PTY suite verifies two synthetic coding-tool calls, a dependent follow-up, queue promotion, cancellation escalation, resize, inert paste, failure cleanup, and terminal restoration.",
+    "The private candidate tarball matches the reviewed 59-file inventory and passes isolated install, installed raw-PTY execution, and offline uninstall smoke."
+  ],
+  "deferredClaims": [
+    "R1 acceptance, hosted Linux/macOS results, branch protection, and mainline merge identity are external records not established by this local manifest.",
+    "Physical repository reads or writes, command execution, verification processes, Git operations, worktrees, and sandbox enforcement are not established by R1.",
+    "A production model provider, arbitrary provider or agent compatibility, API-key onboarding, credential storage, or network access is not established by R1.",
+    "Durable sessions, continuation, resume, crash recovery, background supervision, and editor clients are not established by R1.",
+    "A public package publication, supported installation channel, upgrade, rollback, migration, or production uninstall guarantee is not established by R1."
+  ],
+  "knownLimitations": [
+    {
+      "id": "tested-commit-semantics",
+      "summary": "The commit field identifies the clean source commit tested before the generated manifest file is written.",
+      "impact": "A later manifest commit intentionally points to its tested source parent and never claims to hash itself."
+    },
+    {
+      "id": "unaccepted-r0-prerequisite",
+      "summary": "R0 remains an unmerged prerequisite while this R1 candidate is stacked on its candidate commit.",
+      "impact": "R1 cannot be accepted until R0 is accepted on mainline and R1 is rebased or otherwise proven against that baseline."
+    },
+    {
+      "id": "single-host-capture",
+      "summary": "The generated local manifest records one host environment only.",
+      "impact": "It does not replace the separately required hosted Linux and macOS PTY and package evidence."
+    },
+    {
+      "id": "synthetic-fixture-only",
+      "summary": "The R1 provider and both coding tools operate only on deterministic in-memory fixture data.",
+      "impact": "No physical checkout, real provider, API key, process, Git repository, or persistent user data is exercised."
+    },
+    {
+      "id": "experimental-machine-contract",
+      "summary": "The JSON and streaming-JSON candidate envelopes explicitly declare experimental stability.",
+      "impact": "R7, not R1, owns stable headless schemas, compatibility, and multi-provider conformance."
+    },
+    {
+      "id": "python-pty-harness",
+      "summary": "The R1 process-level PTY harness uses the operating system Python 3 standard library.",
+      "impact": "Python is a contributor and CI test dependency for this candidate, not a runtime dependency of the packed Robin CLI."
+    },
+    {
+      "id": "ephemeral-package-archive",
+      "summary": "Package smoke verifies the temporary gzip archive, canonical tar, exact file hashes and modes, npm integrity metadata, install, PTY execution, and uninstall before removing it.",
+      "impact": "The inventory retains measured macOS-arm64 npm 10/11 and Linux-x64 npm 10 compression profiles, but the archive is not retained or signed; immutable release provenance remains R10 work."
+    },
+    {
+      "id": "partial-requirement-evidence",
+      "summary": "Evidence schema v1 records partial requirement progress only.",
+      "impact": "No requirement is marked complete solely because the R1 candidate or this manifest exists."
+    }
+  ],
+  "generatedAt": "2026-08-31T00:19:32.123Z"
+}
