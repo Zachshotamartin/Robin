@@ -416,7 +416,7 @@ test("requires the exact eight R2 tools and starts with a bounded repository lis
   const conversation = baseConversation();
   const call = await nextCall(provider, conversation, "robin.repo", "list_files");
 
-  assert.deepEqual(call.args, { root: "." });
+  assert.deepEqual(call.args, { root: "" });
   assert.equal(call.callId, "r2-turn-1-01-list");
   assert.equal(provider.descriptor.adapterId, "robin.r2-synthetic-coding");
   assert.equal(provider.descriptor.capabilities.cancellation, "confirmed");

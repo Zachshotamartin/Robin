@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import {
   access,
   mkdir,
   mkdtemp,
+  readFile,
   realpath,
   rm,
   symlink,
@@ -202,6 +204,140 @@ test("honors an already-aborted bootstrap signal before filesystem work", async 
   );
 });
 
+test("runs the complete policy-synchronized two-edit coding loop with live output", async (t) => {
+  const gitExecutable = await installedGitExecutable();
+  const fixture = await createCodingRepositoryFixture(gitExecutable);
+  t.after(async () => rm(fixture.temporaryRoot, { recursive: true, force: true }));
+  const initialIndexHash = sha256(await readFile(path.join(fixture.repositoryRoot, ".git", "index")));
+  const initialHead = await gitText(gitExecutable, fixture.repositoryRoot, ["rev-parse", "HEAD"]);
+  const originalNotes = await readFile(
+    path.join(fixture.repositoryRoot, "notes", "user-notes.txt"),
+    "utf8",
+  );
+  const originalScratch = await readFile(
+    path.join(fixture.repositoryRoot, "scratch-user.txt"),
+    "utf8",
+  );
+
+  const result = await createR2RobinApplication({
+    sessionId: "r2-complete-coding-loop",
+    startDirectory: fixture.repositoryRoot,
+    gitExecutable,
+    permissionMode: "plan",
+  });
+  t.after(async () => result.application.close("shutdown"));
+
+  const planEvents = [];
+  for await (const event of result.application.submit(
+    "Fix and verify the deterministic defects.",
+    new AbortController().signal,
+  )) {
+    planEvents.push(event);
+  }
+  assert.equal(
+    planEvents.some(
+      (event) =>
+        event.type === "PermissionDecided" &&
+        event.payload.toolName === "robin.edit.apply_patch@1" &&
+        event.payload.effect === "deny",
+    ),
+    true,
+    JSON.stringify(
+      planEvents.map((event) => ({
+        type: event.type,
+        payload: event.type === "ToolCallCompleted" ||
+          event.type === "ToolCallFailed" ||
+          event.type === "TurnCompleted" ||
+          event.type === "TurnFailed"
+          ? event.payload
+          : undefined,
+      })),
+    ),
+  );
+  assert.equal(
+    (await readFile(path.join(fixture.repositoryRoot, "src", "calculate.ts"), "utf8"))
+      .includes("total - value"),
+    true,
+  );
+
+  result.application.setPermissionMode("ask");
+  const events = [];
+  for await (const event of result.application.submit(
+    "Fix and verify the deterministic defects.",
+    new AbortController().signal,
+  )) {
+    events.push(event);
+    if (event.type === "ApprovalRequested") {
+      assert.equal(
+        result.application.resolveApproval(event.payload.approvalId, "allow_once"),
+        true,
+      );
+    }
+  }
+
+  assert.equal(events.at(-1)?.type, "TurnCompleted");
+  assert.equal(
+    events.filter((event) => event.type === "ApprovalRequested").length,
+    4,
+  );
+  assert.equal(
+    events.filter((event) => event.type === "ApprovalResolved").every(
+      (event) => event.payload.outcome === "granted",
+    ),
+    true,
+  );
+  const outputs = events.filter((event) => event.type === "ToolOutputDelta");
+  assert.equal(outputs.length > 0, true);
+  assert.deepEqual(
+    outputs.map((event) => event.payload.sequence),
+    outputs.map((event, index, all) =>
+      index === 0 || event.payload.callId !== all[index - 1]?.payload.callId
+        ? 1
+        : (all[index - 1]?.payload.sequence ?? 0) + 1,
+    ),
+  );
+  assert.equal(outputs.every((event) => !event.payload.safeText.includes("\u001b")), true);
+  assert.equal(
+    events.filter(
+      (event) =>
+        event.type === "ToolCallCompleted" &&
+        event.payload.toolName === "robin.process.run@1",
+    ).length,
+    2,
+  );
+
+  const fixed = await readFile(
+    path.join(fixture.repositoryRoot, "src", "calculate.ts"),
+    "utf8",
+  );
+  assert.match(fixed, /total \+ value/u);
+  assert.match(fixed, /return label\.toUpperCase\(\);/u);
+  assert.equal(
+    await readFile(path.join(fixture.repositoryRoot, "notes", "user-notes.txt"), "utf8"),
+    originalNotes,
+  );
+  assert.equal(
+    await readFile(path.join(fixture.repositoryRoot, "scratch-user.txt"), "utf8"),
+    originalScratch,
+  );
+  assert.equal(
+    sha256(await readFile(path.join(fixture.repositoryRoot, ".git", "index"))),
+    initialIndexHash,
+  );
+  assert.equal(
+    await gitText(gitExecutable, fixture.repositoryRoot, ["rev-parse", "HEAD"]),
+    initialHead,
+  );
+  const status = await gitText(gitExecutable, fixture.repositoryRoot, [
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+  ]);
+  assert.match(status, / M notes\/user-notes\.txt/u);
+  assert.match(status, / M src\/calculate\.ts/u);
+  assert.match(status, /\?\? scratch-user\.txt/u);
+});
+
 async function createRepositoryFixture(gitExecutable: string): Promise<{
   readonly temporaryRoot: string;
   readonly repositoryRoot: string;
@@ -238,6 +374,120 @@ async function createRepositoryFixture(gitExecutable: string): Promise<{
     repositoryRoot: await realpath(repositoryRoot),
     nestedDirectory: await realpath(nestedDirectory),
   });
+}
+
+async function createCodingRepositoryFixture(gitExecutable: string): Promise<{
+  readonly temporaryRoot: string;
+  readonly repositoryRoot: string;
+  readonly nestedDirectory: string;
+}> {
+  const fixture = await createRepositoryFixture(gitExecutable);
+  await mkdir(path.join(fixture.repositoryRoot, "test"), { recursive: true });
+  await mkdir(path.join(fixture.repositoryRoot, "notes"), { recursive: true });
+  await writeFile(
+    path.join(fixture.repositoryRoot, "package.json"),
+    `${JSON.stringify({
+      name: "robin-r2-coding-fixture",
+      private: true,
+      type: "module",
+      scripts: { test: "node --test" },
+    }, null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(fixture.repositoryRoot, "src", "calculate.ts"),
+    [
+      "export function calculate(values: readonly number[]): number {",
+      "  let total = 0;",
+      "  for (const value of values) total = total - value;",
+      "  return total;",
+      "}",
+      "",
+      "export function normalizeLabel(label: string): string {",
+      "  return label.toLowerCase();",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(fixture.repositoryRoot, "test", "calculate.test.js"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { readFile } from "node:fs/promises";',
+      'import test from "node:test";',
+      "",
+      'test("both deterministic fixes are present", async () => {',
+      '  const source = await readFile(new URL("../src/calculate.ts", import.meta.url), "utf8");',
+      '  assert.match(source, /total = total \\+ value/u);',
+      '  assert.match(source, /return label\\.toUpperCase\\(\\);/u);',
+      "});",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(fixture.repositoryRoot, "notes", "user-notes.txt"),
+    "keep this user-authored baseline\n",
+  );
+  await runGit(gitExecutable, [
+    "-C",
+    fixture.repositoryRoot,
+    "add",
+    "--",
+    "package.json",
+    "src/calculate.ts",
+    "test/calculate.test.js",
+    "notes/user-notes.txt",
+  ]);
+  await runGit(gitExecutable, [
+    "-C",
+    fixture.repositoryRoot,
+    "-c",
+    "user.name=Robin R2 Test",
+    "-c",
+    "user.email=robin-r2@example.invalid",
+    "commit",
+    "--quiet",
+    "-m",
+    "add coding scenario",
+  ]);
+  await writeFile(
+    path.join(fixture.repositoryRoot, "notes", "user-notes.txt"),
+    "keep this user-authored baseline\npre-existing uncommitted note\n",
+  );
+  await writeFile(
+    path.join(fixture.repositoryRoot, "scratch-user.txt"),
+    "pre-existing untracked user content\n",
+  );
+  return fixture;
+}
+
+function sha256(value: Uint8Array): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+async function gitText(
+  gitExecutable: string,
+  repositoryRoot: string,
+  args: readonly string[],
+): Promise<string> {
+  const result = await execFileAsync(
+    gitExecutable,
+    ["-C", repositoryRoot, ...args],
+    {
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024,
+      env: {
+        GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_OPTIONAL_LOCKS: "0",
+        GIT_TERMINAL_PROMPT: "0",
+        LANG: "C",
+        LC_ALL: "C",
+        PATH: [path.dirname(gitExecutable), "/usr/bin", "/bin"].join(path.delimiter),
+      },
+    },
+  );
+  return result.stdout.trimEnd();
 }
 
 async function installedGitExecutable(): Promise<string> {

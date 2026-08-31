@@ -5,6 +5,8 @@ import type {
   RobinApprovalRequestedPayload,
   RobinApprovalResolvedPayload,
   RobinPermissionDecidedPayload,
+  RobinPermissionMode,
+  RobinToolOutputDeltaPayload,
 } from "@guard/robin-session";
 import type { ToolDispatcher } from "@guard/robin-agent";
 
@@ -24,6 +26,7 @@ export type RobinToolApprovalInvalidation = Omit<
   RobinApprovalInvalidatedPayload,
   "turnId"
 >;
+export type RobinToolOutputDelta = Omit<RobinToolOutputDeltaPayload, "turnId">;
 
 /**
  * Application-owned lifecycle boundary used by a trusted tool dispatcher.
@@ -32,6 +35,8 @@ export type RobinToolApprovalInvalidation = Omit<
  * call before committing it.
  */
 export interface RobinApplicationToolLifecycle {
+  /** Captured once per dispatch so a call uses one pinned permission policy. */
+  currentPermissionMode?(): RobinPermissionMode;
   permissionDecided(decision: RobinToolPermissionDecision): void;
   requestApproval(
     request: RobinToolApprovalRequest,
@@ -39,6 +44,7 @@ export interface RobinApplicationToolLifecycle {
   ): Promise<RobinApprovalDecision>;
   approvalResolved(resolution: RobinToolApprovalResolution): void;
   approvalInvalidated(invalidation: RobinToolApprovalInvalidation): void;
+  toolOutput?(delta: RobinToolOutputDelta): void;
 }
 
 export type RobinApplicationToolDispatcherFactory = (

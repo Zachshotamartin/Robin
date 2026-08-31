@@ -147,7 +147,7 @@ export class R2SyntheticCodingProvider implements ModelProvider {
         "I’ll inspect the repository, locate the deterministic defect, edit its exact preimage, run verification, and review Git evidence.\n",
         signal,
       );
-      yield* emitToolCall(ids.list, TOOLS.list, { root: "." }, signal);
+      yield* emitToolCall(ids.list, TOOLS.list, { root: "" }, signal);
       yield usageFor(request, 46);
       yield actionRequired();
       return;

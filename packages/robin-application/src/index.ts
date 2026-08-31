@@ -18,6 +18,17 @@ export type { CancellationScope } from "./cancellation-tree.js";
 export { R1SyntheticCodingProvider } from "./r1-synthetic-provider.js";
 export { R2SyntheticCodingProvider } from "./r2-synthetic-provider.js";
 export {
+  bootstrapR2RobinApplication,
+  createR2RobinApplication,
+} from "./r2-application.js";
+export type {
+  R2RobinApplicationBootstrap,
+  R2RobinApplicationDispatcherOptions,
+  R2RobinApplicationLifecycleOptions,
+  R2RobinApplicationMetadata,
+  R2RobinApplicationOptions,
+} from "./r2-application.js";
+export {
   ApplicationEventJournal,
   DEFAULT_APPLICATION_EVENT_JOURNAL_LIMITS,
   parseRobinApplicationEvent,
@@ -59,6 +70,7 @@ export type {
   RobinToolApprovalInvalidation,
   RobinToolApprovalRequest,
   RobinToolApprovalResolution,
+  RobinToolOutputDelta,
   RobinToolPermissionDecision,
 } from "./tool-lifecycle.js";
 export {

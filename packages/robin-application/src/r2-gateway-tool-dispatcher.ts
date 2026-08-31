@@ -20,8 +20,12 @@ import type {
   RobinApprovalOutcome,
 } from "@guard/robin-session";
 import type { RobinR2CapabilityRuntime } from "@guard/robin-tools";
+import type { RobinR2SafeProcessLifecycleEvent } from "@guard/robin-tools";
 
-import { createRobinR2PolicyEvaluator } from "./r2-policy.js";
+import {
+  createRobinR2PolicyEvaluator,
+  type RobinR2PermissionMode,
+} from "./r2-policy.js";
 import type {
   RobinApplicationToolLifecycle,
 } from "./tool-lifecycle.js";
@@ -47,15 +51,19 @@ const SYSTEM_APPROVAL_CLOCK: CapabilityApprovalClock = Object.freeze({
 export class R2GatewayToolDispatcher implements ToolDispatcher {
   public readonly advertisedOperations: readonly SemanticOperationDefinition[];
   readonly #runtime: RobinR2CapabilityRuntime;
-  readonly #gateway: CapabilityGateway;
   readonly #lifecycle: RobinApplicationToolLifecycle;
   readonly #actionIds: R2GatewayActionIdSource;
   readonly #clock: CapabilityApprovalClock;
+  readonly #configuredPermissionMode: RobinR2PermissionMode;
+  readonly #gatewayOptions: CapabilityGatewayOptions;
+  readonly #secretCorrelationToken: string | undefined;
   readonly #usedActionIds = new Set<ActionId>();
 
   public constructor(options: R2GatewayToolDispatcherOptions) {
     this.#runtime = options.runtime;
     this.#lifecycle = options.lifecycle;
+    this.#configuredPermissionMode = options.permissionMode;
+    this.#secretCorrelationToken = options.secretCorrelationToken;
     const source = options.actionIds ?? Object.freeze({
       nextActionId: () => ActionIdKind.generate(),
     });
@@ -65,23 +73,16 @@ export class R2GatewayToolDispatcher implements ToolDispatcher {
     this.#clock = captureApprovalClock(
       options.gateway?.approvalClock ?? SYSTEM_APPROVAL_CLOCK,
     );
-    this.#gateway = new CapabilityGateway(
-      options.runtime.registry,
-      createRobinR2PolicyEvaluator(
-        options.permissionMode,
-        options.secretCorrelationToken,
-      ),
-      {
-        maximumInputBytes: 1024 * 1024,
-        maximumRawOutputBytes: 16 * 1024 * 1024,
-        maximumReleasedViewBytes: 16 * 1024 * 1024,
-        maximumCombinedReleasedViewBytes: 48 * 1024 * 1024,
-        defaultApprovalLifetimeMs: 5 * 60 * 1000,
-        maximumApprovalLifetimeMs: 15 * 60 * 1000,
-        ...options.gateway,
-        approvalClock: this.#clock,
-      },
-    );
+    this.#gatewayOptions = Object.freeze({
+      maximumInputBytes: 1024 * 1024,
+      maximumRawOutputBytes: 16 * 1024 * 1024,
+      maximumReleasedViewBytes: 16 * 1024 * 1024,
+      maximumCombinedReleasedViewBytes: 48 * 1024 * 1024,
+      defaultApprovalLifetimeMs: 5 * 60 * 1000,
+      maximumApprovalLifetimeMs: 15 * 60 * 1000,
+      ...options.gateway,
+      approvalClock: this.#clock,
+    });
     this.advertisedOperations = Object.freeze(
       options.runtime.advertisement.operations.map((operation) =>
         Object.freeze({
@@ -101,7 +102,8 @@ export class R2GatewayToolDispatcher implements ToolDispatcher {
     signal: AbortSignal,
   ): Promise<JsonObject> {
     throwIfAborted(signal);
-    const prepared = await this.#gateway.normalize(
+    const gateway = this.#createGateway(this.#currentPermissionMode());
+    const prepared = await gateway.normalize(
       {
         schemaVersion: 1,
         packId: call.capabilityPackId,
@@ -127,7 +129,7 @@ export class R2GatewayToolDispatcher implements ToolDispatcher {
       this.#runtime.advertisement,
     );
     throwIfAborted(signal);
-    const evaluated = this.#gateway.evaluate(prepared);
+    const evaluated = gateway.evaluate(prepared);
     const toolName = r2ToolDisplayName(call);
     this.#lifecycle.permissionDecided({
       actionHash: prepared.actionHash,
@@ -140,7 +142,7 @@ export class R2GatewayToolDispatcher implements ToolDispatcher {
       winningPolicyName: evaluated.decision.winningPolicyName,
     });
 
-    let authorization = this.#gateway.authorize(evaluated);
+    let authorization = gateway.authorize(evaluated);
     if (authorization.status === "denied" || authorization.status === "stale") {
       return authorization.observation;
     }
@@ -148,7 +150,7 @@ export class R2GatewayToolDispatcher implements ToolDispatcher {
     let approvedChallenge: CapabilityApprovalChallenge | null = null;
     let approvedResolvedAt: string | null = null;
     if (authorization.status === "approval_required") {
-      const challenge = this.#gateway.createApprovalChallenge(evaluated, {
+      const challenge = gateway.createApprovalChallenge(evaluated, {
         displayedSummary: this.#runtime.approvalSummary(prepared),
       });
       const binding = approvalBinding(challenge, call.callId, toolName);
@@ -160,7 +162,7 @@ export class R2GatewayToolDispatcher implements ToolDispatcher {
         signal,
       );
       throwIfAborted(signal);
-      const resolution = this.#gateway.resolveApproval(challenge, {
+      const resolution = gateway.resolveApproval(challenge, {
         schemaVersion: 1,
         approvalId: challenge.approvalId,
         decision,
@@ -180,7 +182,7 @@ export class R2GatewayToolDispatcher implements ToolDispatcher {
         return resolution.observation;
       }
       approvedResolvedAt = resolution.grant.grantedAt;
-      authorization = this.#gateway.authorize(resolution.grant);
+      authorization = gateway.authorize(resolution.grant);
       if (authorization.status !== "authorized") {
         const outcome: RobinApprovalOutcome =
           authorization.status === "stale" ? "stale" : "denied";
@@ -208,9 +210,30 @@ export class R2GatewayToolDispatcher implements ToolDispatcher {
       throw invariant("The gateway produced no execution authority.");
     }
     const executed = await this.#runtime.executeAuthorized(
-      this.#gateway,
+      gateway,
       authorization.authorization,
-      { signal },
+      {
+        signal,
+        ...(this.#lifecycle.toolOutput === undefined
+          ? {}
+          : {
+              lifecycleSink: {
+                publish: (event: RobinR2SafeProcessLifecycleEvent) => {
+                  if (event.type !== "output") return;
+                  this.#lifecycle.toolOutput?.({
+                    byteLength: event.byteLength,
+                    callId: call.callId,
+                    channel: event.channel,
+                    limitExceeded: event.limitExceeded,
+                    safeText: event.safeText,
+                    sequence: event.sequence,
+                    textTruncated: event.textTruncated,
+                    toolName,
+                  });
+                },
+              },
+            }),
+      },
     );
     if (executed.status === "executed") return executed.result.agent;
 
@@ -229,6 +252,26 @@ export class R2GatewayToolDispatcher implements ToolDispatcher {
       });
     }
     return executed.observation;
+  }
+
+  #currentPermissionMode(): RobinR2PermissionMode {
+    const mode = this.#lifecycle.currentPermissionMode?.() ??
+      this.#configuredPermissionMode;
+    if (mode !== "ask" && mode !== "plan") {
+      throw invariant("The application returned an invalid permission mode.");
+    }
+    return mode;
+  }
+
+  #createGateway(permissionMode: RobinR2PermissionMode): CapabilityGateway {
+    return new CapabilityGateway(
+      this.#runtime.registry,
+      createRobinR2PolicyEvaluator(
+        permissionMode,
+        this.#secretCorrelationToken,
+      ),
+      this.#gatewayOptions,
+    );
   }
 
   #nextActionId(): ActionId {

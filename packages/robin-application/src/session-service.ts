@@ -37,6 +37,7 @@ import {
   type RobinToolApprovalInvalidation,
   type RobinToolApprovalRequest,
   type RobinToolApprovalResolution,
+  type RobinToolOutputDelta,
   type RobinToolPermissionDecision,
 } from "./tool-lifecycle.js";
 
@@ -761,6 +762,7 @@ export class R1RobinApplication {
 
   #captureToolLifecycle(): RobinApplicationToolLifecycle {
     return Object.freeze({
+      currentPermissionMode: () => this.#permissionMode,
       permissionDecided: (decision: RobinToolPermissionDecision) => {
         this.#appendToolLifecycle("PermissionDecided", decision);
       },
@@ -774,13 +776,17 @@ export class R1RobinApplication {
       approvalInvalidated: (invalidation: RobinToolApprovalInvalidation) => {
         this.#appendToolLifecycle("ApprovalInvalidated", invalidation);
       },
+      toolOutput: (delta: RobinToolOutputDelta) => {
+        this.#appendToolLifecycle("ToolOutputDelta", delta);
+      },
     });
   }
 
   #appendToolLifecycle<TType extends
     | "PermissionDecided"
     | "ApprovalResolved"
-    | "ApprovalInvalidated">(
+    | "ApprovalInvalidated"
+    | "ToolOutputDelta">(
     type: TType,
     payload: Omit<RobinApplicationEventPayloadMap[TType], "turnId">,
   ): Extract<RobinApplicationEvent, { readonly type: TType }> {
